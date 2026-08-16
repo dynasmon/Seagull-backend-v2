@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dynasmon/Seagull-v2/internal/broker"
-	"github.com/dynasmon/Seagull-v2/internal/ingest"
-	"github.com/dynasmon/Seagull-v2/internal/platform/config"
-	"github.com/dynasmon/Seagull-v2/internal/platform/run"
-	"github.com/dynasmon/Seagull-v2/internal/platform/service"
-	"github.com/dynasmon/Seagull-v2/internal/platform/tlsx"
+	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
+	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/run"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/tlsx"
 )
 
 func main() {

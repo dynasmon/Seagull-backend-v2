@@ -15,13 +15,13 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
+	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
+	"github.com/dynasmon/Seagull-backend-v2/internal/event"
+	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
+	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
-	"github.com/dynasmon/Seagull-v2/internal/agentidentity"
-	"github.com/dynasmon/Seagull-v2/internal/broker"
-	"github.com/dynasmon/Seagull-v2/internal/event"
-	"github.com/dynasmon/Seagull-v2/internal/ingest"
-	"github.com/dynasmon/Seagull-v2/internal/platform/metrics"
-	"github.com/dynasmon/Seagull-v2/tests/fixtures"
 )
 
 func brokers(t *testing.T) []string {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynasmon/Seagull-v2/internal/platform/config"
-	"github.com/dynasmon/Seagull-v2/internal/platform/log"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/log"
 )
 
 func TestNewRejectsUnknownLevelAndFormat(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/dynasmon/Seagull-v2/internal/platform/config"
-	"github.com/dynasmon/Seagull-v2/internal/platform/service"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 )
 
 const serviceName = "control-api"

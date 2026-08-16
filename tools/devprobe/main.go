@@ -15,11 +15,11 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/event"
+	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
+	"github.com/dynasmon/Seagull-backend-v2/internal/protocol"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
-	"github.com/dynasmon/Seagull-v2/internal/event"
-	"github.com/dynasmon/Seagull-v2/internal/ingest"
-	"github.com/dynasmon/Seagull-v2/internal/protocol"
 )
 
 func main() {

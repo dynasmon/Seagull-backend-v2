@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynasmon/Seagull-v2/internal/platform/metrics"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 )
 
 func TestRegistryExposesBuildIdentity(t *testing.T) {

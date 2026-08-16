@@ -5,8 +5,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
-	"github.com/dynasmon/Seagull-v2/internal/platform/metrics"
 )
 
 type Metrics struct {

@@ -1,4 +1,4 @@
-module github.com/dynasmon/Seagull-v2
+module github.com/dynasmon/Seagull-backend-v2
 
 go 1.25.0
 

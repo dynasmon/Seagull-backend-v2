@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dynasmon/Seagull-v2/internal/ingest"
+	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
 )
 
 func TestBurstIsAllowedAndTheRestIsRefused(t *testing.T) {

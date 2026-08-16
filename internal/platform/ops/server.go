@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dynasmon/Seagull-v2/internal/platform/health"
-	"github.com/dynasmon/Seagull-v2/internal/platform/httpx"
-	"github.com/dynasmon/Seagull-v2/internal/platform/metrics"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/health"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/httpx"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 )
 
 type Options struct {

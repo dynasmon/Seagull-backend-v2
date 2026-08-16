@@ -8,14 +8,14 @@ import (
 	"os"
 	"time"
 
-	"github.com/dynasmon/Seagull-v2/internal/platform/buildinfo"
-	"github.com/dynasmon/Seagull-v2/internal/platform/config"
-	"github.com/dynasmon/Seagull-v2/internal/platform/health"
-	"github.com/dynasmon/Seagull-v2/internal/platform/httpx"
-	"github.com/dynasmon/Seagull-v2/internal/platform/log"
-	"github.com/dynasmon/Seagull-v2/internal/platform/metrics"
-	"github.com/dynasmon/Seagull-v2/internal/platform/ops"
-	"github.com/dynasmon/Seagull-v2/internal/platform/run"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/buildinfo"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/health"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/httpx"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/log"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/ops"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/run"
 )
 
 type Config struct {

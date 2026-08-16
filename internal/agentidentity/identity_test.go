@@ -7,7 +7,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dynasmon/Seagull-v2/internal/agentidentity"
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 )
 
 func certificateNamed(commonName string) *x509.Certificate {

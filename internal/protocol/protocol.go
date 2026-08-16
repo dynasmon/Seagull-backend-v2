@@ -5,8 +5,8 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	platformv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/platform/v1"
-	"github.com/dynasmon/Seagull-v2/internal/event"
 )
 
 const (

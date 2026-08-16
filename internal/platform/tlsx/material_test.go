@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynasmon/Seagull-v2/internal/devpki"
-	"github.com/dynasmon/Seagull-v2/internal/platform/tlsx"
+	"github.com/dynasmon/Seagull-backend-v2/internal/devpki"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/tlsx"
 )
 
 type bundle struct {

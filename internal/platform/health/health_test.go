@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynasmon/Seagull-v2/internal/platform/health"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/health"
 )
 
 func TestReadyWhenEveryCheckPasses(t *testing.T) {

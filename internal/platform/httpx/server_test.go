@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynasmon/Seagull-v2/internal/platform/httpx"
-	"github.com/dynasmon/Seagull-v2/internal/platform/metrics"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/httpx"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 )
 
 type safeBuffer struct {

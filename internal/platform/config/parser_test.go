@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynasmon/Seagull-v2/internal/platform/config"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 )
 
 func lookupFrom(values map[string]string) config.Lookup {

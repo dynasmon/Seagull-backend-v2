@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynasmon/Seagull-v2/tests/fixtures"
+	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
 )
 
 func TestShutdownWaitsForABatchAlreadyInFlight(t *testing.T) {

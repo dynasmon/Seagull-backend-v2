@@ -17,8 +17,8 @@ RUN test -n "${COMPONENT}" && test -d "./cmd/${COMPONENT}"
 RUN CGO_ENABLED=0 GOFLAGS=-mod=readonly go build \
     -trimpath \
     -ldflags "-s -w \
-      -X github.com/dynasmon/Seagull-v2/internal/platform/buildinfo.version=${VERSION} \
-      -X github.com/dynasmon/Seagull-v2/internal/platform/buildinfo.revision=${REVISION}" \
+      -X github.com/dynasmon/Seagull-backend-v2/internal/platform/buildinfo.version=${VERSION} \
+      -X github.com/dynasmon/Seagull-backend-v2/internal/platform/buildinfo.revision=${REVISION}" \
     -o /out/component "./cmd/${COMPONENT}"
 
 FROM scratch

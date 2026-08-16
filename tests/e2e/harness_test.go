@@ -16,13 +16,13 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/devpki"
+	"github.com/dynasmon/Seagull-backend-v2/internal/event"
+	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/tlsx"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
-	"github.com/dynasmon/Seagull-v2/internal/devpki"
-	"github.com/dynasmon/Seagull-v2/internal/event"
-	"github.com/dynasmon/Seagull-v2/internal/ingest"
-	"github.com/dynasmon/Seagull-v2/internal/platform/service"
-	"github.com/dynasmon/Seagull-v2/internal/platform/tlsx"
 )
 
 type backbone struct {

@@ -8,8 +8,8 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
-	"github.com/dynasmon/Seagull-v2/internal/agentidentity"
 )
 
 var identifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`)

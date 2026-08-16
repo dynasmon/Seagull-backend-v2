@@ -3,10 +3,10 @@ package main
 import (
 	"time"
 
-	"github.com/dynasmon/Seagull-v2/internal/event"
-	"github.com/dynasmon/Seagull-v2/internal/ingest"
-	"github.com/dynasmon/Seagull-v2/internal/platform/config"
-	"github.com/dynasmon/Seagull-v2/internal/platform/service"
+	"github.com/dynasmon/Seagull-backend-v2/internal/event"
+	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 )
 
 const serviceName = "ingest-gateway"

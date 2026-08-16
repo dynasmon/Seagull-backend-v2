@@ -9,13 +9,13 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
+	"github.com/dynasmon/Seagull-backend-v2/internal/event"
+	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
+	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
-	"github.com/dynasmon/Seagull-v2/internal/agentidentity"
-	"github.com/dynasmon/Seagull-v2/internal/event"
-	"github.com/dynasmon/Seagull-v2/internal/ingest"
-	"github.com/dynasmon/Seagull-v2/internal/platform/metrics"
-	"github.com/dynasmon/Seagull-v2/tests/fixtures"
 )
 
 type recordingBackbone struct {

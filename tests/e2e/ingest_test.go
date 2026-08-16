@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynasmon/Seagull-v2/internal/devpki"
-	"github.com/dynasmon/Seagull-v2/internal/ingest"
-	"github.com/dynasmon/Seagull-v2/tests/fixtures"
+	"github.com/dynasmon/Seagull-backend-v2/internal/devpki"
+	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
+	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
 )
 
 func TestAgentBatchTravelsFromMutualTLSToTheBackbone(t *testing.T) {

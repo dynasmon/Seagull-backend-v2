@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynasmon/Seagull-v2/internal/platform/run"
-	"github.com/dynasmon/Seagull-v2/internal/platform/service"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/run"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 )
 
 type operationalService struct {

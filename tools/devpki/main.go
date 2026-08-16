@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dynasmon/Seagull-v2/internal/devpki"
+	"github.com/dynasmon/Seagull-backend-v2/internal/devpki"
 )
 
 func main() {

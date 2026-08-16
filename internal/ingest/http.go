@@ -11,9 +11,9 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/log"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
-	"github.com/dynasmon/Seagull-v2/internal/agentidentity"
-	"github.com/dynasmon/Seagull-v2/internal/platform/log"
 )
 
 const (

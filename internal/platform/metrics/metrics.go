@@ -8,7 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/dynasmon/Seagull-v2/internal/platform/buildinfo"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/buildinfo"
 )
 
 const Namespace = "seagull"

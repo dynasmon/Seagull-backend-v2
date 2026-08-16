@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const modulePath = "github.com/dynasmon/Seagull-v2"
+const modulePath = "github.com/dynasmon/Seagull-backend-v2"
 
 type pkg struct {
 	path    string

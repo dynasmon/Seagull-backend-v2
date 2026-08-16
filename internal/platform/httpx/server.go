@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dynasmon/Seagull-v2/internal/platform/log"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/log"
 )
 
 type ServerOptions struct {

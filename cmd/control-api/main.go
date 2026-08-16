@@ -11,12 +11,12 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/dynasmon/Seagull-v2/internal/platform/config"
-	"github.com/dynasmon/Seagull-v2/internal/platform/httpx"
-	"github.com/dynasmon/Seagull-v2/internal/platform/run"
-	"github.com/dynasmon/Seagull-v2/internal/platform/service"
-	"github.com/dynasmon/Seagull-v2/internal/platform/tlsx"
-	"github.com/dynasmon/Seagull-v2/internal/protocol"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/httpx"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/run"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/tlsx"
+	"github.com/dynasmon/Seagull-backend-v2/internal/protocol"
 )
 
 const contentType = "application/x-protobuf"

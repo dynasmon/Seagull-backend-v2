@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 GO ?= go
-MODULE := github.com/dynasmon/Seagull-v2
+MODULE := github.com/dynasmon/Seagull-backend-v2
 DIST ?= dist
 PKI ?= .local/pki
 COMPOSE := docker compose -f deploy/compose.yaml

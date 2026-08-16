@@ -1,0 +1,12 @@
+# The backbone network is internal, so the broker is unreachable from the host
+# and its port cannot be published. The integration suite runs on the host and
+# needs it, so the exposure is an explicit, separate decision.
+
+networks:
+  backbone-testing: {}
+
+services:
+  redpanda:
+    networks: [backbone, backbone-testing]
+    ports:
+      - "127.0.0.1:19092:19092"

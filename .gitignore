@@ -1,0 +1,12 @@
+/dist/
+/.local/
+/notes/
+
+*.pem
+*.key
+*.crt
+
+.DS_Store
+
+/go.work
+/go.work.sum

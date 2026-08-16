@@ -1,0 +1,102 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+      - "fix/**"
+      - "refact/**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.25.0"
+
+jobs:
+  verify:
+    name: source verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: lint and static analysis
+        run: make lint
+      - name: dependency graph and checksums
+        run: make mod-check
+      - name: unit, architecture and end-to-end suites
+        run: make test
+      - name: race detector
+        run: make test-race
+
+  integration:
+    name: backbone integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: start the backbone
+        run: |
+          docker run -d --name redpanda --network host \
+            redpandadata/redpanda:v24.2.20 \
+            redpanda start --node-id 0 --smp 1 --memory 1G --reserve-memory 0M \
+              --overprovisioned --check=false \
+              --kafka-addr external://0.0.0.0:19092 \
+              --advertise-kafka-addr external://127.0.0.1:19092
+          for attempt in $(seq 1 30); do
+            if docker exec redpanda rpk cluster health --brokers 127.0.0.1:19092 --exit-when-healthy; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "the backbone never became healthy"
+          docker logs redpanda
+          exit 1
+      - name: backbone suite
+        run: SEAGULL_TEST_BROKERS=127.0.0.1:19092 go test -tags integration -count=1 ./tests/integration/...
+
+  vulnerabilities:
+    name: vulnerability analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: scan reachable dependencies
+        run: make vulncheck
+
+  images:
+    name: container images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: build every component image
+        run: make images VERSION=ci REVISION=${{ github.sha }}

@@ -3,7 +3,7 @@ module github.com/dynasmon/Seagull-v2
 go 1.25.0
 
 require (
-	github.com/dynasmon/Seagull-contracts v0.0.0-20260816174912-78789be8454e
+	github.com/dynasmon/Seagull-contracts v0.1.0
 	github.com/prometheus/client_golang v1.20.5
 	github.com/twmb/franz-go v1.18.0
 	github.com/twmb/franz-go/pkg/kadm v1.14.0

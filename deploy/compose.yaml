@@ -1,0 +1,109 @@
+name: seagull-v2
+
+# The development certificates are owned by whoever ran `make dev-pki`, and the
+# private keys stay owner-readable. `make up` passes that identity through so a
+# bind mount works without loosening the permissions on a key.
+x-hardening: &hardening
+  read_only: true
+  user: "${SEAGULL_RUNTIME_USER:-65532:65532}"
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+
+networks:
+  backbone:
+    internal: true
+  agents: {}
+
+services:
+  redpanda:
+    image: redpandadata/redpanda:v24.2.20
+    command:
+      - redpanda
+      - start
+      - --node-id=0
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --check=false
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://127.0.0.1:19092
+    networks: [backbone]
+    volumes:
+      - redpanda:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health --exit-when-healthy || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backbone-topics:
+    image: redpandadata/redpanda:v24.2.20
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks: [backbone]
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        rpk topic create security.events.raw \
+          --brokers redpanda:9092 \
+          --partitions "${SEAGULL_BACKBONE_EVENTS_PARTITIONS:-12}" \
+          --replicas 1 \
+          --topic-config retention.ms="${SEAGULL_BACKBONE_EVENTS_RETENTION_MS:-604800000}" \
+          --topic-config cleanup.policy=delete \
+          --topic-config compression.type=zstd || true
+        rpk topic list --brokers redpanda:9092
+    restart: "no"
+
+  ingest-gateway:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        COMPONENT: ingest-gateway
+        VERSION: ${SEAGULL_VERSION:-dev}
+    depends_on:
+      backbone-topics:
+        condition: service_completed_successfully
+    networks: [backbone, agents]
+    ports:
+      - "${SEAGULL_GATEWAY_PUBLISH:-127.0.0.1:8443}:8443"
+    environment:
+      SEAGULL_GATEWAY_ADDRESS: 0.0.0.0:8443
+      SEAGULL_GATEWAY_TLS_CERT: /run/pki/gateway.pem
+      SEAGULL_GATEWAY_TLS_KEY: /run/pki/gateway-key.pem
+      SEAGULL_GATEWAY_AGENT_CA: /run/pki/agent-ca.pem
+      SEAGULL_BACKBONE_BROKERS: redpanda:9092
+      SEAGULL_BACKBONE_EVENTS_TOPIC: security.events.raw
+      SEAGULL_TENANT_ID: ${SEAGULL_TENANT_ID:-default}
+      SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
+      SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    volumes:
+      - ../.local/pki:/run/pki:ro
+    <<: *hardening
+
+  control-api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        COMPONENT: control-api
+        VERSION: ${SEAGULL_VERSION:-dev}
+    networks: [agents]
+    ports:
+      - "${SEAGULL_CONTROL_API_PUBLISH:-127.0.0.1:8080}:8080"
+    environment:
+      SEAGULL_CONTROL_API_ADDRESS: 0.0.0.0:8080
+      SEAGULL_CONTROL_API_TLS_CERT: /run/pki/gateway.pem
+      SEAGULL_CONTROL_API_TLS_KEY: /run/pki/gateway-key.pem
+      SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
+      SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    volumes:
+      - ../.local/pki:/run/pki:ro
+    <<: *hardening
+
+volumes:
+  redpanda: {}

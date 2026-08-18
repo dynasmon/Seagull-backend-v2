@@ -4,9 +4,9 @@ A security event processing platform. Telemetry becomes durable on an event
 backbone before anything else happens to it; the control plane is built around
 that pipeline rather than the other way around.
 
-This repository holds the foundation and the ingest half of the first vertical
-slice. Normalization, detection, correlation and the control plane are not
-implemented yet.
+This repository holds the foundation and the first vertical slice: telemetry
+travels from an agent to a queryable store, and every step of it is durable.
+Detection, correlation and the control plane are not implemented yet.
 
 ## What runs today
 
@@ -16,13 +16,29 @@ Seagull Agent
       v
 cmd/ingest-gateway  ── admission control ──▶  Redpanda  security.events.raw
       |                                             (durable before the ack)
-      v
-cmd/control-api     ── protocol descriptor
+      |                                                       |
+cmd/control-api     ── protocol descriptor                    v
+                                              cmd/event-writer ──▶ ClickHouse
+                                                       |            security_events
+                                                       v
+                                              security.events.quarantine
 ```
 
 `ingest-gateway` authenticates an agent by its client certificate, admits or
 refuses the batch, publishes it to the backbone and answers only once the
 backbone owns it. It holds no database, no cache and no analytics.
+
+`event-writer` consumes the backbone and makes admitted telemetry queryable. It
+advances its group position only after a batch is durable in the store, so a
+crash replays a batch and never steps over it. A record it cannot store — one
+that is not a `seagull.event.v1.Event`, breaks the contract, or carries an
+instant the store cannot hold — is published to `security.events.quarantine`
+and the rest of the batch continues, so one bad record can never hold up a
+partition.
+
+`store-migrator` applies the store schema and exits. It is the only thing that
+changes the shape of the store, and `event-writer` refuses to start against a
+store that is behind the schema it ships.
 
 `control-api` serves the protocol descriptor an agent needs before it can talk
 to anything else. It exists mainly to prove that a second executable reuses the
@@ -63,6 +79,8 @@ make down
 ```text
 cmd/                    one directory per process
   ingest-gateway/       the only durable entry point for telemetry
+  event-writer/         the backbone's consumer half, writing to the store
+  store-migrator/       applies the store schema, then exits
   control-api/          the control plane entry point
 
 internal/
@@ -70,7 +88,9 @@ internal/
   agentidentity/        what a verified agent identity is
   protocol/             version negotiation between agent and platform
   ingest/               admission control and the ingest transport
+  eventstore/           what a stored event is, and what is refused
   broker/               the Redpanda adapter
+  clickhouse/           the store adapter and its embedded schema
   devpki/               development certificate material
   platform/             infrastructure shared by every process
     config/             environment parsing, validation, secrets
@@ -87,7 +107,7 @@ tests/
   fixtures/             event builders shared by the suites
   architecture/         the dependency rules, enforced
   e2e/                  the gateway over real mutual TLS
-  integration/          the backbone against a live Redpanda
+  integration/          the data plane against a live Redpanda and ClickHouse
 
 deploy/                 Dockerfile and Compose
 tools/                  development programs, not shipped
@@ -150,6 +170,33 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_BACKBONE_BROKERS` | required | comma separated broker addresses |
 | `SEAGULL_BACKBONE_EVENTS_TOPIC` | `security.events.raw` | where admitted events are published |
 
+### event-writer
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEAGULL_BACKBONE_BROKERS` | required | comma separated broker addresses |
+| `SEAGULL_BACKBONE_EVENTS_TOPIC` | `security.events.raw` | where admitted events are read from |
+| `SEAGULL_BACKBONE_QUARANTINE_TOPIC` | `security.events.quarantine` | where refused records go |
+| `SEAGULL_WRITER_CONSUMER_GROUP` | `event-writer` | the consumer group that owns the offsets |
+| `SEAGULL_WRITER_BATCH_EVENTS` | `5000` | records per poll, and per store batch |
+| `SEAGULL_WRITER_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
+| `SEAGULL_WRITER_RETRY_DELAY` | `1s` | first delay before a batch is retried |
+| `SEAGULL_WRITER_RETRY_DELAY_MAX` | `30s` | ceiling the delay backs off to |
+
+### event-writer and store-migrator
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEAGULL_EVENT_STORE_ADDRESS` | required | the store's native protocol address, `clickhouse:9000` |
+| `SEAGULL_EVENT_STORE_DATABASE` | `seagull` | the database holding `security_events` |
+| `SEAGULL_EVENT_STORE_USER` | `seagull` | |
+| `SEAGULL_EVENT_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
+| `SEAGULL_EVENT_STORE_TIMEOUT` | `30s` | budget for one write attempt, and to dial |
+
+The connection to the store carries no TLS, deliberately: the gateway already
+reaches Redpanda in the clear on the same internal network, and securing one leg
+of the data plane and not the other would describe a boundary that is not there.
+
 ### control-api
 
 | Variable | Default | Meaning |
@@ -197,6 +244,51 @@ The gateway replaces the whole `reception` message and the identity fields in
 `origin`, so a producer cannot choose its own identity, tenant, or place in the
 platform's timeline.
 
+## The telemetry store
+
+One table, `security_events`, holding one row per admitted event, projected from
+the contract by `internal/eventstore`. A field exists there because the contract
+carries it, and a test walks the protobuf descriptor to make sure the contract
+cannot grow a field the store quietly stops keeping.
+
+No column is `Nullable`: absence is the zero value, which is exactly what proto3
+means by an unset field. Enums are stored under their own name with the
+contract's prefix removed and lowercased, so a value added to the contract needs
+no migration. A new event class does need one, which is the friction intended.
+
+**Duplicates.** Delivery is at least once, so a crash between the write and the
+commit replays a batch. The table is a `ReplacingMergeTree` ordered by
+`(tenant_id, event_time, event_id)`, so the replay collapses back to one row —
+but that happens **on merge**, not on insert. A query that must not see a
+duplicate has to ask for it:
+
+```sql
+SELECT count() FROM security_events FINAL WHERE tenant_id = 'acme';
+```
+
+**Retention.** `TTL event_time + INTERVAL 365 DAY`. A security store without
+retention fills disks; changing the window is a later migration.
+
+**Schema changes** are versioned SQL embedded in the binary and applied by
+`store-migrator`, never at process startup. `event-writer` verifies at startup
+that every migration it ships is applied, and refuses to run otherwise:
+
+```bash
+docker compose -f deploy/compose.yaml run --rm store-migrator
+```
+
+**Scaling** is horizontal. One `event-writer` is a single sequential loop —
+poll, write, commit — with no worker pool and no buffering, because at 5000-row
+batches there is nothing for concurrency to win. More throughput means more
+instances of the process, and the topic's partitions divide between them.
+
+**Quarantine.** A refused record is published to `security.events.quarantine` as
+the bytes that arrived, with `quarantine-reason`, `quarantine-detail`,
+`source-partition` and `source-offset` as record headers. It is replayable by
+construction, and wrapping an unparseable payload in a second schema — which
+would itself have to parse — is avoided. Payloads are never logged: a refused
+record can carry an attacker's input, and the position is enough to fetch it.
+
 ## Contracts
 
 The messages exchanged with agents live in
@@ -217,16 +309,19 @@ decides whether the change is allowed.
 ```bash
 make test              # unit, architecture and end-to-end suites
 make test-race         # the same suites under the race detector
-make test-integration  # the backbone suite against a live Redpanda
+make test-integration  # the data plane against a live Redpanda and ClickHouse
 ```
 
 The end-to-end suite starts a real mutual TLS listener with a certificate
 authority minted in the test, so no fixture files are needed and nothing depends
 on the machine it runs on. It also runs under a goroutine leak detector.
 
-`make test-integration` starts the broker through `deploy/compose.test.yaml`,
-which is the only place the backbone is reachable from the host. In the ordinary
-stack it sits on an internal network with no published port.
+`make test-integration` starts the broker and the store through
+`deploy/compose.test.yaml`, which is the only place either is reachable from the
+host. In the ordinary stack both sit on an internal network with no published
+port. The suite ends with the whole slice — admission, backbone, writer, store —
+running against real infrastructure, which is what the rest of it is a
+decomposition of.
 
 ## Further reading
 

@@ -6,7 +6,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -174,6 +177,103 @@ func TestReachableBackbonePassesReadiness(t *testing.T) {
 
 	if err := publisher.Ping(ctx); err != nil {
 		t.Fatalf("a reachable backbone failed readiness: %v", err)
+	}
+}
+
+func TestConsumerLagIncludesRecordsWaitingForDurableProcessing(t *testing.T) {
+	addresses := brokers(t)
+	topic := temporaryTopic(t, addresses)
+	publisher, err := broker.NewPublisher(broker.Config{
+		Brokers: addresses, Topic: topic, ClientID: "integration-test",
+	})
+	if err != nil {
+		t.Fatalf("build publisher: %v", err)
+	}
+	t.Cleanup(publisher.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := publisher.PublishEvents(ctx, []*eventv1.Event{
+		fixtures.SSHAuthentication{EventID: "10000000-0000-4000-8000-000000000001"}.Event(),
+		fixtures.SSHAuthentication{EventID: "10000000-0000-4000-8000-000000000002"}.Event(),
+	}); err != nil {
+		t.Fatalf("publish initial records: %v", err)
+	}
+
+	registry := metrics.New("integration")
+	consumer, err := broker.NewConsumer(broker.ConsumerConfig{
+		Brokers:      addresses,
+		Topic:        topic,
+		Group:        fmt.Sprintf("lag-test-%d", time.Now().UnixNano()),
+		ClientID:     "integration-test",
+		MaxRecords:   2,
+		FetchMaxWait: 200 * time.Millisecond,
+		Metrics:      broker.NewConsumerMetrics(registry),
+	})
+	if err != nil {
+		t.Fatalf("build consumer: %v", err)
+	}
+	t.Cleanup(consumer.Close)
+
+	processing := make(chan struct{}, 1)
+	stopped := make(chan error, 1)
+	go func() {
+		stopped <- consumer.Consume(ctx, func(ctx context.Context, records []broker.Record) error {
+			processing <- struct{}{}
+			<-ctx.Done()
+			return ctx.Err()
+		})
+	}()
+
+	select {
+	case <-processing:
+	case <-ctx.Done():
+		t.Fatal("the initial records were not delivered")
+	}
+	waitForConsumerLag(t, registry, topic, 2)
+	if err := publisher.PublishEvents(ctx, []*eventv1.Event{
+		fixtures.SSHAuthentication{EventID: "10000000-0000-4000-8000-000000000003"}.Event(),
+		fixtures.SSHAuthentication{EventID: "10000000-0000-4000-8000-000000000004"}.Event(),
+		fixtures.SSHAuthentication{EventID: "10000000-0000-4000-8000-000000000005"}.Event(),
+	}); err != nil {
+		t.Fatalf("publish records during processing: %v", err)
+	}
+
+	waitForConsumerLag(t, registry, topic, 5)
+	cancel()
+	if err := <-stopped; !errors.Is(err, context.Canceled) {
+		t.Fatalf("consumer stopped with %v, want context.Canceled", err)
+	}
+}
+
+func waitForConsumerLag(t *testing.T, registry *metrics.Registry, topic string, want float64) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		recorder := httptest.NewRecorder()
+		registry.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		var lag float64
+		for _, line := range strings.Split(recorder.Body.String(), "\n") {
+			if !strings.HasPrefix(line, "seagull_backbone_consumer_lag_records{") ||
+				!strings.Contains(line, `topic="`+topic+`"`) {
+				continue
+			}
+			fields := strings.Fields(line)
+			if len(fields) == 2 {
+				value, err := strconv.ParseFloat(fields[1], 64)
+				if err != nil {
+					t.Fatalf("parse lag metric %q: %v", line, err)
+				}
+				lag += value
+			}
+		}
+		if lag == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("consumer lag is %.0f, want %.0f", lag, want)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

@@ -35,14 +35,54 @@ func TestTheAdapterInsertsIntoTheColumnsTheSchemaCreates(t *testing.T) {
 	}
 }
 
+func TestLaterMigrationsProduceTheFinalColumnOrder(t *testing.T) {
+	history := []migration{
+		{
+			version: 1,
+			name:    "security_events",
+			statements: []string{`CREATE TABLE IF NOT EXISTS security_events
+(
+    event_id String,
+    obsolete String
+)
+ENGINE = MergeTree
+ORDER BY event_id`},
+		},
+		{
+			version: 2,
+			name:    "add_process_fields",
+			statements: []string{`ALTER TABLE security_events
+ADD COLUMN IF NOT EXISTS process_name String AFTER event_id,
+ADD COLUMN IF NOT EXISTS process_identity Tuple(UInt32, UInt32) AFTER process_name,
+ADD COLUMN IF NOT EXISTS tenant_id String FIRST,
+ADD COLUMN IF NOT EXISTS process_path String`},
+		},
+		{
+			version: 3,
+			name:    "refine_process_fields",
+			statements: []string{`ALTER TABLE security_events
+RENAME COLUMN IF EXISTS process_identity TO process_id,
+DROP COLUMN IF EXISTS obsolete`},
+		},
+	}
+
+	got, err := declaredColumnsIn(history, table)
+	if err != nil {
+		t.Fatalf("build the final schema: %v", err)
+	}
+	want := []string{"tenant_id", "event_id", "process_name", "process_id", "process_path"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("the final columns are %v, want %v", got, want)
+	}
+}
+
 func TestEveryColumnIsGivenAValue(t *testing.T) {
 	if got, want := len(values(eventstore.Row{})), len(storedColumns); got != want {
 		t.Fatalf("the adapter names %d columns and supplies %d values", want, got)
 	}
 }
 
-// A field added to the projection and forgotten here would be filled, carried,
-// and never written. Nothing else compares the two widths.
+// Catch projected fields that are never written.
 func TestTheProjectionAndTheTableHaveTheSameWidth(t *testing.T) {
 	fields := reflect.TypeOf(eventstore.Row{}).NumField()
 	if fields != len(storedColumns) {
@@ -68,21 +108,43 @@ func TestTheEmbeddedSchemaIsOrderedAndComplete(t *testing.T) {
 	}
 }
 
-// An interrupted run applies every statement again, so a migration that is not
-// idempotent turns a restart into an outage.
+// Interrupted migrations replay statements before recording the ledger row.
 func TestEveryMigrationIsIdempotent(t *testing.T) {
 	for _, applied := range migrations {
 		for _, statement := range applied.statements {
-			upper := strings.ToUpper(statement)
-			switch {
-			case strings.HasPrefix(upper, "CREATE TABLE IF NOT EXISTS"),
-				strings.HasPrefix(upper, "ALTER TABLE"),
-				strings.HasPrefix(upper, "CREATE VIEW IF NOT EXISTS"),
-				strings.HasPrefix(upper, "CREATE MATERIALIZED VIEW IF NOT EXISTS"):
-			default:
+			if !isIdempotent(statement) {
 				t.Errorf("%s runs a statement that cannot be applied twice: %.60s...", applied, statement)
 			}
 		}
+	}
+}
+
+func TestAlterColumnActionsNeedTheirOwnIdempotencyGuard(t *testing.T) {
+	cases := []struct {
+		name      string
+		statement string
+		want      bool
+	}{
+		{"guarded add", "ALTER TABLE security_events ADD COLUMN IF NOT EXISTS process_name String", true},
+		{"unguarded add", "ALTER TABLE security_events ADD COLUMN process_name String", false},
+		{"guarded drop", "ALTER TABLE security_events DROP COLUMN IF EXISTS process_name", true},
+		{"unguarded drop", "ALTER TABLE security_events DROP COLUMN process_name", false},
+		{"guarded rename", "ALTER TABLE security_events RENAME COLUMN IF EXISTS process_name TO image_name", true},
+		{"unguarded rename", "ALTER TABLE security_events RENAME COLUMN process_name TO image_name", false},
+		{
+			"one unguarded action",
+			"ALTER TABLE security_events ADD COLUMN IF NOT EXISTS process_name String, ADD COLUMN process_id UInt32",
+			false,
+		},
+		{"unsupported mutation", "ALTER TABLE security_events UPDATE process_id = 0 WHERE process_id < 0", false},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isIdempotent(test.statement); got != test.want {
+				t.Fatalf("isIdempotent returned %t, want %t", got, test.want)
+			}
+		})
 	}
 }
 

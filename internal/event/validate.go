@@ -31,6 +31,16 @@ type Policy struct {
 }
 
 func Validate(record *eventv1.Event, now time.Time, policy Policy) error {
+	if err := ValidateContract(record); err != nil {
+		return err
+	}
+	return admissible(record.GetTime(), now, policy)
+}
+
+// Every rule that does not depend on when the record is examined. A replay must
+// not apply the gateway's admission window, or it would refuse the events it
+// exists to reprocess.
+func ValidateContract(record *eventv1.Event) error {
 	if record == nil {
 		return &Violation{Field: "event", Reason: "is missing"}
 	}
@@ -44,7 +54,7 @@ func Validate(record *eventv1.Event, now time.Time, policy Policy) error {
 			Reason: fmt.Sprintf("must be between %d and %d", MinSchemaVersion, MaxSchemaVersion),
 		}
 	}
-	if err := validateTime(record.GetTime(), now, policy); err != nil {
+	if err := validateTimestamps(record.GetTime()); err != nil {
 		return err
 	}
 	if err := validateOrigin(record.GetOrigin()); err != nil {
@@ -56,24 +66,34 @@ func Validate(record *eventv1.Event, now time.Time, policy Policy) error {
 	return validateBody(record)
 }
 
-func validateTime(times *eventv1.Timestamps, now time.Time, policy Policy) error {
+func validateTimestamps(times *eventv1.Timestamps) error {
 	if times == nil {
 		return &Violation{Field: "time", Reason: "is missing"}
 	}
-	if err := instant("time.event_time", times.GetEventTime(), now, policy); err != nil {
+	if err := instant("time.event_time", times.GetEventTime()); err != nil {
 		return err
 	}
-	return instant("time.observed_time", times.GetObservedTime(), now, policy)
+	return instant("time.observed_time", times.GetObservedTime())
 }
 
-func instant(field string, value *timestamppb.Timestamp, now time.Time, policy Policy) error {
+func instant(field string, value *timestamppb.Timestamp) error {
 	if value == nil {
 		return &Violation{Field: field, Reason: "is missing"}
 	}
 	if !value.IsValid() {
 		return &Violation{Field: field, Reason: "is not a representable instant"}
 	}
-	at := value.AsTime()
+	return nil
+}
+
+func admissible(times *eventv1.Timestamps, now time.Time, policy Policy) error {
+	if err := withinWindow("time.event_time", times.GetEventTime().AsTime(), now, policy); err != nil {
+		return err
+	}
+	return withinWindow("time.observed_time", times.GetObservedTime().AsTime(), now, policy)
+}
+
+func withinWindow(field string, at, now time.Time, policy Policy) error {
 	if at.After(now.Add(policy.MaxClockSkew)) {
 		return &Violation{
 			Field:  field,

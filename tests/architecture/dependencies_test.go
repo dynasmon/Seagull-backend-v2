@@ -124,6 +124,70 @@ func TestOnlyExecutablesWireTheBroker(t *testing.T) {
 	}
 }
 
+// The same rule for the store. An adapter may name the capability it plugs into;
+// the reverse would make the capability describe a particular database.
+func TestOnlyExecutablesWireTheStore(t *testing.T) {
+	for _, entry := range packages(t) {
+		if within(entry.path, "cmd") || within(entry.path, "internal/clickhouse") {
+			continue
+		}
+		for _, imported := range entry.imports {
+			if within(imported, "internal/clickhouse") {
+				t.Errorf("%s imports %s: only an executable may choose the store implementation", entry.path, imported)
+			}
+		}
+	}
+}
+
+// The writing capability owns what a stored row is and what is refused. It must
+// be able to state that without a transport, a driver or a broker client.
+func TestTheStoringCapabilityDoesNotKnowItsAdapters(t *testing.T) {
+	forbidden := []string{
+		"net/http",
+		"database/sql",
+		"github.com/twmb/franz-go",
+		"github.com/ClickHouse",
+		modulePath + "/internal/broker",
+		modulePath + "/internal/clickhouse",
+		modulePath + "/internal/ingest",
+		modulePath + "/internal/platform/httpx",
+		modulePath + "/internal/platform/tlsx",
+	}
+
+	for _, entry := range packages(t) {
+		if !within(entry.path, "internal/eventstore") {
+			continue
+		}
+		for _, imported := range entry.imports {
+			for _, banned := range forbidden {
+				if imported == banned || strings.HasPrefix(imported, banned+"/") {
+					t.Errorf("%s imports %s: the writing capability must not name an adapter", entry.path, imported)
+				}
+			}
+		}
+	}
+}
+
+// The two halves of the data plane meet on the backbone, never in Go.
+func TestTheTwoHalvesOfTheDataPlaneDoNotKnowEachOther(t *testing.T) {
+	for _, entry := range packages(t) {
+		var opposite string
+		switch {
+		case within(entry.path, "internal/ingest"):
+			opposite = "internal/eventstore"
+		case within(entry.path, "internal/eventstore"):
+			opposite = "internal/ingest"
+		default:
+			continue
+		}
+		for _, imported := range entry.imports {
+			if within(imported, opposite) {
+				t.Errorf("%s imports %s: the two halves of the data plane meet on the backbone, not in Go", entry.path, imported)
+			}
+		}
+	}
+}
+
 func TestNothingImportsAnExecutable(t *testing.T) {
 	for _, entry := range packages(t) {
 		for _, imported := range entry.imports {

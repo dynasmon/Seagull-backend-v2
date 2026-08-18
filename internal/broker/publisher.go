@@ -35,7 +35,7 @@ type Publisher struct {
 // Records are acknowledged by every in-sync replica before a produce returns,
 // and the producer is idempotent: an agent is told its batch is durable only
 // once the backbone owns it.
-func NewPublisher(config Config) (*Publisher, error) {
+func newProducerClient(config Config) (*kgo.Client, error) {
 	if len(config.Brokers) == 0 {
 		return nil, errors.New("the backbone needs at least one broker address")
 	}
@@ -54,6 +54,14 @@ func NewPublisher(config Config) (*Publisher, error) {
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create backbone client: %w", err)
+	}
+	return client, nil
+}
+
+func NewPublisher(config Config) (*Publisher, error) {
+	client, err := newProducerClient(config)
+	if err != nil {
+		return nil, err
 	}
 	return &Publisher{client: client, topic: config.Topic}, nil
 }

@@ -18,8 +18,7 @@ import (
 
 const table = "security_events"
 
-// One decision written twice, in the same order. NewStore refuses to build a
-// store whose columns are not the ones the embedded schema creates.
+// The writer and the final migrated schema must name columns in the same order.
 var storedColumns = []string{
 	"event_id",
 	"schema_version",
@@ -159,8 +158,7 @@ func (s *Store) Ping(ctx context.Context) error {
 	return nil
 }
 
-// Fail closed: a writer whose store is behind the schema it ships refuses to
-// start rather than writing into a table that cannot hold the rows.
+// Refuse writers whose database is behind their embedded schema.
 func (s *Store) VerifySchema(ctx context.Context) error {
 	outstanding, err := pending(ctx, s.connection)
 	if err != nil {
@@ -177,8 +175,7 @@ func (s *Store) VerifySchema(ctx context.Context) error {
 	return s.verifyColumns(ctx)
 }
 
-// NewStore checks the embedded DDL; this asks the running database, which is
-// what also covers a column added by a later ALTER.
+// Verify the schema that migrations actually produced.
 func (s *Store) verifyColumns(ctx context.Context) error {
 	rows, err := s.connection.Query(ctx,
 		"SELECT name FROM system.columns WHERE database = ? AND table = ?", s.database, table)
@@ -219,7 +216,7 @@ func agreesWithSchema() error {
 		return err
 	}
 	if !slices.Equal(declared, storedColumns) {
-		return fmt.Errorf("the store writes %d columns and the schema creates %d: %s versus %s",
+		return fmt.Errorf("the store writes %d columns and the migrated schema defines %d: %s versus %s",
 			len(storedColumns), len(declared),
 			strings.Join(storedColumns, ", "), strings.Join(declared, ", "))
 	}
@@ -229,8 +226,7 @@ func agreesWithSchema() error {
 	return nil
 }
 
-// No TLS, deliberately: the gateway already reaches Redpanda in the clear on the
-// same internal network, and securing one leg and not the other proves nothing.
+// Internal ClickHouse traffic matches the clear-text broker leg.
 func connect(configuration Config) (driver.Conn, error) {
 	switch {
 	case configuration.Address == "":

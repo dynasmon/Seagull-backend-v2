@@ -6,8 +6,18 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
+
+const (
+	lagRefreshInterval = 5 * time.Second
+	lagRefreshTimeout  = 2 * time.Second
+)
+
+type endOffsetReader interface {
+	ListEndOffsets(ctx context.Context, topics ...string) (kadm.ListedOffsets, error)
+}
 
 type Record struct {
 	Partition int32
@@ -34,10 +44,10 @@ type Consumer struct {
 	group      string
 	maxRecords int
 	metrics    *ConsumerMetrics
+	endOffsets endOffsetReader
 }
 
-// A new group starts at the beginning: telemetry that is already durable must
-// not be skipped because a consumer was deployed after it arrived.
+// New groups start at the earliest durable telemetry.
 func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 	if len(config.Brokers) == 0 {
 		return nil, errors.New("the backbone needs at least one broker address")
@@ -80,12 +90,23 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 	}
 
 	consumer.client = client
+	consumer.endOffsets = kadm.NewClient(client)
 	return consumer, nil
 }
 
-// The position advances only once deliver has returned, so a crash replays a
-// batch. At-least-once is a property of the backbone, not of each consumer.
+// Commit only after delivery so crashes replay the batch.
 func (c *Consumer) Consume(ctx context.Context, deliver Deliver) error {
+	monitorCtx, stopMonitor := context.WithCancel(ctx)
+	monitorDone := make(chan struct{})
+	go func() {
+		defer close(monitorDone)
+		c.monitorLag(monitorCtx)
+	}()
+	defer func() {
+		stopMonitor()
+		<-monitorDone
+	}()
+
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -113,6 +134,7 @@ func (c *Consumer) Consume(ctx context.Context, deliver Deliver) error {
 				c.client.AllowRebalance()
 				return fmt.Errorf("commit the group position on %s: %w", c.topic, err)
 			}
+			c.metrics.committed(fetches)
 		}
 		c.client.AllowRebalance()
 	}
@@ -135,9 +157,9 @@ func collect(fetches kgo.Fetches) []Record {
 	return records
 }
 
-// A fetch error is not fatal: the client retries on its own, so the loop counts
-// them and keeps consuming.
+// Fetch errors are counted while franz-go performs its own retries.
 func (c *Consumer) report(fetches kgo.Fetches) {
+	committed := c.client.CommittedOffsets()
 	fetches.EachError(func(topic string, partition int32, err error) {
 		if errors.Is(err, context.Canceled) {
 			return
@@ -145,8 +167,48 @@ func (c *Consumer) report(fetches kgo.Fetches) {
 		c.metrics.fetchFailed(topic, partition)
 	})
 	fetches.EachPartition(func(partition kgo.FetchTopicPartition) {
-		c.metrics.observe(partition)
+		next := int64(-1)
+		if partitions := committed[partition.Topic]; partitions != nil {
+			if position, exists := partitions[partition.Partition]; exists {
+				next = position.Offset
+			}
+		}
+		c.metrics.observe(partition, next)
 	})
+}
+
+func (c *Consumer) monitorLag(ctx context.Context) {
+	ticker := time.NewTicker(lagRefreshInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			c.refreshLag(ctx)
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (c *Consumer) refreshLag(ctx context.Context) {
+	if !c.metrics.tracks(c.topic) {
+		return
+	}
+	refreshCtx, cancel := context.WithTimeout(ctx, lagRefreshTimeout)
+	defer cancel()
+
+	offsets, err := c.endOffsets.ListEndOffsets(refreshCtx, c.topic)
+	failed := err != nil
+	offsets.Each(func(offset kadm.ListedOffset) {
+		if offset.Err != nil || offset.Offset < 0 {
+			failed = true
+			return
+		}
+		c.metrics.refresh(offset.Topic, offset.Partition, offset.Offset)
+	})
+	if failed && ctx.Err() == nil {
+		c.metrics.lagRefreshFailed(c.topic)
+	}
 }
 
 func (c *Consumer) Ping(ctx context.Context) error {

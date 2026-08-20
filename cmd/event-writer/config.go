@@ -3,6 +3,7 @@ package main
 import (
 	"time"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/clickhouse"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
@@ -13,10 +14,9 @@ const serviceName = "event-writer"
 type configuration struct {
 	service service.Config
 
-	brokers         []string
-	topic           string
-	quarantineTopic string
-	group           string
+	brokers  []string
+	topology broker.Topology
+	group    string
 
 	batchEvents   int
 	fetchMaxWait  time.Duration
@@ -30,10 +30,9 @@ func load(parser *config.Parser) (configuration, error) {
 	loaded := configuration{
 		service: service.LoadConfig(serviceName, parser),
 
-		brokers:         parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
-		topic:           parser.String("SEAGULL_BACKBONE_EVENTS_TOPIC", "security.events.raw"),
-		quarantineTopic: parser.String("SEAGULL_BACKBONE_QUARANTINE_TOPIC", "security.events.quarantine"),
-		group:           parser.String("SEAGULL_WRITER_CONSUMER_GROUP", serviceName),
+		brokers:  parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
+		topology: broker.LoadTopology(parser),
+		group:    parser.String("SEAGULL_WRITER_CONSUMER_GROUP", serviceName),
 
 		batchEvents:   parser.Int("SEAGULL_WRITER_BATCH_EVENTS", 5_000, 1, 100_000),
 		fetchMaxWait:  parser.Duration("SEAGULL_WRITER_FETCH_MAX_WAIT", time.Second, 10*time.Millisecond, time.Minute),

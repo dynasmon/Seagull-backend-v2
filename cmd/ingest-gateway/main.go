@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
@@ -45,13 +46,25 @@ func gateway(ctx context.Context) error {
 
 	publisher, err := broker.NewPublisher(broker.Config{
 		Brokers:  settings.brokers,
-		Topic:    settings.topic,
+		Topic:    settings.topology.Events.Name,
 		ClientID: settings.admissionRules.Gateway,
 	})
 	if err != nil {
 		return err
 	}
 	defer publisher.Close()
+
+	// The topology is applied by backbone-migrator, never here. This only refuses
+	// to serve agents when the topic it would publish to is missing or reshaped.
+	topologyCtx, cancel := context.WithTimeout(ctx, settings.publishTimeout)
+	defer cancel()
+	drift, err := publisher.VerifyTopics(topologyCtx, settings.topology.Events)
+	if err != nil {
+		return err
+	}
+	for _, entry := range drift {
+		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
+	}
 
 	admitter, err := ingest.NewAdmitter(publisher, settings.admissionRules, ingest.NewMetrics(platform.Metrics()))
 	if err != nil {

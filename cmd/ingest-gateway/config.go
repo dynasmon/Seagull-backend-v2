@@ -3,6 +3,7 @@ package main
 import (
 	"time"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
@@ -31,8 +32,8 @@ type configuration struct {
 	trackedAgents  int
 	admissionRules ingest.Policy
 
-	brokers []string
-	topic   string
+	brokers  []string
+	topology broker.Topology
 }
 
 func load(parser *config.Parser) (configuration, error) {
@@ -54,8 +55,8 @@ func load(parser *config.Parser) (configuration, error) {
 		rateBurst:     parser.Int("SEAGULL_GATEWAY_RATE_BURST", 400, 1, 1_000_000),
 		trackedAgents: parser.Int("SEAGULL_GATEWAY_RATE_TRACKED_AGENTS", 10_000, 1, 1_000_000),
 
-		brokers: parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
-		topic:   parser.String("SEAGULL_BACKBONE_EVENTS_TOPIC", "security.events.raw"),
+		brokers:  parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
+		topology: broker.LoadTopology(parser),
 	}
 
 	loaded.ratePerSecond = float64(parser.Int("SEAGULL_GATEWAY_RATE_PER_SECOND", 200, 0, 1_000_000))

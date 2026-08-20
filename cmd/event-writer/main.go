@@ -51,7 +51,7 @@ func writer(ctx context.Context) error {
 
 	consumer, err := broker.NewConsumer(broker.ConsumerConfig{
 		Brokers:      settings.brokers,
-		Topic:        settings.topic,
+		Topic:        settings.topology.Events.Name,
 		Group:        settings.group,
 		ClientID:     serviceName,
 		MaxRecords:   settings.batchEvents,
@@ -63,9 +63,21 @@ func writer(ctx context.Context) error {
 	}
 	defer consumer.Close()
 
+	// The topology is applied by backbone-migrator, never here. This only refuses
+	// to consume when a topic it depends on is missing or reshaped.
+	topologyCtx, cancelTopology := context.WithTimeout(ctx, settings.store.Timeout)
+	defer cancelTopology()
+	drift, err := consumer.VerifyTopics(topologyCtx, settings.topology.Topics()...)
+	if err != nil {
+		return err
+	}
+	for _, entry := range drift {
+		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
+	}
+
 	refused, err := broker.NewQuarantine(broker.Config{
 		Brokers:  settings.brokers,
-		Topic:    settings.quarantineTopic,
+		Topic:    settings.topology.Quarantine.Name,
 		ClientID: serviceName,
 	})
 	if err != nil {
@@ -92,8 +104,8 @@ func writer(ctx context.Context) error {
 	platform.Add(component)
 
 	platform.Logger().Info("event_writer_configured",
-		slog.String("topic", settings.topic),
-		slog.String("quarantine_topic", settings.quarantineTopic),
+		slog.String("topic", settings.topology.Events.Name),
+		slog.String("quarantine_topic", settings.topology.Quarantine.Name),
 		slog.String("group", settings.group),
 		slog.Int("batch_events", settings.batchEvents),
 		slog.String("store_database", settings.store.Database),

@@ -40,6 +40,10 @@ partition.
 changes the shape of the store, and `event-writer` refuses to start against a
 store that is behind the schema it ships.
 
+`backbone-migrator` applies the topic topology and exits, on the same terms. It
+is the only thing that creates or configures a topic, and both halves of the
+data plane refuse to start when a topic they depend on is missing or reshaped.
+
 `control-api` serves the protocol descriptor an agent needs before it can talk
 to anything else. It exists mainly to prove that a second executable reuses the
 platform foundation without copying it.
@@ -81,6 +85,7 @@ cmd/                    one directory per process
   ingest-gateway/       the only durable entry point for telemetry
   event-writer/         the backbone's consumer half, writing to the store
   store-migrator/       applies the store schema, then exits
+  backbone-migrator/    applies the topic topology, then exits
   control-api/          the control plane entry point
 
 internal/
@@ -167,16 +172,27 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_GATEWAY_ID` | `ingest-gateway` | recorded on every admitted event |
 | `SEAGULL_EVENT_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock an event may be |
 | `SEAGULL_EVENT_MAX_AGE` | `168h` | how old an event may be and still be admitted |
+
+### The backbone, shared by both halves of the data plane and the migrator
+
+| Variable | Default | Meaning |
+|---|---|---|
 | `SEAGULL_BACKBONE_BROKERS` | required | comma separated broker addresses |
-| `SEAGULL_BACKBONE_EVENTS_TOPIC` | `security.events.raw` | where admitted events are published |
+| `SEAGULL_BACKBONE_EVENTS_TOPIC` | `security.events.raw` | admitted telemetry |
+| `SEAGULL_BACKBONE_EVENTS_PARTITIONS` | `12` | how far per-agent ordering spreads |
+| `SEAGULL_BACKBONE_EVENTS_RETENTION` | `168h` | how far back a replay can reach |
+| `SEAGULL_BACKBONE_QUARANTINE_TOPIC` | `security.events.quarantine` | refused records |
+| `SEAGULL_BACKBONE_QUARANTINE_PARTITIONS` | `3` | |
+| `SEAGULL_BACKBONE_QUARANTINE_RETENTION` | `720h` | |
+| `SEAGULL_BACKBONE_REPLICAS` | `1` | replication factor of every topic |
+
+Every process reads the same declaration: `backbone-migrator` applies it, and
+the gateway and the writer verify it before they serve.
 
 ### event-writer
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SEAGULL_BACKBONE_BROKERS` | required | comma separated broker addresses |
-| `SEAGULL_BACKBONE_EVENTS_TOPIC` | `security.events.raw` | where admitted events are read from |
-| `SEAGULL_BACKBONE_QUARANTINE_TOPIC` | `security.events.quarantine` | where refused records go |
 | `SEAGULL_WRITER_CONSUMER_GROUP` | `event-writer` | the consumer group that owns the offsets |
 | `SEAGULL_WRITER_BATCH_EVENTS` | `5000` | records per poll, and per store batch |
 | `SEAGULL_WRITER_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
@@ -243,6 +259,41 @@ Three timestamps are distinct and never collapsed:
 The gateway replaces the whole `reception` message and the identity fields in
 `origin`, so a producer cannot choose its own identity, tenant, or place in the
 platform's timeline.
+
+## The backbone topology
+
+Two topics, declared once in `internal/broker` and applied by
+`backbone-migrator`:
+
+| Topic | Partitions | Retention | Why |
+|---|---|---|---|
+| `security.events.raw` | 12 | 7 days | admitted telemetry, keyed by agent |
+| `security.events.quarantine` | 3 | 30 days | refused records, kept longer because they are the ones still waiting to be read |
+
+**Partitions and replication are refused, never converged.** Records are keyed
+by `agent_id`, so growing the partition count moves an agent to a different
+partition and silently ends the per-agent ordering that stateful detection will
+depend on. The migrator reports the divergence and stops; changing the shape of
+a live topic stays an operator's decision.
+
+**Retention, cleanup and compression do converge.** They describe how long the
+backbone keeps what it already ordered, so a run brings them back to the
+declaration and reports what it changed.
+
+**Startup verifies rather than assumes.** Readiness reaches the brokers, not the
+topics, so a gateway whose topic is missing starts, reports itself healthy, and
+then fails every batch an agent sends. A topic with the wrong shape is worse:
+one partition instead of twelve works perfectly and only collapses the per-agent
+ordering. The gateway and the writer describe their topics first and refuse to
+serve when one is missing or reshaped:
+
+```bash
+docker compose -f deploy/compose.yaml run --rm backbone-migrator
+```
+
+Retention drift is logged as `backbone_topology_drift` and does not stop a
+process: refusing to admit telemetry over a setting the process cannot fix would
+trade the stream for the window.
 
 ## The telemetry store
 

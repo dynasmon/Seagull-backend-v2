@@ -113,6 +113,7 @@ tests/
   architecture/         the dependency rules, enforced
   e2e/                  the gateway over real mutual TLS
   integration/          the data plane against a live Redpanda and ClickHouse
+  load/                 the gateway under load, against a live Redpanda
 
 deploy/                 Dockerfile and Compose
 tools/                  development programs, not shipped
@@ -361,6 +362,8 @@ decides whether the change is allowed.
 make test              # unit, architecture and end-to-end suites
 make test-race         # the same suites under the race detector
 make test-integration  # the data plane against a live Redpanda and ClickHouse
+make test-load         # the ingest load scenarios against a live Redpanda
+make bench             # the hot path, one core, no infrastructure
 ```
 
 The end-to-end suite starts a real mutual TLS listener with a certificate
@@ -373,6 +376,14 @@ host. In the ordinary stack both sit on an internal network with no published
 port. The suite ends with the whole slice — admission, backbone, writer, store —
 running against real infrastructure, which is what the rest of it is a
 decomposition of.
+
+The load suite drives the real gateway over real mutual TLS against a live
+backbone through five scenarios — sustained ingest, concurrent batches at three
+sizes, a slow backbone, an abusive agent, and a shutdown under load — and
+reports throughput, percentiles and allocation per event. A run fails when the
+gateway allocates more than 8 KB per admitted event, when a slow backbone
+produces an acknowledgement the backbone never received, or when a shutdown
+drops a batch it had already answered for.
 
 ## Further reading
 

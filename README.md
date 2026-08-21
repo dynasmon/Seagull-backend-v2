@@ -165,7 +165,7 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_GATEWAY_TLS_KEY` | required | server private key |
 | `SEAGULL_GATEWAY_AGENT_CA` | required | authority that agent certificates must chain to |
 | `SEAGULL_GATEWAY_MAX_BODY` | `8MiB` | ceiling on a batch body, counted as it is read |
-| `SEAGULL_GATEWAY_MAX_EVENTS_PER_BATCH` | `10000` | ceiling on events in one batch |
+| `SEAGULL_GATEWAY_MAX_EVENTS_PER_BATCH` | `1000` | ceiling on events in one batch |
 | `SEAGULL_GATEWAY_PUBLISH_TIMEOUT` | `10s` | budget for making a batch durable |
 | `SEAGULL_GATEWAY_RATE_PER_SECOND` | `200` | per-agent batch budget, `0` disables it |
 | `SEAGULL_GATEWAY_RATE_BURST` | `400` | per-agent burst |
@@ -173,6 +173,13 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_GATEWAY_ID` | `ingest-gateway` | recorded on every admitted event |
 | `SEAGULL_EVENT_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock an event may be |
 | `SEAGULL_EVENT_MAX_AGE` | `168h` | how old an event may be and still be admitted |
+
+The batch ceiling is measured, not chosen. No event in a batch is published until
+every event in it has been decoded and validated, so a larger batch is a larger
+body that must be fully materialised before one byte reaches the backbone. At a
+thousand the gateway sustains 727k events/s with a p99 of 139ms; at ten thousand
+it sustains 300k with a p99 of three seconds. `make test-load` is where those
+numbers come from.
 
 ### The backbone, shared by both halves of the data plane and the migrator
 

@@ -63,7 +63,7 @@ func load(parser *config.Parser) (configuration, error) {
 	loaded.admissionRules = ingest.Policy{
 		Gateway:           parser.String("SEAGULL_GATEWAY_ID", serviceName),
 		TenantID:          parser.String("SEAGULL_TENANT_ID", "default"),
-		MaxEventsPerBatch: parser.Int("SEAGULL_GATEWAY_MAX_EVENTS_PER_BATCH", 10_000, 1, 100_000),
+		MaxEventsPerBatch: parser.Int("SEAGULL_GATEWAY_MAX_EVENTS_PER_BATCH", 1_000, 1, 100_000),
 		Event: event.Policy{
 			MaxClockSkew: parser.Duration("SEAGULL_EVENT_MAX_CLOCK_SKEW", 5*time.Minute, time.Second, time.Hour),
 			MaxAge:       parser.Duration("SEAGULL_EVENT_MAX_AGE", 168*time.Hour, time.Minute, 8760*time.Hour),

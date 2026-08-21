@@ -12,7 +12,7 @@ TEST_BROKERS ?= 127.0.0.1:19092
 TEST_EVENT_STORE ?= 127.0.0.1:19000
 
 .PHONY: help fmt fmt-check vet mod-check lint test test-race test-integration \
-        build images vulncheck dev-pki up down logs clean verify
+        bench build images vulncheck dev-pki up down logs clean verify
 
 help:
 	@echo "fmt                 format the module"
@@ -23,6 +23,7 @@ help:
 	@echo "test                run the unit, architecture and end-to-end suites"
 	@echo "test-race           run the same suites under the race detector"
 	@echo "test-integration    run the data plane suites against a live Redpanda and ClickHouse"
+	@echo "bench               run the hot-path benchmarks"
 	@echo "build               build every component into $(DIST)"
 	@echo "images              build the container image of every component"
 	@echo "dev-pki             mint development certificates into $(PKI)"
@@ -63,6 +64,9 @@ test-integration:
 	SEAGULL_TEST_BROKERS=$(TEST_BROKERS) \
 	SEAGULL_TEST_EVENT_STORE=$(TEST_EVENT_STORE) \
 	  $(GO) test -tags integration -count=1 ./tests/integration/...
+
+bench:
+	$(GO) test -run '^$$' -bench . -benchmem ./internal/...
 
 build:
 	@mkdir -p $(DIST)

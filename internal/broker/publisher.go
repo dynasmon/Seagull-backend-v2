@@ -71,14 +71,26 @@ func (p *Publisher) PublishEvents(ctx context.Context, events []*eventv1.Event) 
 		return nil
 	}
 
+	records, err := encode(p.topic, events)
+	if err != nil {
+		return err
+	}
+
+	if err := p.client.ProduceSync(ctx, records...).FirstErr(); err != nil {
+		return fmt.Errorf("publish to %s: %w", p.topic, err)
+	}
+	return nil
+}
+
+func encode(topic string, events []*eventv1.Event) ([]*kgo.Record, error) {
 	records := make([]*kgo.Record, 0, len(events))
 	for _, record := range events {
 		encoded, err := proto.Marshal(record)
 		if err != nil {
-			return fmt.Errorf("encode event %s: %w", record.GetEventId(), err)
+			return nil, fmt.Errorf("encode event %s: %w", record.GetEventId(), err)
 		}
 		records = append(records, &kgo.Record{
-			Topic: p.topic,
+			Topic: topic,
 			Key:   []byte(record.GetOrigin().GetAgentId()),
 			Value: encoded,
 			Headers: []kgo.RecordHeader{
@@ -88,11 +100,7 @@ func (p *Publisher) PublishEvents(ctx context.Context, events []*eventv1.Event) 
 			},
 		})
 	}
-
-	if err := p.client.ProduceSync(ctx, records...).FirstErr(); err != nil {
-		return fmt.Errorf("publish to %s: %w", p.topic, err)
-	}
-	return nil
+	return records, nil
 }
 
 func (p *Publisher) Ping(ctx context.Context) error {

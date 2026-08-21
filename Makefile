@@ -12,7 +12,7 @@ TEST_BROKERS ?= 127.0.0.1:19092
 TEST_EVENT_STORE ?= 127.0.0.1:19000
 
 .PHONY: help fmt fmt-check vet mod-check lint test test-race test-integration \
-        bench build images vulncheck dev-pki up down logs clean verify
+        test-load bench build images vulncheck dev-pki up down logs clean verify
 
 help:
 	@echo "fmt                 format the module"
@@ -23,6 +23,7 @@ help:
 	@echo "test                run the unit, architecture and end-to-end suites"
 	@echo "test-race           run the same suites under the race detector"
 	@echo "test-integration    run the data plane suites against a live Redpanda and ClickHouse"
+	@echo "test-load           run the ingest load scenarios against a live Redpanda"
 	@echo "bench               run the hot-path benchmarks"
 	@echo "build               build every component into $(DIST)"
 	@echo "images              build the container image of every component"
@@ -42,6 +43,7 @@ fmt-check:
 vet:
 	$(GO) vet ./...
 	$(GO) vet -tags integration ./tests/...
+	$(GO) vet -tags load ./tests/...
 
 mod-check:
 	$(GO) mod verify
@@ -64,6 +66,11 @@ test-integration:
 	SEAGULL_TEST_BROKERS=$(TEST_BROKERS) \
 	SEAGULL_TEST_EVENT_STORE=$(TEST_EVENT_STORE) \
 	  $(GO) test -tags integration -count=1 ./tests/integration/...
+
+test-load:
+	$(COMPOSE_TEST) up -d --wait redpanda
+	SEAGULL_TEST_BROKERS=$(TEST_BROKERS) \
+	  $(GO) test -tags load -count=1 -timeout 20m -v ./tests/load/...
 
 bench:
 	$(GO) test -run '^$$' -bench . -benchmem ./internal/...

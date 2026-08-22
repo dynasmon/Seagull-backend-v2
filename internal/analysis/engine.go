@@ -39,9 +39,9 @@ type EngineOptions struct {
 }
 
 // The second consumer of the raw telemetry the gateway admitted, and the first
-// one that reads it to decide something rather than to keep it. Routing is the
-// first decision it makes; normalization and detection arrive behind it, on
-// the route their class sends an event down.
+// one that reads it to decide something rather than to keep it. It routes an
+// event by its class and puts it into the canonical form that class defines;
+// detection arrives behind that, on the same route.
 type Engine struct {
 	source  Source
 	metrics *Metrics
@@ -83,12 +83,15 @@ func (e *Engine) handle(ctx context.Context, records []Record) error {
 	reached := e.now().UTC()
 	analysed := 0
 	for _, record := range records {
-		decoded, route, readable := e.read(record)
+		decoded, stage, readable := e.read(record)
 		if !readable {
 			continue
 		}
+		if stage.Normalize(decoded) {
+			e.metrics.normalized(stage.Route)
+		}
 		e.metrics.observeDelay(reached, decoded)
-		e.metrics.routed(route)
+		e.metrics.routed(stage.Route)
 		analysed++
 	}
 
@@ -96,12 +99,12 @@ func (e *Engine) handle(ctx context.Context, records []Record) error {
 	return nil
 }
 
-// A record becomes an event, and the event's class decides where it goes.
-func (e *Engine) read(record Record) (*eventv1.Event, Route, bool) {
+// A record becomes an event, and the event's class decides what runs on it.
+func (e *Engine) read(record Record) (*eventv1.Event, Stage, bool) {
 	var decoded eventv1.Event
 	if err := proto.Unmarshal(record.Value, &decoded); err != nil {
 		e.refuse(record, ReasonUndecodable, "the record is not a seagull.event.v1.Event")
-		return nil, "", false
+		return nil, Stage{}, false
 	}
 
 	// A class this build's contract has never heard of is not a malformed
@@ -112,23 +115,23 @@ func (e *Engine) read(record Record) (*eventv1.Event, Route, bool) {
 	class := decoded.GetEventClass()
 	if !Declared(class) {
 		e.unrouted(record, class)
-		return nil, "", false
+		return nil, Stage{}, false
 	}
 
 	if err := event.ValidateContract(&decoded); err != nil {
 		e.refuse(record, ReasonContractViolation, err.Error())
-		return nil, "", false
+		return nil, Stage{}, false
 	}
 
-	// Everything the contract declares and admits has a route: the suite holds
+	// Everything the contract declares and admits has a stage: the suite holds
 	// the routing table and the contract together, and a class that reaches
 	// here without one means they have drifted apart.
-	route, routed := RouteFor(class)
+	stage, routed := StageFor(class)
 	if !routed {
 		e.unrouted(record, class)
-		return nil, "", false
+		return nil, Stage{}, false
 	}
-	return &decoded, route, true
+	return &decoded, stage, true
 }
 
 // Reported by class rather than by payload, and counted apart from a refusal,

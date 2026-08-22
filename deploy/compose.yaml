@@ -110,6 +110,23 @@ services:
     restart: "no"
     <<: *hardening
 
+  analysis-engine:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        COMPONENT: analysis-engine
+        VERSION: ${SEAGULL_VERSION:-dev}
+    depends_on:
+      backbone-migrator:
+        condition: service_completed_successfully
+    networks: [backbone]
+    environment:
+      <<: *backbone
+      SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
+      SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    <<: *hardening
+
   event-writer:
     build:
       context: ..

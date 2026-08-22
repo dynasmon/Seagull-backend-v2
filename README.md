@@ -4,9 +4,11 @@ A security event processing platform. Telemetry becomes durable on an event
 backbone before anything else happens to it; the control plane is built around
 that pipeline rather than the other way around.
 
-This repository holds the foundation and the first vertical slice: telemetry
-travels from an agent to a queryable store, and every step of it is durable.
-Detection, correlation and the control plane are not implemented yet.
+This repository holds the foundation, the first vertical slice and the runtime
+the analysis pipeline will be built inside: telemetry travels from an agent to a
+queryable store, every step of it is durable, and a second consumer reads the
+same stream to decide something about it. Detection, correlation and the control
+plane are not implemented yet.
 
 ## What runs today
 
@@ -16,12 +18,15 @@ Seagull Agent
       v
 cmd/ingest-gateway  ── admission control ──▶  Redpanda  security.events.raw
       |                                             (durable before the ack)
-      |                                                       |
-cmd/control-api     ── protocol descriptor                    v
-                                              cmd/event-writer ──▶ ClickHouse
-                                                       |            security_events
-                                                       v
-                                              security.events.quarantine
+      |                                              |                    |
+cmd/control-api     ── protocol descriptor           v                    v
+                                        cmd/event-writer      cmd/analysis-engine
+                                                 |
+                                                 ▼
+                                    ClickHouse  security_events
+                                                 |
+                                                 ▼
+                                       security.events.quarantine
 ```
 
 `ingest-gateway` authenticates an agent by its client certificate, admits or
@@ -35,6 +40,14 @@ that is not a `seagull.event.v1.Event`, breaks the contract, or carries an
 instant the store cannot hold — is published to `security.events.quarantine`
 and the rest of the batch continues, so one bad record can never hold up a
 partition.
+
+`analysis-engine` consumes the same topic under a group of its own, so it and
+the writer advance independently and neither can hold the other back. It turns a
+record into a `seagull.event.v1.Event`, refuses what it cannot read without
+returning an error — one unreadable record must never hold a partition — and
+reports how long after admission each event reached it. Routing, normalization
+and detection arrive inside that loop; the loop exists first because everything
+after it depends on the group position being correct.
 
 `store-migrator` applies the store schema and exits. It is the only thing that
 changes the shape of the store, and `event-writer` refuses to start against a
@@ -83,6 +96,7 @@ make down
 ```text
 cmd/                    one directory per process
   ingest-gateway/       the only durable entry point for telemetry
+  analysis-engine/      the backbone's analytical consumer
   event-writer/         the backbone's consumer half, writing to the store
   store-migrator/       applies the store schema, then exits
   backbone-migrator/    applies the topic topology, then exits
@@ -93,6 +107,7 @@ internal/
   agentidentity/        what a verified agent identity is
   protocol/             version negotiation between agent and platform
   ingest/               admission control and the ingest transport
+  analysis/             what analysing an event off the backbone means
   eventstore/           what a stored event is, and what is refused
   broker/               the Redpanda adapter
   clickhouse/           the store adapter and its embedded schema
@@ -196,6 +211,15 @@ numbers come from.
 
 Every process reads the same declaration: `backbone-migrator` applies it, and
 the gateway and the writer verify it before they serve.
+
+### analysis-engine
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEAGULL_ANALYSIS_CONSUMER_GROUP` | `analysis-engine` | the consumer group that owns its offsets |
+| `SEAGULL_ANALYSIS_BATCH_EVENTS` | `5000` | records per poll |
+| `SEAGULL_ANALYSIS_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
+| `SEAGULL_ANALYSIS_START_TIMEOUT` | `30s` | budget for verifying the topology before serving |
 
 ### event-writer
 

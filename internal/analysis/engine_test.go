@@ -114,6 +114,29 @@ func fromANewerContract(t *testing.T) []byte {
 	return payload
 }
 
+// The same event a collector produces when it copies what a log line said
+// rather than what the platform matches on.
+func inANonCanonicalForm(t *testing.T) []byte {
+	t.Helper()
+
+	record := fixtures.SSHAuthentication{
+		EventID:  "event-in-a-non-canonical-form",
+		Hostname: "WEB-01.",
+		SourceIP: "::ffff:203.0.113.10",
+		Method:   "PASSWORD",
+	}.Event()
+	record.Reception = &eventv1.Reception{
+		IngestTime: timestamppb.New(time.Now().UTC()),
+		Gateway:    "gateway-a",
+		BatchId:    "batch-a",
+	}
+	payload, err := proto.Marshal(record)
+	if err != nil {
+		t.Fatalf("encode event: %v", err)
+	}
+	return payload
+}
+
 func withoutAClass(t *testing.T) []byte {
 	t.Helper()
 
@@ -348,5 +371,33 @@ func TestAnEventThatDoesNotSayWhatItIsIsRefused(t *testing.T) {
 	}
 	if body := exposition(t, registry); strings.Contains(body, "seagull_analysis_unrouted_total") {
 		t.Error("an event without a class was filed as a class this build does not know")
+	}
+}
+
+// Normalization runs on the route the class sends the event down, and is
+// counted apart from routing so the two questions stay separate: what the
+// engine worked on, and how much of it arrived in a form it had to correct.
+func TestTheEngineNormalizesWhatItRoutes(t *testing.T) {
+	source := &oneBatch{records: []analysis.Record{
+		{Partition: 1, Offset: 4, Value: inANonCanonicalForm(t)},
+		{Partition: 1, Offset: 5, Value: admitted(t, "event-already-canonical")},
+	}}
+	engine, written, registry := newEngine(t, source)
+
+	if err := engine.Run(context.Background()); err != nil {
+		t.Fatalf("run the engine: %v", err)
+	}
+	if reported := entries(t, written); len(reported) != 0 {
+		t.Errorf("normalizing an event reported something: %v", reported)
+	}
+
+	body := exposition(t, registry)
+	for _, expected := range []string{
+		`seagull_analysis_routed_total{route="authentication"} 2`,
+		`seagull_analysis_normalized_total{route="authentication"} 1`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("%s missing from the exposition:\n%s", expected, body)
+		}
 	}
 }

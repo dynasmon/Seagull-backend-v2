@@ -12,6 +12,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	"github.com/dynasmon/Seagull-backend-v2/internal/analysis"
@@ -20,11 +21,13 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
+	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 )
 
 // The runtime boundary of the second consumer: it joins a group of its own on
 // the topic the gateway publishes to, works through what is there, and advances
-// its committed position past a record it cannot read.
+// its committed position past both a record it cannot read and a class it
+// cannot route.
 func TestTheEngineConsumesTheBackboneInAGroupOfItsOwn(t *testing.T) {
 	addresses := brokers(t)
 	topic := temporaryTopic(t, addresses)
@@ -32,6 +35,7 @@ func TestTheEngineConsumesTheBackboneInAGroupOfItsOwn(t *testing.T) {
 
 	admitEvents(t, addresses, topic, 4)
 	publishRaw(t, addresses, topic, []byte("this is not a seagull.event.v1.Event"))
+	publishRaw(t, addresses, topic, fromANewerContract(t))
 
 	consumer, err := broker.NewConsumer(broker.ConsumerConfig{
 		Brokers:      addresses,
@@ -75,7 +79,7 @@ func TestTheEngineConsumesTheBackboneInAGroupOfItsOwn(t *testing.T) {
 	stopped := make(chan error, 1)
 	go func() { stopped <- engine.Run(running) }()
 
-	awaitCommitted(t, addresses, topic, group, 5)
+	awaitCommitted(t, addresses, topic, group, 6)
 
 	stop()
 	if err := <-stopped; err != nil && !isCancellation(err) {
@@ -117,6 +121,21 @@ func admitEvents(t *testing.T, addresses []string, topic string, count int) {
 	if _, err := admitter.Admit(ctx, agentidentity.Identity{AgentID: "web-01"}, batch); err != nil {
 		t.Fatalf("admit the batch: %v", err)
 	}
+}
+
+// What a gateway running a newer contract admits: a well formed event carrying
+// a class this build has never heard of. The engine has to advance past it
+// rather than stop on it or refuse the batch.
+func fromANewerContract(t *testing.T) []byte {
+	t.Helper()
+
+	record := fixtures.SSHAuthentication{EventID: "analysis-from-a-newer-contract"}.Event()
+	record.EventClass = eventv1.EventClass(4242)
+	payload, err := proto.Marshal(record)
+	if err != nil {
+		t.Fatalf("encode an event from a newer contract: %v", err)
+	}
+	return payload
 }
 
 func publishRaw(t *testing.T, addresses []string, topic string, payload []byte) {

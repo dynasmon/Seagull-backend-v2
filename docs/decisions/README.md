@@ -9,3 +9,4 @@ rediscovered by reading the code.
 - [3. The protobuf contract is the event model](0003-the-contract-is-the-event-model.md)
 - [4. Every process starts from the same skeleton](0004-one-process-skeleton.md)
 - [5. The canonical form is for analysis, not for storage](0005-the-canonical-form-is-for-analysis.md)
+- [6. A detection rule addresses the contract](0006-a-rule-addresses-the-contract.md)

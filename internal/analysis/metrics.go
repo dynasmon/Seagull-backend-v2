@@ -12,6 +12,8 @@ import (
 type Metrics struct {
 	events   *prometheus.CounterVec
 	refusals *prometheus.CounterVec
+	byRoute  *prometheus.CounterVec
+	byClass  *prometheus.CounterVec
 	batch    prometheus.Histogram
 	delay    prometheus.Histogram
 }
@@ -31,6 +33,18 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "refusals_total",
 			Help:      "Records the engine could not turn into an event, by why.",
 		}, []string{"reason"}),
+		byRoute: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "analysis",
+			Name:      "routed_total",
+			Help:      "Events by the route their class sends them down.",
+		}, []string{"route"}),
+		byClass: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "analysis",
+			Name:      "unrouted_total",
+			Help:      "Events this build has no route for, by the class they carry.",
+		}, []string{"class"}),
 		batch: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: "analysis",
@@ -46,7 +60,14 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Buckets:   []float64{0.05, 0.25, 1, 5, 30, 300, 3600},
 		}),
 	}
-	registry.MustRegister(instruments.events, instruments.refusals, instruments.batch, instruments.delay)
+	registry.MustRegister(
+		instruments.events,
+		instruments.refusals,
+		instruments.byRoute,
+		instruments.byClass,
+		instruments.batch,
+		instruments.delay,
+	)
 	return instruments
 }
 
@@ -56,6 +77,18 @@ func (m *Metrics) analysed(events int) {
 	if events > 0 {
 		m.events.WithLabelValues("analysed").Add(float64(events))
 	}
+}
+
+// What the engine worked on, by kind. The outcome counter above says how many
+// events it got through; this says what they were, which is the number that
+// decides where the next stage is worth building.
+func (m *Metrics) routed(route Route) { m.byRoute.WithLabelValues(string(route)).Inc() }
+
+// Not a refusal: the record may be well formed and simply carry a class this
+// build has no route for, which an operator answers by deploying.
+func (m *Metrics) unroutable(class string) {
+	m.events.WithLabelValues("unrouted").Inc()
+	m.byClass.WithLabelValues(class).Inc()
 }
 
 // Offset lag says how many records are waiting; this says how long an event has

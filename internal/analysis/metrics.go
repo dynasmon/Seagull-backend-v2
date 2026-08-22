@@ -14,6 +14,7 @@ type Metrics struct {
 	refusals *prometheus.CounterVec
 	byRoute  *prometheus.CounterVec
 	byClass  *prometheus.CounterVec
+	rewrites *prometheus.CounterVec
 	batch    prometheus.Histogram
 	delay    prometheus.Histogram
 }
@@ -45,6 +46,12 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "unrouted_total",
 			Help:      "Events this build has no route for, by the class they carry.",
 		}, []string{"class"}),
+		rewrites: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "analysis",
+			Name:      "normalized_total",
+			Help:      "Events the engine had to rewrite into canonical form, by route.",
+		}, []string{"route"}),
 		batch: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: "analysis",
@@ -65,6 +72,7 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 		instruments.refusals,
 		instruments.byRoute,
 		instruments.byClass,
+		instruments.rewrites,
 		instruments.batch,
 		instruments.delay,
 	)
@@ -90,6 +98,11 @@ func (m *Metrics) unroutable(class string) {
 	m.events.WithLabelValues("unrouted").Inc()
 	m.byClass.WithLabelValues(class).Inc()
 }
+
+// Against routed_total this says what share of a deployment's telemetry arrives
+// in a form the engine has to correct, which is a question about the agents
+// rather than about the engine.
+func (m *Metrics) normalized(route Route) { m.rewrites.WithLabelValues(string(route)).Inc() }
 
 // Offset lag says how many records are waiting; this says how long an event has
 // been waiting, which is the number an operator is actually asked about.

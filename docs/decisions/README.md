@@ -8,3 +8,4 @@ rediscovered by reading the code.
 - [2. Agent identity comes from the certificate](0002-identity-comes-from-the-certificate.md)
 - [3. The protobuf contract is the event model](0003-the-contract-is-the-event-model.md)
 - [4. Every process starts from the same skeleton](0004-one-process-skeleton.md)
+- [5. The canonical form is for analysis, not for storage](0005-the-canonical-form-is-for-analysis.md)

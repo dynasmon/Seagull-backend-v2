@@ -55,8 +55,18 @@ the event, so the stream has moved ahead of the process reading it and the
 answer is a deployment. An event that declares no class at all is refused as a
 contract violation, because that producer is broken. Every class the contract
 declares has a route or the suite fails, so a class added to the contract cannot
-arrive here unnoticed. Normalization and detection arrive behind the route a
-class sends an event down.
+arrive here unnoticed.
+
+The route then puts the event into the canonical form its class defines, so a
+rule can be written once instead of once per way a collector spells things:
+`SSH` and `ssh` are one service, `WEB-01.` and `web-01` are one host, and
+`::ffff:10.0.0.5` and `10.0.0.5` are one address. It rewrites the event in
+memory only — the store keeps what the agent sent, because the store is
+evidence — and it never rewrites a field where the representation is the
+meaning, such as an account name or the collected line itself. Every string the
+contract carries has a recorded decision and a reason, and a string added to the
+contract fails the suite until it has one. [ADR 5](docs/decisions/0005-the-canonical-form-is-for-analysis.md)
+carries the reasoning. Detection arrives behind the same route.
 
 `store-migrator` applies the store schema and exits. It is the only thing that
 changes the shape of the store, and `event-writer` refuses to start against a

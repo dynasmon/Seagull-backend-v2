@@ -43,11 +43,20 @@ partition.
 
 `analysis-engine` consumes the same topic under a group of its own, so it and
 the writer advance independently and neither can hold the other back. It turns a
-record into a `seagull.event.v1.Event`, refuses what it cannot read without
-returning an error — one unreadable record must never hold a partition — and
-reports how long after admission each event reached it. Routing, normalization
-and detection arrive inside that loop; the loop exists first because everything
-after it depends on the group position being correct.
+record into a `seagull.event.v1.Event`, routes it by the class it carries,
+refuses what it cannot read without returning an error — one unreadable record
+must never hold a partition — and reports how long after admission each event
+reached it.
+
+Routing decides before the contract does, and that order separates two failures
+an operator answers differently. A class this build's contract does not declare
+is reported as *unrouted*: the gateway validated the class before it admitted
+the event, so the stream has moved ahead of the process reading it and the
+answer is a deployment. An event that declares no class at all is refused as a
+contract violation, because that producer is broken. Every class the contract
+declares has a route or the suite fails, so a class added to the contract cannot
+arrive here unnoticed. Normalization and detection arrive behind the route a
+class sends an event down.
 
 `store-migrator` applies the store schema and exits. It is the only thing that
 changes the shape of the store, and `event-writer` refuses to start against a

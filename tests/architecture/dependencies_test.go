@@ -100,6 +100,14 @@ var outside = map[layer]restriction{
 // A rule that belongs to one package rather than to its layer, because ingest
 // is a transport and a rule about capabilities would refuse it too.
 var within = map[string]restriction{
+	"internal/analysis": {
+		prefixes: []string{
+			"net/http",
+			modulePath + "/internal/platform/httpx",
+			modulePath + "/internal/platform/tlsx",
+		},
+		because: "what analysing an event means has no transport of its own: this half is reached from the backbone",
+	},
 	"internal/eventstore": {
 		prefixes: []string{
 			"net/http",

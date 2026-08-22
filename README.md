@@ -7,8 +7,9 @@ that pipeline rather than the other way around.
 This repository holds the foundation, the first vertical slice and the runtime
 the analysis pipeline will be built inside: telemetry travels from an agent to a
 queryable store, every step of it is durable, and a second consumer reads the
-same stream to decide something about it. Detection, correlation and the control
-plane are not implemented yet.
+same stream, routes it and puts it into canonical form. Detection has a rule
+model and nothing that evaluates it yet; correlation and the control plane are
+not implemented.
 
 ## What runs today
 
@@ -80,6 +81,24 @@ data plane refuse to start when a topic they depend on is missing or reshaped.
 to anything else. It exists mainly to prove that a second executable reuses the
 platform foundation without copying it.
 
+## What a detection rule is
+
+`internal/detection` is the model and none of the runtime: a rule names the class
+of event it reads, matches with an expression over fields of
+`seagull.event.v1.Event`, and carries what an analyst is owed when it fires — a
+severity, an ATT&CK technique, what a false positive looks like, and what to do
+about it. Nothing evaluates a rule yet.
+
+The vocabulary a rule matches on is derived from the contract rather than
+written down, so `authentication.user.name` is a field because the contract says
+so, `authentication.network.source.port` holds a number because the contract
+says so, and `authentication.outcome` accepts `success` or `failure` because
+those are the values the contract declares. A rule naming anything else is
+refused where it is written, with the part of the rule that is wrong.
+[ADR 6](docs/decisions/0006-a-rule-addresses-the-contract.md) records why there
+is no dictionary between a rule and the contract, and what the model
+deliberately cannot say yet.
+
 ## Getting started from a clean clone
 
 ```bash
@@ -123,6 +142,7 @@ cmd/                    one directory per process
 
 internal/
   event/                what a well formed event is
+  detection/            what a detection rule is, and what makes one runnable
   agentidentity/        what a verified agent identity is
   protocol/             version negotiation between agent and platform
   ingest/               admission control and the ingest transport

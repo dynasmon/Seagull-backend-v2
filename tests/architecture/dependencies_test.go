@@ -30,6 +30,7 @@ const (
 var layers = map[string]layer{
 	"cmd":                    executable,
 	"internal/agentidentity": domain,
+	"internal/analysis":      capability,
 	"internal/broker":        adapter,
 	"internal/clickhouse":    adapter,
 	"internal/devpki":        development,

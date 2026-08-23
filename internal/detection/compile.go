@@ -45,6 +45,10 @@ func Compile(rule Rule) (*Program, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := rule.satisfiable("match", root); err != nil {
+		return nil, err
+	}
+
 	fields := make([]Field, 0, len(read))
 	for field := range read {
 		fields = append(fields, field)

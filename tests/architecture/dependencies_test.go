@@ -40,6 +40,7 @@ var layers = map[string]layer{
 	"internal/ingest":        capability,
 	"internal/platform":      platform,
 	"internal/protocol":      domain,
+	"internal/rulefile":      adapter,
 	"tests":                  suite,
 	"tools":                  tool,
 }
@@ -116,6 +117,10 @@ var within = map[string]restriction{
 			modulePath + "/internal/platform/tlsx",
 		},
 		because: "what a stored event is has no transport of its own: this half is reached from the backbone",
+	},
+	"internal/rulefile": {
+		prefixes: []string{"net/http", "os", "database/sql"},
+		because:  "a rule file is a document, and where rules are read from is chosen by an executable",
 	},
 }
 

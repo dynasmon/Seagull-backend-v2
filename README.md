@@ -87,7 +87,7 @@ platform foundation without copying it.
 of event it reads, matches with an expression over fields of
 `seagull.event.v1.Event`, and carries what an analyst is owed when it fires — a
 severity, an ATT&CK technique, what a false positive looks like, and what to do
-about it. Nothing evaluates a rule yet.
+about it.
 
 The vocabulary a rule matches on is derived from the contract rather than
 written down, so `authentication.user.name` is a field because the contract says
@@ -98,6 +98,57 @@ refused where it is written, with the part of the rule that is wrong.
 [ADR 6](docs/decisions/0006-a-rule-addresses-the-contract.md) records why there
 is no dictionary between a rule and the contract, and what the model
 deliberately cannot say yet.
+
+## How a rule is written and compiled
+
+Rules are written in YAML files that `internal/rulefile` reads and the domain
+never learns about, so Sigma and a control plane can feed the same model later
+without becoming a second one:
+
+```yaml
+schema_version: 1
+rules:
+  - id: ssh.failed_password_from_outside
+    revision: 1
+    name: Failed SSH password from an external address
+    description: A password authentication over SSH failed from outside the estate.
+    class: authentication
+    severity: medium
+    status: active
+    technique:
+      tactic: credential_access
+      id: T1110.001
+      name: "Brute Force: Password Guessing"
+    false_positives: An administrator mistyping a password from a home connection.
+    response: Check for a pattern from the same address.
+    match:
+      all:
+        - field: authentication.outcome
+          equals: failure
+        - field: authentication.network.source.port
+          at_least: 1024
+        - not:
+            field: authentication.network.source.ip
+            starts_with: "10."
+```
+
+`detection.Compile` is the one door from that to something runnable: it
+validates the rule, resolves every field to the contract's own descriptors,
+compiles every literal into the type its field holds, and turns a long list into
+a set — once, not per event. A number a field can never carry is refused, and so
+is a rule that provably matches nothing or provably matches everything.
+
+A refusal names the file, the line, the column, the rule and the part of it that
+is wrong:
+
+```text
+rules/core/ssh.yml:11:14: rule "ssh.failed_password_from_outside": match.authentication.user.nam is not a field the contract declares
+```
+
+A ruleset is read whole or not at all, and every file that is wrong is reported
+rather than only the first. Nothing evaluates a compiled rule yet.
+[ADR 7](docs/decisions/0007-a-rule-file-is-not-the-rule.md) records why the file
+format is an adapter rather than the model.
 
 ## Getting started from a clean clone
 
@@ -142,12 +193,13 @@ cmd/                    one directory per process
 
 internal/
   event/                what a well formed event is
-  detection/            what a detection rule is, and what makes one runnable
+  detection/            what a detection rule is, and what compiles one
   agentidentity/        what a verified agent identity is
   protocol/             version negotiation between agent and platform
   ingest/               admission control and the ingest transport
   analysis/             what analysing an event off the backbone means
   eventstore/           what a stored event is, and what is refused
+  rulefile/             the rule file format, read into the domain
   broker/               the Redpanda adapter
   clickhouse/           the store adapter and its embedded schema
   devpki/               development certificate material

@@ -150,7 +150,7 @@ func (r Rule) validatePredicate(part string, predicate Predicate) error {
 		return r.violation(where, "is not a field the contract declares")
 	}
 	if !AddressableBy(predicate.Field, r.Class) {
-		return r.violation(where, fmt.Sprintf("belongs to another class, so a %s rule would never match it", bodyOf(r.Class)))
+		return r.violation(where, fmt.Sprintf("belongs to another class, so a %s rule would never match it", className(r.Class)))
 	}
 	if !predicate.Operator.known() {
 		return r.violation(where, fmt.Sprintf("asks %q, which is not an operator", predicate.Operator))

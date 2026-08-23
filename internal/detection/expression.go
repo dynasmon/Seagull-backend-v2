@@ -1,6 +1,9 @@
 package detection
 
-import "strconv"
+import (
+	"slices"
+	"strconv"
+)
 
 // The boolean expression a rule matches with. The interface is closed on
 // purpose: an executor has to switch over every shape there is, and a rule
@@ -94,6 +97,17 @@ func (o Operator) asks(kind Kind) bool {
 func (o Operator) known() bool {
 	_, declared := accepts[o]
 	return declared
+}
+
+// Every operator the language has, sorted, so a refusal can say what was
+// available instead.
+func Operators() []Operator {
+	known := make([]Operator, 0, len(accepts))
+	for operator := range accepts {
+		known = append(known, operator)
+	}
+	slices.Sort(known)
+	return known
 }
 
 // A literal in a rule. Comparable, so two rules that say the same thing hold

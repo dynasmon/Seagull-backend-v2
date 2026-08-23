@@ -39,17 +39,21 @@ const maxDepth = 8
 type held struct {
 	kind    Kind
 	choices []string
+	path    []protoreflect.FieldDescriptor
 }
 
 var vocabulary = sync.OnceValue(buildVocabulary)
 
 func buildVocabulary() map[Field]held {
 	fields := make(map[Field]held)
-	describe((&eventv1.Event{}).ProtoReflect().Descriptor(), "", fields, 0)
+	describe((&eventv1.Event{}).ProtoReflect().Descriptor(), "", nil, fields, 0)
 	return fields
 }
 
-func describe(descriptor protoreflect.MessageDescriptor, prefix string, into map[Field]held, depth int) {
+// The walk records how to reach a field as well as what it holds, so that
+// resolving a name to the contract happens once for the life of the process
+// rather than once per event.
+func describe(descriptor protoreflect.MessageDescriptor, prefix string, trail []protoreflect.FieldDescriptor, into map[Field]held, depth int) {
 	if depth > maxDepth {
 		return
 	}
@@ -61,22 +65,23 @@ func describe(descriptor protoreflect.MessageDescriptor, prefix string, into map
 			continue
 		}
 		path := prefix + string(field.Name())
+		reach := append(slices.Clone(trail), field)
 
 		switch field.Kind() {
 		case protoreflect.StringKind:
-			into[Field(path)] = held{kind: Text}
+			into[Field(path)] = held{kind: Text, path: reach}
 		case protoreflect.BoolKind:
-			into[Field(path)] = held{kind: Truth}
+			into[Field(path)] = held{kind: Truth, path: reach}
 		case protoreflect.EnumKind:
-			into[Field(path)] = held{kind: Choice, choices: choicesOf(field.Enum())}
+			into[Field(path)] = held{kind: Choice, choices: choicesOf(field.Enum()), path: reach}
 		case protoreflect.MessageKind, protoreflect.GroupKind:
 			if strings.HasPrefix(string(field.Message().FullName()), "google.protobuf.") {
 				continue
 			}
-			describe(field.Message(), path+".", into, depth+1)
+			describe(field.Message(), path+".", reach, into, depth+1)
 		default:
 			if numeric(field.Kind()) {
-				into[Field(path)] = held{kind: Number}
+				into[Field(path)] = held{kind: Number, path: reach}
 			}
 		}
 	}
@@ -100,15 +105,17 @@ func numeric(kind protoreflect.Kind) bool {
 // the enumeration's own name, and the suite holds it to that rather than
 // trusting it.
 func choicesOf(enumeration protoreflect.EnumDescriptor) []string {
-	prefix := upperSnake(string(enumeration.Name())) + "_"
-
 	values := enumeration.Values()
 	named := make([]string, 0, values.Len())
 	for index := range values.Len() {
-		name := string(values.Get(index).Name())
-		named = append(named, strings.ToLower(strings.TrimPrefix(name, prefix)))
+		named = append(named, shortName(enumeration, values.Get(index)))
 	}
 	return named
+}
+
+func shortName(enumeration protoreflect.EnumDescriptor, value protoreflect.EnumValueDescriptor) string {
+	prefix := upperSnake(string(enumeration.Name())) + "_"
+	return strings.ToLower(strings.TrimPrefix(string(value.Name()), prefix))
 }
 
 func upperSnake(name string) string {
@@ -125,6 +132,13 @@ func upperSnake(name string) string {
 func KindOf(field Field) (Kind, bool) {
 	entry, declared := vocabulary()[field]
 	return entry.kind, declared
+}
+
+// How to reach the field from the event: every message on the way down and the
+// leaf itself.
+func pathOf(field Field) ([]protoreflect.FieldDescriptor, bool) {
+	entry, declared := vocabulary()[field]
+	return entry.path, declared
 }
 
 // The values a choice field accepts, in the order the contract declares them.
@@ -160,16 +174,6 @@ var bodies = sync.OnceValue(func() map[string]struct{} {
 	return named
 })
 
-// The body a class carries is named after the class: EVENT_CLASS_AUTHENTICATION
-// carries `authentication`.
-func bodyOf(class eventv1.EventClass) string {
-	name, declared := eventv1.EventClass_name[int32(class)]
-	if !declared {
-		return ""
-	}
-	return strings.ToLower(strings.TrimPrefix(name, "EVENT_CLASS_"))
-}
-
 // Whether a rule for this class can reach the field at all. Everything outside
 // a body is common to every event; a body belongs to its own class, and a rule
 // that reaches into another one would never match — which is worse than being
@@ -179,9 +183,11 @@ func AddressableBy(field Field, class eventv1.EventClass) bool {
 		return false
 	}
 
+	// The body a class carries is named after the class, so the name a rule
+	// writes the class under is also the root of the fields it may reach.
 	root, _, _ := strings.Cut(string(field), ".")
 	if _, isBody := bodies()[root]; !isBody {
 		return true
 	}
-	return root == bodyOf(class)
+	return root == className(class)
 }

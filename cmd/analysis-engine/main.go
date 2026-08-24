@@ -11,6 +11,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/run"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
+	"github.com/dynasmon/Seagull-backend-v2/internal/ruleset"
 )
 
 func main() {
@@ -60,8 +61,20 @@ func engine(ctx context.Context) error {
 		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
 	}
 
+	// A process that cannot read its rules does not start: running against a
+	// ruleset nobody chose is worse than refusing to run.
+	registry, err := ruleset.New(ruleset.Options{
+		Source:  written(settings.rules),
+		Metrics: ruleset.NewMetrics(platform.Metrics()),
+		Logger:  platform.Logger(),
+	})
+	if err != nil {
+		return err
+	}
+
 	component, err := analysis.NewEngine(analysis.EngineOptions{
 		Source:  source{consumer: consumer},
+		Rules:   rules{registry: registry},
 		Metrics: analysis.NewMetrics(platform.Metrics()),
 		Logger:  platform.Logger(),
 	})
@@ -75,6 +88,7 @@ func engine(ctx context.Context) error {
 	platform.Logger().Info("analysis_engine_configured",
 		slog.String("topic", settings.topology.Events.Name),
 		slog.String("group", settings.group),
+		slog.String("rules", settings.rules),
 		slog.Int("batch_events", settings.batchEvents),
 	)
 

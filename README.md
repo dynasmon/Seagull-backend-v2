@@ -44,7 +44,8 @@ partition.
 
 `analysis-engine` consumes the same topic under a group of its own, so it and
 the writer advance independently and neither can hold the other back. It turns a
-record into a `seagull.event.v1.Event`, routes it by the class it carries,
+record into a `seagull.event.v1.Event`, routes it by the class it carries, puts
+it into canonical form, decides it against the rules registered on that route,
 refuses what it cannot read without returning an error — one unreadable record
 must never hold a partition — and reports how long after admission each event
 reached it.
@@ -172,10 +173,60 @@ seagull_ruleset_rules{state="running"} 21
 seagull_ruleset_reloads_total{outcome="applied"} 3
 ```
 
-Nothing evaluates a compiled rule yet.
 [ADR 8](docs/decisions/0008-a-ruleset-is-named-by-what-is-in-it.md) records why
 the identity is a digest rather than a version, and what that buys replay and
 backtesting.
+
+## How an event is decided
+
+Detection is a stage inside `analysis-engine`, not a process of its own: the
+engine already consumes the backbone, and a second process would split the same
+stream twice. A routed event is normalized, then decided against the rules the
+current ruleset registers on that route.
+
+Deciding is a pure function of a rule and an event. It reads nothing but the
+message in front of it, keeps nothing between calls, writes nothing into the
+event, does no I/O and cannot fail, so detection adds no failure mode to the
+engine: what is quarantined, what is retried and when the group position
+advances are all unchanged. A rule that does not match allocates nothing, which
+is the answer most events give most rules.
+
+A field the event does not carry answers no question. The contract does not
+distinguish an unset field from one holding its zero value, so neither does a
+rule: every comparison against an absent field is false, and `present` is the one
+way to ask about the field itself. Negation then says the useful thing on its
+own — a rule asking that a user is not `backup` also holds when the event
+carries no user at all.
+
+A match carries evidence: the fields the rule read and what the event held in
+them, written the way a rule writes a literal. A disjunction is evidenced by the
+branch that held; one that held nowhere keeps every branch, because under a
+negation all of them failing is why the rule matched.
+
+```text
+authentication.outcome equals, and the event holds failure
+authentication.service.protocol equals, and the event holds "ssh"
+authentication.network.source.ip not starts_with, and the event holds "203.0.113.10"
+```
+
+Nothing is emitted yet, and that is deliberate: a detection crosses a runtime
+boundary and needs a message in `Seagull-contracts` before it can leave the
+process. Until then a match is counted and reported, which is enough to say a
+rule fires and not enough to act on. A report names the rule, its revision, the
+severity, the ruleset, the event and the fields the rule read — never what the
+event held, because a field value can carry attacker input and evidence belongs
+in the detection record rather than in a log line.
+
+```text
+seagull_detection_evaluations_total{route="authentication"} 41288
+seagull_detection_matches_total{route="authentication",severity="medium"} 17
+seagull_detection_seconds_bucket{route="authentication",le="0.00025"} 20644
+```
+
+Which rule fired is not a label: a ruleset is unbounded from the engine's point
+of view, and what fired belongs in the detection record where it can be queried.
+[ADR 9](docs/decisions/0009-an-absent-field-answers-no-question.md) records what
+an absent field means and what a match owes an analyst.
 
 ## Getting started from a clean clone
 
@@ -249,7 +300,7 @@ tests/
   integration/          the data plane against a live Redpanda and ClickHouse
   load/                 the gateway under load, against a live Redpanda
 
-deploy/                 Dockerfile and Compose
+deploy/                 Dockerfile, Compose, and the ruleset the local stack runs
 tools/                  development programs, not shipped
 ```
 
@@ -336,6 +387,7 @@ the gateway and the writer verify it before they serve.
 | Variable | Default | Meaning |
 |---|---|---|
 | `SEAGULL_ANALYSIS_CONSUMER_GROUP` | `analysis-engine` | the consumer group that owns its offsets |
+| `SEAGULL_DETECTION_RULES` | `/etc/seagull/rules` | the rule tree the process is pinned to; it does not start without one |
 | `SEAGULL_ANALYSIS_BATCH_EVENTS` | `5000` | records per poll |
 | `SEAGULL_ANALYSIS_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
 | `SEAGULL_ANALYSIS_START_TIMEOUT` | `30s` | budget for verifying the topology before serving |

@@ -59,10 +59,12 @@ func Compile(rule Rule) (*Program, error) {
 }
 
 // The compiled shapes, closed the way the written ones are: whatever evaluates
-// a program has to answer for every shape there is.
+// a program has to answer for every shape there is, and the compiler is what
+// holds it to that.
 type node interface {
 	fmt.Stringer
 	node()
+	holds(record protoreflect.Message, into *[]Evidence, negated bool) bool
 }
 
 type conjunction struct{ terms []node }

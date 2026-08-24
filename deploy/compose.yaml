@@ -110,6 +110,8 @@ services:
     restart: "no"
     <<: *hardening
 
+  # The rules are mounted rather than built in: the image is FROM scratch and
+  # carries no filesystem, and a ruleset changes on its own cadence.
   analysis-engine:
     build:
       context: ..
@@ -123,8 +125,11 @@ services:
     networks: [backbone]
     environment:
       <<: *backbone
+      SEAGULL_DETECTION_RULES: /etc/seagull/rules
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    volumes:
+      - ./rules:/etc/seagull/rules:ro
     <<: *hardening
 
   event-writer:

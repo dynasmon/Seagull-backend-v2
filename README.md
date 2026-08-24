@@ -146,9 +146,36 @@ rules/core/ssh.yml:11:14: rule "ssh.failed_password_from_outside": match.authent
 ```
 
 A ruleset is read whole or not at all, and every file that is wrong is reported
-rather than only the first. Nothing evaluates a compiled rule yet.
+rather than only the first.
 [ADR 7](docs/decisions/0007-a-rule-file-is-not-the-rule.md) records why the file
 format is an adapter rather than the model.
+
+## What a process is pinned to
+
+`internal/ruleset` holds the compiled rules a process runs, as an immutable
+snapshot named by a digest of everything its rules carry — so two processes
+given the same rules report the same ruleset, and a detection will be able to
+name exactly what decided it. Order does not change the name: the same rules
+split across different files are the same ruleset.
+
+A worker reads the current snapshot once and holds it for the whole of deciding
+an event, so a reload arriving in the middle changes what the next event is read
+against and never what this one is being read against. Reading takes no lock,
+replacement is one atomic swap, and a reload that fails leaves the process
+running exactly what it was running before. Where a ruleset comes from is a
+`Source` an executable chooses; the registry itself reads no file.
+
+```text
+seagull_ruleset_info{ruleset="6a1c…"} 1
+seagull_ruleset_rules{state="held"} 24
+seagull_ruleset_rules{state="running"} 21
+seagull_ruleset_reloads_total{outcome="applied"} 3
+```
+
+Nothing evaluates a compiled rule yet.
+[ADR 8](docs/decisions/0008-a-ruleset-is-named-by-what-is-in-it.md) records why
+the identity is a digest rather than a version, and what that buys replay and
+backtesting.
 
 ## Getting started from a clean clone
 
@@ -200,6 +227,7 @@ internal/
   analysis/             what analysing an event off the backbone means
   eventstore/           what a stored event is, and what is refused
   rulefile/             the rule file format, read into the domain
+  ruleset/              the compiled rules a process is pinned to
   broker/               the Redpanda adapter
   clickhouse/           the store adapter and its embedded schema
   devpki/               development certificate material

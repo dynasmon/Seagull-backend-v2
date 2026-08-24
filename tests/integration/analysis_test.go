@@ -3,10 +3,13 @@
 package integration_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
-	"io"
+	"iter"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,17 +20,19 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	"github.com/dynasmon/Seagull-backend-v2/internal/analysis"
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
+	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
+	"github.com/dynasmon/Seagull-backend-v2/internal/ruleset"
 	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 )
 
 // The runtime boundary of the second consumer: it joins a group of its own on
-// the topic the gateway publishes to, works through what is there, and advances
-// its committed position past both a record it cannot read and a class it
-// cannot route.
+// the topic the gateway publishes to, decides every event it can route against
+// the ruleset it is pinned to, and advances its committed position past both a
+// record it cannot read and a class it cannot route.
 func TestTheEngineConsumesTheBackboneInAGroupOfItsOwn(t *testing.T) {
 	addresses := brokers(t)
 	topic := temporaryTopic(t, addresses)
@@ -64,10 +69,12 @@ func TestTheEngineConsumesTheBackboneInAGroupOfItsOwn(t *testing.T) {
 		t.Fatalf("the engine refused a topic it should accept: %v", err)
 	}
 
+	var reported bytes.Buffer
 	engine, err := analysis.NewEngine(analysis.EngineOptions{
 		Source:  analysedBy(consumer),
+		Rules:   pinnedTo(t, failedAuthentication(t)),
 		Metrics: analysis.NewMetrics(metrics.New("integration")),
-		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:  slog.New(slog.NewJSONHandler(&reported, &slog.HandlerOptions{Level: slog.LevelInfo})),
 	})
 	if err != nil {
 		t.Fatalf("build the engine: %v", err)
@@ -85,6 +92,83 @@ func TestTheEngineConsumesTheBackboneInAGroupOfItsOwn(t *testing.T) {
 	if err := <-stopped; err != nil && !isCancellation(err) {
 		t.Fatalf("the engine stopped with %v", err)
 	}
+
+	// Read only after the engine has stopped, so the buffer the test reads is
+	// the one the engine finished writing.
+	if detections := detectionsIn(t, reported.String()); len(detections) != 4 {
+		t.Fatalf("four admitted failures produced %d detections: %v", len(detections), detections)
+	}
+}
+
+// A rule the admitted events answer, so what the engine decided off a real
+// backbone is visible rather than inferred.
+func failedAuthentication(t *testing.T) *detection.Program {
+	t.Helper()
+
+	program, err := detection.Compile(detection.Rule{
+		ID:          "authentication.failed",
+		Revision:    1,
+		Name:        "An authentication failed",
+		Description: "A rule narrow enough to be decided from one event.",
+		Class:       eventv1.EventClass_EVENT_CLASS_AUTHENTICATION,
+		Match: detection.Predicate{
+			Field:    "authentication.outcome",
+			Operator: detection.Equals,
+			Values:   []detection.Value{detection.TextValue("failure")},
+		},
+		Severity: detection.High,
+		Status:   detection.Active,
+	})
+	if err != nil {
+		t.Fatalf("compile the rule: %v", err)
+	}
+	return program
+}
+
+// The bridge an executable owns, rebuilt here because nothing may import a cmd
+// package: the registry names a ruleset in its own type and the engine asks for
+// a name.
+func pinnedTo(t *testing.T, programs ...*detection.Program) analysis.Rules {
+	t.Helper()
+
+	snapshot, err := ruleset.Compose(programs)
+	if err != nil {
+		t.Fatalf("compose the ruleset: %v", err)
+	}
+	return heldRuleset{snapshot: snapshot}
+}
+
+type heldRuleset struct{ snapshot *ruleset.Snapshot }
+
+func (h heldRuleset) Current() analysis.Ruleset { return h }
+
+func (h heldRuleset) ID() string { return string(h.snapshot.ID()) }
+
+func (h heldRuleset) For(class eventv1.EventClass) iter.Seq[*detection.Program] {
+	return h.snapshot.For(class)
+}
+
+func detectionsIn(t *testing.T, reported string) []string {
+	t.Helper()
+
+	var events []string
+	for _, line := range strings.Split(strings.TrimSpace(reported), "\n") {
+		if line == "" {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("decode a report: %v", err)
+		}
+		if entry["msg"] != "detection" {
+			continue
+		}
+		if rule := entry["rule"]; rule != "authentication.failed" {
+			t.Errorf("a detection names rule %v", rule)
+		}
+		events = append(events, fmt.Sprint(entry["event"]))
+	}
+	return events
 }
 
 func admitEvents(t *testing.T, addresses []string, topic string, count int) {

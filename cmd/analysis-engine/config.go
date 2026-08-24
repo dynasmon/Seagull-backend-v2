@@ -16,6 +16,7 @@ type configuration struct {
 	brokers  []string
 	topology broker.Topology
 	group    string
+	rules    string
 
 	batchEvents  int
 	fetchMaxWait time.Duration
@@ -31,6 +32,7 @@ func load(parser *config.Parser) (configuration, error) {
 		brokers:  parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
 		topology: broker.LoadTopology(parser),
 		group:    parser.String("SEAGULL_ANALYSIS_CONSUMER_GROUP", serviceName),
+		rules:    parser.FilePath("SEAGULL_DETECTION_RULES", "/etc/seagull/rules"),
 
 		batchEvents:  parser.Int("SEAGULL_ANALYSIS_BATCH_EVENTS", 5_000, 1, 100_000),
 		fetchMaxWait: parser.Duration("SEAGULL_ANALYSIS_FETCH_MAX_WAIT", time.Second, 10*time.Millisecond, time.Minute),

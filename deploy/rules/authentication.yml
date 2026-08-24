@@ -1,0 +1,40 @@
+schema_version: 1
+
+# The ruleset the local stack runs, so that `make up` detects something end to
+# end. It is one rule and not a catalogue: each rule is a security decision, and
+# a rule nobody chose is noise somebody has to turn off.
+rules:
+  - id: ssh.failed_password_from_outside
+    revision: 1
+    name: Failed SSH password from outside the estate
+    description: >-
+      A password authentication over SSH failed for a session that reached the
+      host from an address outside the private ranges.
+    class: authentication
+    severity: medium
+    status: active
+    technique:
+      tactic: credential_access
+      id: T1110.001
+      name: "Brute Force: Password Guessing"
+    false_positives: >-
+      An administrator mistyping a password from a home connection. The rule
+      also treats 172.16.0.0/12 as external, because the language has no way to
+      say a range yet.
+    response: >-
+      Confirm the account is expected to be reachable from outside, then check
+      for a pattern from the same address.
+    match:
+      all:
+        - field: authentication.outcome
+          equals: failure
+        - field: authentication.service.protocol
+          equals: ssh
+        - not:
+            any:
+              - field: authentication.network.source.ip
+                starts_with: "10."
+              - field: authentication.network.source.ip
+                starts_with: "192.168."
+              - field: authentication.network.source.ip
+                starts_with: "127."

@@ -41,6 +41,7 @@ var layers = map[string]layer{
 	"internal/platform":      platform,
 	"internal/protocol":      domain,
 	"internal/rulefile":      adapter,
+	"internal/ruleset":       capability,
 	"tests":                  suite,
 	"tools":                  tool,
 }
@@ -121,6 +122,16 @@ var within = map[string]restriction{
 	"internal/rulefile": {
 		prefixes: []string{"net/http", "os", "database/sql"},
 		because:  "a rule file is a document, and where rules are read from is chosen by an executable",
+	},
+	"internal/ruleset": {
+		prefixes: []string{
+			"net/http",
+			"os",
+			"io/fs",
+			modulePath + "/internal/platform/httpx",
+			modulePath + "/internal/platform/tlsx",
+		},
+		because: "a registry holds compiled rules and reads none: where a ruleset comes from is a source's business",
 	},
 }
 

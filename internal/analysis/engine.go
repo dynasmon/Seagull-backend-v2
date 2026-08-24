@@ -34,16 +34,18 @@ type Source interface {
 
 type EngineOptions struct {
 	Source  Source
+	Rules   Rules
 	Metrics *Metrics
 	Logger  *slog.Logger
 }
 
 // The second consumer of the raw telemetry the gateway admitted, and the first
 // one that reads it to decide something rather than to keep it. It routes an
-// event by its class and puts it into the canonical form that class defines;
-// detection arrives behind that, on the same route.
+// event by its class, puts it into the canonical form that class defines, and
+// decides it against the rules registered on that route.
 type Engine struct {
 	source  Source
+	rules   Rules
 	metrics *Metrics
 	logger  *slog.Logger
 	now     func() time.Time
@@ -53,6 +55,8 @@ func NewEngine(options EngineOptions) (*Engine, error) {
 	switch {
 	case options.Source == nil:
 		return nil, errors.New("the analysis engine needs a source")
+	case options.Rules == nil:
+		return nil, errors.New("the analysis engine needs rules")
 	case options.Metrics == nil:
 		return nil, errors.New("the analysis engine needs metrics")
 	case options.Logger == nil:
@@ -61,6 +65,7 @@ func NewEngine(options EngineOptions) (*Engine, error) {
 
 	return &Engine{
 		source:  options.Source,
+		rules:   options.Rules,
 		metrics: options.Metrics,
 		logger:  options.Logger,
 		now:     time.Now,
@@ -92,6 +97,7 @@ func (e *Engine) handle(ctx context.Context, records []Record) error {
 		}
 		e.metrics.observeDelay(reached, decoded)
 		e.metrics.routed(stage.Route)
+		e.detect(decoded, stage.Route, record)
 		analysed++
 	}
 

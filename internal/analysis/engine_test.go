@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"iter"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/analysis"
+	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
@@ -71,15 +73,79 @@ func withoutIdentity(t *testing.T) []byte {
 	return payload
 }
 
+// The ruleset the test pins the engine to, in place of the registry an
+// executable wires in. One type answers both halves of the seam, because a test
+// has nothing to reload.
+type pinned struct {
+	id       string
+	programs []*detection.Program
+	held     bool
+}
+
+func (p pinned) Current() analysis.Ruleset {
+	if !p.held {
+		return nil
+	}
+	return p
+}
+
+func (p pinned) ID() string { return p.id }
+
+func (p pinned) For(class eventv1.EventClass) iter.Seq[*detection.Program] {
+	return func(yield func(*detection.Program) bool) {
+		for _, program := range p.programs {
+			if program.Rule().Class != class {
+				continue
+			}
+			if !yield(program) {
+				return
+			}
+		}
+	}
+}
+
+func nothingToRun() pinned { return pinned{id: "e3b0c44298fc1c14", held: true} }
+
+// A rule that decides the event the fixture produces, and one that decides the
+// same event the other way, so a batch exercises both answers.
+func compiled(t *testing.T, id string, outcome string) *detection.Program {
+	t.Helper()
+
+	program, err := detection.Compile(detection.Rule{
+		ID:          detection.ID(id),
+		Revision:    3,
+		Name:        "Authentication ended a particular way",
+		Description: "A rule narrow enough to be decided from one event.",
+		Class:       eventv1.EventClass_EVENT_CLASS_AUTHENTICATION,
+		Match: detection.Predicate{
+			Field:    "authentication.outcome",
+			Operator: detection.Equals,
+			Values:   []detection.Value{detection.TextValue(outcome)},
+		},
+		Severity: detection.High,
+		Status:   detection.Active,
+	})
+	if err != nil {
+		t.Fatalf("compile rule %q: %v", id, err)
+	}
+	return program
+}
+
 func newEngine(t *testing.T, source analysis.Source) (*analysis.Engine, *bytes.Buffer, *metrics.Registry) {
+	t.Helper()
+	return engineOn(t, source, nothingToRun(), slog.LevelWarn)
+}
+
+func engineOn(t *testing.T, source analysis.Source, rules analysis.Rules, level slog.Level) (*analysis.Engine, *bytes.Buffer, *metrics.Registry) {
 	t.Helper()
 
 	var written bytes.Buffer
 	registry := metrics.New("test")
 	engine, err := analysis.NewEngine(analysis.EngineOptions{
 		Source:  source,
+		Rules:   rules,
 		Metrics: analysis.NewMetrics(registry),
-		Logger:  slog.New(slog.NewJSONHandler(&written, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		Logger:  slog.New(slog.NewJSONHandler(&written, &slog.HandlerOptions{Level: level})),
 	})
 	if err != nil {
 		t.Fatalf("build engine: %v", err)
@@ -267,9 +333,10 @@ func TestTheEngineRefusesToStartWithoutWhatItNeeds(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
 
 	missing := map[string]analysis.EngineOptions{
-		"no source":  {Metrics: analysis.NewMetrics(registry), Logger: logger},
-		"no metrics": {Source: &oneBatch{}, Logger: logger},
-		"no logger":  {Source: &oneBatch{}, Metrics: analysis.NewMetrics(metrics.New("other"))},
+		"no source":  {Rules: nothingToRun(), Metrics: analysis.NewMetrics(registry), Logger: logger},
+		"no rules":   {Source: &oneBatch{}, Metrics: analysis.NewMetrics(metrics.New("without-rules")), Logger: logger},
+		"no metrics": {Source: &oneBatch{}, Rules: nothingToRun(), Logger: logger},
+		"no logger":  {Source: &oneBatch{}, Rules: nothingToRun(), Metrics: analysis.NewMetrics(metrics.New("other"))},
 	}
 	for name, options := range missing {
 		t.Run(name, func(t *testing.T) {
@@ -399,5 +466,169 @@ func TestTheEngineNormalizesWhatItRoutes(t *testing.T) {
 		if !strings.Contains(body, expected) {
 			t.Errorf("%s missing from the exposition:\n%s", expected, body)
 		}
+	}
+}
+
+// Detection is a stage on the route rather than a process of its own, so what
+// proves it is the engine deciding a routed event against the ruleset it is
+// pinned to and reporting what fired.
+func TestARoutedEventIsDecidedAgainstTheRulesetTheProcessIsPinnedTo(t *testing.T) {
+	rules := pinned{
+		id:   "6a1cb0f4d2e8917c",
+		held: true,
+		programs: []*detection.Program{
+			compiled(t, "authentication.failed", "failure"),
+			compiled(t, "authentication.succeeded", "success"),
+		},
+	}
+	source := &oneBatch{records: []analysis.Record{
+		{Partition: 4, Offset: 11, Value: admitted(t, "event-one")},
+		{Partition: 4, Offset: 12, Value: admitted(t, "event-two")},
+	}}
+	engine, written, registry := engineOn(t, source, rules, slog.LevelInfo)
+
+	if err := engine.Run(context.Background()); err != nil {
+		t.Fatalf("run the engine: %v", err)
+	}
+
+	reported := entries(t, written)
+	if len(reported) != 2 {
+		t.Fatalf("two failed authentications produced %d detections: %v", len(reported), reported)
+	}
+	first := reported[0]
+	for field, expected := range map[string]any{
+		"msg":       "detection",
+		"rule":      "authentication.failed",
+		"revision":  3.0,
+		"severity":  "high",
+		"ruleset":   rules.id,
+		"event":     "event-one",
+		"agent":     "dev-agent-01",
+		"tenant":    "default",
+		"partition": 4.0,
+		"offset":    11.0,
+	} {
+		if held := first[field]; held != expected {
+			t.Errorf("the detection reports %s as %v and should report %v", field, held, expected)
+		}
+	}
+	if fields, _ := first["fields"].([]any); len(fields) != 1 || fields[0] != "authentication.outcome" {
+		t.Errorf("the detection names %v as what the rule read", first["fields"])
+	}
+
+	body := exposition(t, registry)
+	for _, expected := range []string{
+		`seagull_detection_evaluations_total{route="authentication"} 4`,
+		`seagull_detection_matches_total{route="authentication",severity="high"} 2`,
+		`seagull_detection_seconds_count{route="authentication"} 2`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("%s missing from the exposition:\n%s", expected, body)
+		}
+	}
+}
+
+// A detection says what decided it and never what the event held. Evidence is
+// owed to an investigation and belongs in the detection record; a log line is
+// not the place to copy attacker input into.
+func TestADetectionDoesNotQuoteWhatTheEventHeld(t *testing.T) {
+	rules := pinned{
+		id:       "6a1cb0f4d2e8917c",
+		held:     true,
+		programs: []*detection.Program{compiled(t, "authentication.failed", "failure")},
+	}
+	source := &oneBatch{records: []analysis.Record{
+		{Partition: 0, Offset: 1, Value: admitted(t, "event-one")},
+	}}
+	engine, written, _ := engineOn(t, source, rules, slog.LevelInfo)
+
+	if err := engine.Run(context.Background()); err != nil {
+		t.Fatalf("run the engine: %v", err)
+	}
+
+	for _, held := range []string{"root", "203.0.113.10", "Failed password"} {
+		if strings.Contains(written.String(), held) {
+			t.Errorf("the detection quoted %q out of the event", held)
+		}
+	}
+}
+
+// A process whose registry has not pinned a ruleset still routes and still
+// normalizes: detection is a stage, and a stage with nothing to run is not a
+// reason to stop reading the backbone.
+func TestAnEngineWithNoRulesetRoutesWithoutDeciding(t *testing.T) {
+	source := &oneBatch{records: []analysis.Record{
+		{Partition: 0, Offset: 1, Value: admitted(t, "event-one")},
+	}}
+	engine, written, registry := engineOn(t, source, pinned{}, slog.LevelInfo)
+
+	if err := engine.Run(context.Background()); err != nil {
+		t.Fatalf("run the engine: %v", err)
+	}
+	if reported := entries(t, written); len(reported) != 0 {
+		t.Errorf("an engine with no ruleset reported %v", reported)
+	}
+
+	body := exposition(t, registry)
+	if !strings.Contains(body, `seagull_analysis_routed_total{route="authentication"} 1`) {
+		t.Errorf("the event was not routed:\n%s", body)
+	}
+	if strings.Contains(body, "seagull_detection_seconds_count") {
+		t.Error("an engine with no ruleset timed a decision it never made")
+	}
+}
+
+// A rule may ask three questions about one field, and the report says which
+// fields it read rather than how many times it read them.
+func TestADetectionNamesEachFieldTheRuleReadOnce(t *testing.T) {
+	program, err := detection.Compile(detection.Rule{
+		ID:          "authentication.failed_from_outside",
+		Revision:    1,
+		Name:        "An authentication failed from outside the estate",
+		Description: "A rule that asks about one field more than once.",
+		Class:       eventv1.EventClass_EVENT_CLASS_AUTHENTICATION,
+		Match: detection.All{Terms: []detection.Expression{
+			detection.Predicate{
+				Field:    "authentication.outcome",
+				Operator: detection.Equals,
+				Values:   []detection.Value{detection.TextValue("failure")},
+			},
+			detection.Not{Term: detection.Any{Terms: []detection.Expression{
+				detection.Predicate{
+					Field:    "authentication.network.source.ip",
+					Operator: detection.StartsWith,
+					Values:   []detection.Value{detection.TextValue("10.")},
+				},
+				detection.Predicate{
+					Field:    "authentication.network.source.ip",
+					Operator: detection.StartsWith,
+					Values:   []detection.Value{detection.TextValue("192.168.")},
+				},
+			}}},
+		}},
+		Severity: detection.Medium,
+		Status:   detection.Active,
+	})
+	if err != nil {
+		t.Fatalf("compile the rule: %v", err)
+	}
+
+	source := &oneBatch{records: []analysis.Record{
+		{Partition: 0, Offset: 1, Value: admitted(t, "event-one")},
+	}}
+	rules := pinned{id: "6a1cb0f4d2e8917c", held: true, programs: []*detection.Program{program}}
+	engine, written, _ := engineOn(t, source, rules, slog.LevelInfo)
+
+	if err := engine.Run(context.Background()); err != nil {
+		t.Fatalf("run the engine: %v", err)
+	}
+
+	reported := entries(t, written)
+	if len(reported) != 1 {
+		t.Fatalf("one event produced %d detections", len(reported))
+	}
+	fields, _ := reported[0]["fields"].([]any)
+	if len(fields) != 2 || fields[0] != "authentication.outcome" || fields[1] != "authentication.network.source.ip" {
+		t.Errorf("the detection names %v as what the rule read", fields)
 	}
 }

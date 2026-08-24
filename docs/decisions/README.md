@@ -12,3 +12,4 @@ rediscovered by reading the code.
 - [6. A detection rule addresses the contract](0006-a-rule-addresses-the-contract.md)
 - [7. A rule file is not the rule](0007-a-rule-file-is-not-the-rule.md)
 - [8. A ruleset is named by what is in it](0008-a-ruleset-is-named-by-what-is-in-it.md)
+- [9. An absent field answers no question](0009-an-absent-field-answers-no-question.md)

@@ -2,6 +2,7 @@ package detection
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -16,6 +17,9 @@ const (
 	MaxNameLength        = 200
 	MaxDescriptionLength = 2000
 	MaxGuidanceLength    = 2000
+	MaxTags              = 32
+	MaxReferences        = 16
+	MaxReferenceLength   = 500
 	MaxValues            = 4096
 	MaxDepth             = 16
 )
@@ -76,6 +80,15 @@ func (r Rule) Validate() error {
 	if err := r.validateTechnique(); err != nil {
 		return err
 	}
+	if err := r.validateSource(); err != nil {
+		return err
+	}
+	if err := r.validateTags(); err != nil {
+		return err
+	}
+	if err := r.validateReferences(); err != nil {
+		return err
+	}
 	if err := r.validateClass(); err != nil {
 		return err
 	}
@@ -106,6 +119,79 @@ func (r Rule) validateTechnique() error {
 		return r.violation("technique.id", fmt.Sprintf("is %q and should read like T1110 or T1110.001", r.Technique.ID))
 	}
 	return r.text("technique.name", r.Technique.Name, MaxNameLength, true)
+}
+
+// A rule either says where it came from or does not, and the identifier is held
+// only to being text: an upstream catalogue names its rules however it likes,
+// and a UUID is the common case.
+func (r Rule) validateSource() error {
+	if r.Source.empty() {
+		return nil
+	}
+	if r.Source.Catalogue == "" || r.Source.Identifier == "" {
+		return r.violation("source", "needs a catalogue and an identifier, or neither")
+	}
+	if !identifier.MatchString(r.Source.Catalogue) || len(r.Source.Catalogue) > MaxIDLength {
+		return r.violation("source.catalogue",
+			fmt.Sprintf("is %q and must be lowercase words joined by . or _, up to %d characters", r.Source.Catalogue, MaxIDLength))
+	}
+	return r.text("source.identifier", r.Source.Identifier, MaxNameLength, true)
+}
+
+// A tag is a name in the same vocabulary a rule id is written in. v1 filed rules
+// under free text and the same idea arrived as `privilege_escalation` and
+// `privesc`, which is two views over one catalogue and no way to notice.
+func (r Rule) validateTags() error {
+	if len(r.Tags) > MaxTags {
+		return r.violation("tags", fmt.Sprintf("lists %d tags, above the ceiling of %d", len(r.Tags), MaxTags))
+	}
+
+	carried := make(map[string]struct{}, len(r.Tags))
+	for index, tag := range r.Tags {
+		part := fmt.Sprintf("tags[%d]", index)
+		if !identifier.MatchString(tag) || len(tag) > MaxIDLength {
+			return r.violation(part,
+				fmt.Sprintf("is %q and must be lowercase words joined by . or _, up to %d characters", tag, MaxIDLength))
+		}
+		if _, twice := carried[tag]; twice {
+			return r.violation(part, fmt.Sprintf("is %q, which the rule already carries", tag))
+		}
+		carried[tag] = struct{}{}
+	}
+	return nil
+}
+
+// A reference is a link an analyst can open, and nothing else: prose already has
+// description, false_positives and response, and a reference nobody can follow
+// is a citation the platform cannot show.
+func (r Rule) validateReferences() error {
+	if len(r.References) > MaxReferences {
+		return r.violation("references", fmt.Sprintf("lists %d references, above the ceiling of %d", len(r.References), MaxReferences))
+	}
+
+	carried := make(map[string]struct{}, len(r.References))
+	for index, reference := range r.References {
+		part := fmt.Sprintf("references[%d]", index)
+		if len(reference) > MaxReferenceLength {
+			return r.violation(part, fmt.Sprintf("is longer than %d characters", MaxReferenceLength))
+		}
+		if !reachable(reference) {
+			return r.violation(part, fmt.Sprintf("is %q, and a reference is an http or https link", reference))
+		}
+		if _, twice := carried[reference]; twice {
+			return r.violation(part, fmt.Sprintf("is %q, which the rule already carries", reference))
+		}
+		carried[reference] = struct{}{}
+	}
+	return nil
+}
+
+func reachable(reference string) bool {
+	parsed, err := url.Parse(reference)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	return parsed.Scheme == "http" || parsed.Scheme == "https"
 }
 
 func (r Rule) validateExpression(part string, expression Expression, depth int) error {

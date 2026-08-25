@@ -237,6 +237,51 @@ of view, and what fired belongs in the detection record where it can be queried.
 [ADR 9](docs/decisions/0009-an-absent-field-answers-no-question.md) records what
 an absent field means and what a match owes an analyst.
 
+## How a rule is held to what it was written for
+
+A rule carries the cases it was written to satisfy, in the same file and in the
+same vocabulary it matches on. A case is an event and what the rule should say
+about it:
+
+```yaml
+    tests:
+      - name: a failed password from an address outside the estate
+        expect: match
+        severity: medium
+        evidence: [authentication.outcome, authentication.network.source.ip]
+        event:
+          authentication.outcome: failure
+          authentication.network.source.ip: 203.0.113.10
+
+      - name: the same failure from inside the estate
+        description: The false positive the rule is written to avoid.
+        expect: no_match
+        event:
+          authentication.outcome: failure
+          authentication.network.source.ip: 10.0.0.5
+```
+
+A field the case does not name is a field the event does not carry, which is how
+a case says that something is absent. `severity` and `evidence` are asked only
+when they are written, and a case documenting a false positive is one that
+expects no match, named after the false positive it documents.
+
+`rulefile.Check` runs every case under a tree and reads nothing outside it — no
+broker, no store, no container — so the same answer comes back in a test, in a
+pipeline and in a control plane. Checking a case calls the same `Decide` the
+engine calls, so a case cannot pass against an evaluator that does not ship.
+
+```text
+deploy/rules/authentication.yml: rule "ssh.failed_password_from_outside": case "a failure from inside the estate": the rule matched, on authentication.network.source.ip, authentication.outcome
+```
+
+A rule with no cases is reported rather than refused: whether to ship one is a
+decision, and it is made where the ruleset is chosen. `cmd/analysis-engine` makes
+it, and the answer is that every rule this repository ships carries its cases and
+`make test` runs them.
+[ADR 10](docs/decisions/0010-a-rule-carries-the-cases-it-was-written-for.md)
+records why a case is beside the rule rather than in it.
+
 ## Getting started from a clean clone
 
 ```bash
@@ -280,13 +325,13 @@ cmd/                    one directory per process
 
 internal/
   event/                what a well formed event is
-  detection/            what a detection rule is, and what compiles one
+  detection/            what a detection rule is, what compiles one, what checks one
   agentidentity/        what a verified agent identity is
   protocol/             version negotiation between agent and platform
   ingest/               admission control and the ingest transport
   analysis/             what analysing an event off the backbone means
   eventstore/           what a stored event is, and what is refused
-  rulefile/             the rule file format, read into the domain
+  rulefile/             the rule file format, with the cases written beside a rule
   ruleset/              the compiled rules a process is pinned to
   broker/               the Redpanda adapter
   clickhouse/           the store adapter and its embedded schema

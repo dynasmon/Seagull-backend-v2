@@ -90,6 +90,12 @@ of event it reads, matches with an expression over fields of
 severity, an ATT&CK technique, what a false positive looks like, and what to do
 about it.
 
+It also carries what somebody does with the rule rather than what the rule
+decides: the tags it is filed under, the links that explain it, and where it came
+from. `source` is empty for a rule this estate wrote and names the catalogue and
+the identifier for one translated out of an upstream one, so a detection can be
+traced past the rule to the thing the rule was made from.
+
 The vocabulary a rule matches on is derived from the contract rather than
 written down, so `authentication.user.name` is a field because the contract says
 so, `authentication.network.source.port` holds a number because the contract
@@ -122,6 +128,9 @@ rules:
       name: "Brute Force: Password Guessing"
     false_positives: An administrator mistyping a password from a home connection.
     response: Check for a pattern from the same address.
+    tags: [ssh, credential_access]
+    references:
+      - https://attack.mitre.org/techniques/T1110/001/
     match:
       all:
         - field: authentication.outcome

@@ -2,6 +2,7 @@ package detection_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -161,6 +162,39 @@ func TestARuleTheEngineCannotRunIsRefusedByPart(t *testing.T) {
 			}
 		}},
 		"a rule nested past reading": {"match", "nests deeper than", func(r *detection.Rule) { r.Match = nested(detection.MaxDepth + 2) }},
+		"half a source": {"source", "or neither", func(r *detection.Rule) {
+			r.Source = detection.Source{Catalogue: "sigma"}
+		}},
+		"a source with no catalogue": {"source", "or neither", func(r *detection.Rule) {
+			r.Source = detection.Source{Identifier: "5013fd8a-56f1-4d5c-9f1d-4c9d0a1f3b77"}
+		}},
+		"a catalogue that is not a name": {"source.catalogue", "lowercase words", func(r *detection.Rule) {
+			r.Source = detection.Source{Catalogue: "Sigma HQ", Identifier: "5013fd8a"}
+		}},
+		"a tag that is not a name": {"tags[0]", "lowercase words", func(r *detection.Rule) {
+			r.Tags = []string{"Privilege Escalation"}
+		}},
+		"the same tag twice": {"tags[1]", "already carries", func(r *detection.Rule) {
+			r.Tags = []string{"ssh", "ssh"}
+		}},
+		"more tags than a rule can carry": {"tags", "above the ceiling", func(r *detection.Rule) {
+			r.Tags = names(detection.MaxTags + 1)
+		}},
+		"a reference that is not a link": {"references[0]", "http or https link", func(r *detection.Rule) {
+			r.References = []string{"the runbook in the wiki"}
+		}},
+		"a reference under a scheme nobody can open": {"references[0]", "http or https link", func(r *detection.Rule) {
+			r.References = []string{"file:///etc/seagull/runbook.md"}
+		}},
+		"the same reference twice": {"references[1]", "already carries", func(r *detection.Rule) {
+			r.References = []string{"https://attack.mitre.org/techniques/T1110/001/", "https://attack.mitre.org/techniques/T1110/001/"}
+		}},
+		"a reference longer than one anybody wrote": {"references[0]", "longer than", func(r *detection.Rule) {
+			r.References = []string{"https://example.test/" + strings.Repeat("a", detection.MaxReferenceLength)}
+		}},
+		"more references than a rule can carry": {"references", "above the ceiling", func(r *detection.Rule) {
+			r.References = links(detection.MaxReferences + 1)
+		}},
 	}
 
 	for name, broken := range cases {
@@ -201,6 +235,23 @@ func TestARuleMayReadTheEnvelopeAlone(t *testing.T) {
 	}
 }
 
+// A rule says where it came from, what it is filed under and what explains it,
+// or says none of it: this estate wrote most of them, and nothing about a rule
+// written here has an upstream identifier to carry.
+func TestARuleThatSaysWhereItCameFromIsAccepted(t *testing.T) {
+	subject := rule()
+	subject.Source = detection.Source{Catalogue: "sigma", Identifier: "5013fd8a-56f1-4d5c-9f1d-4c9d0a1f3b77"}
+	subject.Tags = []string{"ssh", "credential_access"}
+	subject.References = []string{
+		"https://attack.mitre.org/techniques/T1110/001/",
+		"http://internal.example.test/runbooks/ssh",
+	}
+
+	if err := subject.Validate(); err != nil {
+		t.Fatalf("a rule carrying its provenance was refused: %v", err)
+	}
+}
+
 // The technique is optional, because not everything worth detecting is an
 // adversary technique.
 func TestARuleWithoutATechniqueIsAccepted(t *testing.T) {
@@ -225,6 +276,22 @@ func TestARefusalNamesTheRuleAndThePart(t *testing.T) {
 			t.Errorf("the refusal does not mention %q: %s", expected, message)
 		}
 	}
+}
+
+func names(count int) []string {
+	tags := make([]string, 0, count)
+	for index := range count {
+		tags = append(tags, fmt.Sprintf("tag%d", index))
+	}
+	return tags
+}
+
+func links(count int) []string {
+	references := make([]string, 0, count)
+	for index := range count {
+		references = append(references, fmt.Sprintf("https://example.test/%d", index))
+	}
+	return references
 }
 
 func nested(depth int) detection.Expression {

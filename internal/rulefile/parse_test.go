@@ -99,7 +99,7 @@ func TestARuleFileParsesIntoTheRuleItWrites(t *testing.T) {
 		References: []string{"https://attack.mitre.org/techniques/T1110/001/"},
 	}
 
-	if read := programs[0].Rule(); !reflect.DeepEqual(read, asked) {
+	if read := programs[0].Program.Rule(); !reflect.DeepEqual(read, asked) {
 		t.Errorf("the file was read as\n%#v\nand should have been read as\n%#v", read, asked)
 	}
 }
@@ -122,7 +122,7 @@ func TestALiteralKeepsTheTypeItWasWrittenAs(t *testing.T) {
 	const asked = `(authentication.network.source.port equals 22 and ` +
 		`authentication.user.uid equals "22" and ` +
 		`authentication.user.name present)`
-	if compiled := programs[0].String(); compiled != asked {
+	if compiled := programs[0].Program.String(); compiled != asked {
 		t.Errorf("the rule compiled to\n%s\nand should have compiled to\n%s", compiled, asked)
 	}
 }

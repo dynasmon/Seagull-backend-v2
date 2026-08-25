@@ -89,7 +89,7 @@ func (r *reader) rule(node *yaml.Node) (detection.Rule, error) {
 	r.id = detection.ID(id)
 
 	rule := detection.Rule{ID: r.id}
-	for _, part := range []string{"id", "revision", "name", "description", "severity", "status", "class"} {
+	for _, part := range []string{"id", "revision", "name", "description", "severity", "status", "class", "source", "tags", "references"} {
 		r.at(part, held.at(part))
 	}
 
@@ -125,6 +125,15 @@ func (r *reader) rule(node *yaml.Node) (detection.Rule, error) {
 		return detection.Rule{}, err
 	}
 	if rule.Technique, err = r.technique(&held); err != nil {
+		return detection.Rule{}, err
+	}
+	if rule.Source, err = r.provenance(&held); err != nil {
+		return detection.Rule{}, err
+	}
+	if rule.Tags, err = r.list(&held, "tags", "tags"); err != nil {
+		return detection.Rule{}, err
+	}
+	if rule.References, err = r.list(&held, "references", "references"); err != nil {
 		return detection.Rule{}, err
 	}
 
@@ -185,6 +194,59 @@ func (r *reader) technique(held *mapping) (detection.Technique, error) {
 		return technique, r.fault(attributed.key[left[0]], "technique."+left[0], "is not part of a technique")
 	}
 	return technique, nil
+}
+
+func (r *reader) provenance(held *mapping) (detection.Source, error) {
+	node, given := held.take("source")
+	if !given {
+		return detection.Source{}, nil
+	}
+
+	from, refused := fieldsOf(node)
+	if refused != "" {
+		return detection.Source{}, r.fault(node, "source", refused)
+	}
+
+	var source detection.Source
+	var err error
+	if source.Catalogue, err = r.words(&from, "source.catalogue", "catalogue"); err != nil {
+		return source, err
+	}
+	if source.Identifier, err = r.words(&from, "source.identifier", "identifier"); err != nil {
+		return source, err
+	}
+	for _, part := range []string{"catalogue", "identifier"} {
+		r.at("source."+part, from.at(part))
+	}
+
+	if left := from.rest(); len(left) > 0 {
+		return source, r.fault(from.key[left[0]], "source."+left[0], "is not part of a source")
+	}
+	return source, nil
+}
+
+// Each item is remembered where it was written, so a domain refusal naming
+// `tags[2]` points at the third tag rather than at the list.
+func (r *reader) list(held *mapping, part, name string) ([]string, error) {
+	node, given := held.take(name)
+	if !given {
+		return nil, nil
+	}
+	if node.Kind != yaml.SequenceNode {
+		return nil, r.fault(node, part, "is not a list")
+	}
+
+	read := make([]string, 0, len(node.Content))
+	for index, item := range node.Content {
+		where := fmt.Sprintf("%s[%d]", part, index)
+		value := resolve(item)
+		if value == nil || value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
+			return nil, r.fault(item, where, "is not text")
+		}
+		r.at(where, value)
+		read = append(read, value.Value)
+	}
+	return read, nil
 }
 
 func (r *reader) words(held *mapping, part, name string) (string, error) {

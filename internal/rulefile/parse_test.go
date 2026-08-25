@@ -26,6 +26,12 @@ rules:
       name: "Brute Force: Password Guessing"
     false_positives: An administrator mistyping a password from a home connection.
     response: Check for a pattern from the same address.
+    source:
+      catalogue: sigma
+      identifier: 5013fd8a-56f1-4d5c-9f1d-4c9d0a1f3b77
+    tags: [ssh, credential_access]
+    references:
+      - https://attack.mitre.org/techniques/T1110/001/
     match:
       all:
         - field: authentication.outcome
@@ -85,6 +91,12 @@ func TestARuleFileParsesIntoTheRuleItWrites(t *testing.T) {
 		},
 		FalsePositives: "An administrator mistyping a password from a home connection.",
 		Response:       "Check for a pattern from the same address.",
+		Source: detection.Source{
+			Catalogue:  "sigma",
+			Identifier: "5013fd8a-56f1-4d5c-9f1d-4c9d0a1f3b77",
+		},
+		Tags:       []string{"ssh", "credential_access"},
+		References: []string{"https://attack.mitre.org/techniques/T1110/001/"},
 	}
 
 	if read := programs[0].Rule(); !reflect.DeepEqual(read, asked) {
@@ -167,6 +179,22 @@ rules: []
       all:
         - {field: authentication.user.name, equals: root}
         - {field: authentication.user.name, equals: admin}`)},
+		"a source that is not a mapping": {"source", "is not a mapping",
+			rule(`{field: event_id, present: true}`) + "    source: sigma\n"},
+		"a key a source does not have": {"source.author", "is not part of a source",
+			rule(`{field: event_id, present: true}`) + "    source:\n      catalogue: sigma\n      author: somebody\n"},
+		"a catalogue that is not text": {"source.catalogue", "is not text",
+			rule(`{field: event_id, present: true}`) + "    source:\n      catalogue: [sigma]\n"},
+		"tags that are not a list": {"tags", "is not a list",
+			rule(`{field: event_id, present: true}`) + "    tags: ssh\n"},
+		"a tag that is not text": {"tags[1]", "is not text",
+			rule(`{field: event_id, present: true}`) + "    tags: [ssh, 22]\n"},
+		"references that are not a list": {"references", "is not a list",
+			rule(`{field: event_id, present: true}`) + "    references: https://example.test/\n"},
+		"a tag the domain refuses": {"tags[0]", "lowercase words",
+			rule(`{field: event_id, present: true}`) + "    tags: [\"Privilege Escalation\"]\n"},
+		"a reference the domain refuses": {"references[0]", "http or https link",
+			rule(`{field: event_id, present: true}`) + "    references: [the runbook in the wiki]\n"},
 	}
 
 	for name, broken := range cases {

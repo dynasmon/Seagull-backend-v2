@@ -24,6 +24,9 @@ rules:
     response: >-
       Confirm the account is expected to be reachable from outside, then check
       for a pattern from the same address.
+    tags: [ssh, credential_access]
+    references:
+      - https://attack.mitre.org/techniques/T1110/001/
     match:
       all:
         - field: authentication.outcome

@@ -36,7 +36,26 @@ type Rule struct {
 	// only look at.
 	FalsePositives string
 	Response       string
+
+	// Where the rule came from, what it is filed under, and what explains it.
+	// None of the three changes what the rule decides, and all of them change
+	// what somebody can do with a detection after it is made.
+	Source     Source
+	Tags       []string
+	References []string
 }
+
+// Where a rule came from and what it was called there. Empty means this estate
+// wrote it; a rule translated out of an upstream catalogue names the catalogue
+// and keeps the identifier it had, so a detection can be traced past the rule to
+// the thing the rule was made from and a later import can find it again. All of
+// it or none of it, for the same reason half a technique is refused.
+type Source struct {
+	Catalogue  string // `sigma`
+	Identifier string // what the rule was called there
+}
+
+func (s Source) empty() bool { return s.Catalogue == "" && s.Identifier == "" }
 
 // Lowercase, and readable as a sentence about what is detected rather than as
 // an identifier of the file it lives in.

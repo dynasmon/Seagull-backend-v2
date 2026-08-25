@@ -1,6 +1,7 @@
 package ruleset_test
 
 import (
+	"reflect"
 	"slices"
 	"testing"
 
@@ -45,28 +46,120 @@ func TestOrderDoesNotChangeWhatARulesetIs(t *testing.T) {
 // Everything a rule carries can change what a detection says, so everything a
 // rule carries changes the ruleset it belongs to.
 func TestAnythingARuleCarriesChangesTheRuleset(t *testing.T) {
-	changed := map[string]func(*detection.Rule){
-		"the id":             func(r *detection.Rule) { r.ID = "ssh.something_else" },
-		"the revision":       func(r *detection.Rule) { r.Revision = 2 },
-		"the severity":       func(r *detection.Rule) { r.Severity = detection.High },
-		"the status":         func(r *detection.Rule) { r.Status = detection.Disabled },
-		"the name":           func(r *detection.Rule) { r.Name = "Another name" },
-		"the description":    func(r *detection.Rule) { r.Description = "Another description." },
-		"the guidance":       func(r *detection.Rule) { r.Response = "Do something else." },
-		"the technique":      func(r *detection.Rule) { r.Technique.ID = "T1110.003" },
-		"what it matches on": func(r *detection.Rule) { r.Match = predicate("authentication.user.uid") },
-	}
-
 	before := compose(t, compiled(t, rule("ssh.session_opened"))).ID()
-	for what, change := range changed {
-		t.Run(what, func(t *testing.T) {
+
+	for field, change := range changesToARule() {
+		t.Run(field, func(t *testing.T) {
+			if change == nil {
+				t.Skip("the contract declares one event class, so a rule has no second one to be written for")
+			}
+
 			subject := rule("ssh.session_opened")
 			change(&subject)
 
 			if after := compose(t, compiled(t, subject)).ID(); after == before {
-				t.Errorf("changing %s left the ruleset named %s", what, after)
+				t.Errorf("changing %s left the ruleset named %s", field, after)
 			}
 		})
+	}
+}
+
+// A field added to a rule and forgotten in the digest is a field a ruleset is
+// not named by, and two rulesets that decide events differently would then share
+// a name — which is what makes a detection traceable to the rules that made it.
+// Held in both directions, so a field that leaves the domain fails here too.
+func TestEveryFieldOfARuleIsAccountedForInTheRulesetItNames(t *testing.T) {
+	accounted := changesToARule()
+	carried := reflect.TypeFor[detection.Rule]()
+
+	for index := range carried.NumField() {
+		field := carried.Field(index).Name
+		if _, named := accounted[field]; !named {
+			t.Errorf("a rule carries %s and nothing here says whether it names the ruleset", field)
+		}
+	}
+	for field := range accounted {
+		if _, declared := carried.FieldByName(field); !declared {
+			t.Errorf("%s is accounted for here and a rule does not carry it", field)
+		}
+	}
+}
+
+// Every field of a rule, and a second rule the domain still accepts that differs
+// only in that field. A field with no second value to give it is named with no
+// change rather than left out, so the coverage above still accounts for it.
+func changesToARule() map[string]func(*detection.Rule) {
+	return map[string]func(*detection.Rule){
+		"ID":             func(r *detection.Rule) { r.ID = "ssh.something_else" },
+		"Revision":       func(r *detection.Rule) { r.Revision = 2 },
+		"Name":           func(r *detection.Rule) { r.Name = "Another name" },
+		"Description":    func(r *detection.Rule) { r.Description = "Another description." },
+		"Class":          nil,
+		"Match":          func(r *detection.Rule) { r.Match = predicate("authentication.user.uid") },
+		"Severity":       func(r *detection.Rule) { r.Severity = detection.High },
+		"Status":         func(r *detection.Rule) { r.Status = detection.Disabled },
+		"Technique":      func(r *detection.Rule) { r.Technique.ID = "T1110.003" },
+		"FalsePositives": func(r *detection.Rule) { r.FalsePositives = "An administrator mistyping a password." },
+		"Response":       func(r *detection.Rule) { r.Response = "Do something else." },
+		"Tags":           func(r *detection.Rule) { r.Tags = []string{"ssh"} },
+		"References":     func(r *detection.Rule) { r.References = []string{"https://attack.mitre.org/techniques/T1110/001/"} },
+		"Source": func(r *detection.Rule) {
+			r.Source = detection.Source{Catalogue: "sigma", Identifier: "5013fd8a-56f1-4d5c-9f1d-4c9d0a1f3b77"}
+		},
+	}
+}
+
+// A tag is a set and a reference is a list, so filing a rule under the same two
+// words in the other order is the same rule and citing the same two pages in the
+// other order is not.
+func TestTagsAreASetAndReferencesAreAList(t *testing.T) {
+	tagged := func(tags ...string) detection.Rule {
+		subject := rule("ssh.session_opened")
+		subject.Tags = tags
+		return subject
+	}
+	cited := func(references ...string) detection.Rule {
+		subject := rule("ssh.session_opened")
+		subject.References = references
+		return subject
+	}
+
+	one := compose(t, compiled(t, tagged("ssh", "credential_access"))).ID()
+	other := compose(t, compiled(t, tagged("credential_access", "ssh"))).ID()
+	if one != other {
+		t.Errorf("the same two tags in the other order named %s and %s", one, other)
+	}
+
+	first := "https://attack.mitre.org/techniques/T1110/001/"
+	second := "https://example.test/runbooks/ssh"
+	one = compose(t, compiled(t, cited(first, second))).ID()
+	other = compose(t, compiled(t, cited(second, first))).ID()
+	if one == other {
+		t.Errorf("the same two references in the other order both named %s", one)
+	}
+}
+
+// A list that is not counted can borrow what follows it: a rule tagged `ssh` and
+// citing nothing would otherwise write the bytes of one tagged nothing and
+// citing `ssh`.
+func TestOneListCannotBeReadAsAnother(t *testing.T) {
+	tagged := rule("ssh.session_opened")
+	tagged.Tags = []string{"https://example.test/"}
+
+	cited := rule("ssh.session_opened")
+	cited.References = []string{"https://example.test/"}
+
+	if _, err := detection.Compile(tagged); err == nil {
+		t.Fatal("a tag that is a link was accepted and this test needs it refused")
+	}
+
+	tagged.Tags = []string{"ssh"}
+	cited.References = []string{"https://example.test/ssh"}
+
+	one := compose(t, compiled(t, tagged)).ID()
+	other := compose(t, compiled(t, cited)).ID()
+	if one == other {
+		t.Errorf("a tag and a reference wrote the same ruleset name %s", one)
 	}
 }
 

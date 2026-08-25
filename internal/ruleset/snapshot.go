@@ -88,6 +88,11 @@ func (s *Snapshot) For(class eventv1.EventClass) iter.Seq[*detection.Program] {
 // rule does, length prefixed so that no two rulesets can write the same bytes.
 // The compiled form stands in for the expression, which is what makes two rules
 // that ask the same thing in different words the same rule here.
+//
+// Tags are a set and are sorted, so filing a rule under the same two words in
+// the other order is the same rule; references are read in the order they were
+// written and keep it. Both are counted before they are written, because an
+// uncounted list can borrow what follows it and name two rulesets alike.
 func identify(programs []*detection.Program) ID {
 	digest := sha256.New()
 	write := func(value string) { fmt.Fprintf(digest, "%d:%s", len(value), value) }
@@ -103,6 +108,8 @@ func identify(programs []*detection.Program) ID {
 			rule.Technique.Tactic,
 			rule.Technique.ID,
 			rule.Technique.Name,
+			rule.Source.Catalogue,
+			rule.Source.Identifier,
 			rule.Name,
 			rule.Description,
 			rule.FalsePositives,
@@ -110,6 +117,15 @@ func identify(programs []*detection.Program) ID {
 			program.String(),
 		} {
 			write(part)
+		}
+
+		write(strconv.Itoa(len(rule.Tags)))
+		for _, tag := range slices.Sorted(slices.Values(rule.Tags)) {
+			write(tag)
+		}
+		write(strconv.Itoa(len(rule.References)))
+		for _, reference := range rule.References {
+			write(reference)
 		}
 	}
 	return ID(hex.EncodeToString(digest.Sum(nil)[:16]))

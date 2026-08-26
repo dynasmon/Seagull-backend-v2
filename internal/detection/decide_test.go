@@ -351,3 +351,43 @@ func equal(one, other []string) bool {
 	}
 	return true
 }
+
+// A rule refusing three private prefixes asks three questions of one field and
+// the event gives one answer. What was asked in full is not kept, so three
+// copies of that answer would say nothing three times — and the rule the local
+// stack ships is written exactly this way, so this is what reaches a detection.
+func TestOneAnswerIsWrittenDownOnceHoweverOftenItWasAsked(t *testing.T) {
+	program := running(t, detection.Not{Term: detection.Any{Terms: []detection.Expression{
+		text("authentication.network.source.ip", detection.StartsWith, "10."),
+		text("authentication.network.source.ip", detection.StartsWith, "192.168."),
+		text("authentication.network.source.ip", detection.StartsWith, "127."),
+	}}})
+
+	match, held := program.Decide(event(nil))
+	if !held {
+		t.Fatal("an address outside every private range did not match a rule refusing them")
+	}
+
+	written := lines(match.Evidence)
+	if len(written) != 1 {
+		t.Errorf("one field answered one way and the match carries %d observations: %v", len(written), written)
+	}
+}
+
+// Two questions of one field that the event answers differently stay two
+// observations: what is dropped is a repetition, never a distinction.
+func TestTwoDifferentAnswersAboutOneFieldAreBothKept(t *testing.T) {
+	program := running(t, detection.All{Terms: []detection.Expression{
+		text("authentication.network.source.ip", detection.StartsWith, "203."),
+		detection.Not{Term: text("authentication.network.source.ip", detection.StartsWith, "10.")},
+	}})
+
+	match, held := program.Decide(event(nil))
+	if !held {
+		t.Fatal("an external address did not match a rule written for one")
+	}
+	if written := lines(match.Evidence); len(written) != 2 {
+		t.Errorf("one field was asked two different ways and the match carries %d observations: %v",
+			len(written), written)
+	}
+}

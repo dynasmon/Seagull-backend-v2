@@ -74,80 +74,85 @@ func (r *reader) at(part string, node *yaml.Node) {
 	}
 }
 
-func (r *reader) rule(node *yaml.Node) (detection.Rule, error) {
+func (r *reader) rule(node *yaml.Node) (detection.Rule, []detection.Case, error) {
 	r.id, r.where = "", make(map[string]*yaml.Node)
 
 	held, refused := fieldsOf(node)
 	if refused != "" {
-		return detection.Rule{}, r.fault(node, "", "a rule "+refused)
+		return detection.Rule{}, nil, r.fault(node, "", "a rule "+refused)
 	}
 
 	id, err := r.words(&held, "id", "id")
 	if err != nil {
-		return detection.Rule{}, err
+		return detection.Rule{}, nil, err
 	}
 	r.id = detection.ID(id)
 
 	rule := detection.Rule{ID: r.id}
-	for _, part := range []string{"id", "revision", "name", "description", "severity", "status", "class", "source", "tags", "references"} {
+	for _, part := range []string{"id", "revision", "name", "description", "severity", "status", "class", "source", "tags", "references", "tests"} {
 		r.at(part, held.at(part))
 	}
 
 	if rule.Revision, err = r.whole(&held, "revision", "revision"); err != nil {
-		return detection.Rule{}, err
+		return detection.Rule{}, nil, err
 	}
 	if rule.Name, err = r.words(&held, "name", "name"); err != nil {
-		return detection.Rule{}, err
+		return detection.Rule{}, nil, err
 	}
 	if rule.Description, err = r.words(&held, "description", "description"); err != nil {
-		return detection.Rule{}, err
+		return detection.Rule{}, nil, err
 	}
 	if rule.FalsePositives, err = r.words(&held, "false_positives", "false_positives"); err != nil {
-		return detection.Rule{}, err
+		return detection.Rule{}, nil, err
 	}
 	if rule.Response, err = r.words(&held, "response", "response"); err != nil {
-		return detection.Rule{}, err
+		return detection.Rule{}, nil, err
 	}
 
 	severity, err := r.words(&held, "severity", "severity")
 	if err != nil {
-		return detection.Rule{}, err
+		return detection.Rule{}, nil, err
 	}
 	rule.Severity = detection.Severity(severity)
 
 	status, err := r.words(&held, "status", "status")
 	if err != nil {
-		return detection.Rule{}, err
+		return detection.Rule{}, nil, err
 	}
 	rule.Status = detection.Status(status)
 
 	if rule.Class, err = r.class(&held); err != nil {
-		return detection.Rule{}, err
+		return detection.Rule{}, nil, err
 	}
 	if rule.Technique, err = r.technique(&held); err != nil {
-		return detection.Rule{}, err
+		return detection.Rule{}, nil, err
 	}
 	if rule.Source, err = r.provenance(&held); err != nil {
-		return detection.Rule{}, err
+		return detection.Rule{}, nil, err
 	}
 	if rule.Tags, err = r.list(&held, "tags", "tags"); err != nil {
-		return detection.Rule{}, err
+		return detection.Rule{}, nil, err
 	}
 	if rule.References, err = r.list(&held, "references", "references"); err != nil {
-		return detection.Rule{}, err
+		return detection.Rule{}, nil, err
 	}
 
 	if match, given := held.take("match"); given {
 		if rule.Match, err = r.expression("match", match, 0); err != nil {
-			return detection.Rule{}, err
+			return detection.Rule{}, nil, err
 		}
 	}
 	r.at("match", held.at("match"))
 
-	if left := held.rest(); len(left) > 0 {
-		return detection.Rule{}, r.fault(held.key[left[0]], left[0], "is not part of a rule")
+	cases, err := r.cases(&held, rule)
+	if err != nil {
+		return detection.Rule{}, nil, err
 	}
-	return rule, nil
+
+	if left := held.rest(); len(left) > 0 {
+		return detection.Rule{}, nil, r.fault(held.key[left[0]], left[0], "is not part of a rule")
+	}
+	return rule, cases, nil
 }
 
 func (r *reader) class(held *mapping) (class eventv1.EventClass, err error) {

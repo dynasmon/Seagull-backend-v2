@@ -41,3 +41,68 @@ rules:
                 starts_with: "192.168."
               - field: authentication.network.source.ip
                 starts_with: "127."
+    tests:
+      - name: a failed password from an address outside the estate
+        expect: match
+        severity: medium
+        evidence:
+          - authentication.outcome
+          - authentication.service.protocol
+          - authentication.network.source.ip
+        event:
+          authentication.outcome: failure
+          authentication.service.protocol: ssh
+          authentication.network.source.ip: 203.0.113.10
+
+      - name: the same failure from inside the estate
+        description: >-
+          The false positive the rule is written to avoid: a session from a
+          private range is not what it is looking for.
+        expect: no_match
+        event:
+          authentication.outcome: failure
+          authentication.service.protocol: ssh
+          authentication.network.source.ip: 10.0.0.5
+
+      - name: a password that was accepted
+        expect: no_match
+        event:
+          authentication.outcome: success
+          authentication.service.protocol: ssh
+          authentication.network.source.ip: 203.0.113.10
+
+      - name: a failure on another service
+        expect: no_match
+        event:
+          authentication.outcome: failure
+          authentication.service.protocol: rdp
+          authentication.network.source.ip: 203.0.113.10
+
+      - name: a failure from the loopback address
+        expect: no_match
+        event:
+          authentication.outcome: failure
+          authentication.service.protocol: ssh
+          authentication.network.source.ip: 127.0.0.1
+
+      - name: a failure the event carries no address for
+        description: >-
+          An absent field answers no question, so none of the private ranges
+          holds and the rule reads the session as external. Written down because
+          it is a decision the rule makes rather than one anybody made for it.
+        expect: match
+        severity: medium
+        event:
+          authentication.outcome: failure
+          authentication.service.protocol: ssh
+
+      - name: a failure from the private range the rule cannot express
+        description: >-
+          172.16.0.0/12 is private and the language has no way to say a range,
+          so the rule finds it. This is the false positive the guidance names.
+        expect: match
+        severity: medium
+        event:
+          authentication.outcome: failure
+          authentication.service.protocol: ssh
+          authentication.network.source.ip: 172.16.4.9

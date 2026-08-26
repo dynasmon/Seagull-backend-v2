@@ -17,6 +17,8 @@ const (
 	MaxNameLength        = 200
 	MaxDescriptionLength = 2000
 	MaxGuidanceLength    = 2000
+	MaxCases             = 64
+	MaxCaseFields        = 64
 	MaxTags              = 32
 	MaxReferences        = 16
 	MaxReferenceLength   = 500

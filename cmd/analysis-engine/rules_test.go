@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
+	"github.com/dynasmon/Seagull-backend-v2/internal/rulefile"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ruleset"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 )
@@ -82,4 +83,26 @@ func TestTheRulesTheStackMountsCompile(t *testing.T) {
 	if len(programs) == 0 {
 		t.Error("the local stack mounts a ruleset that runs nothing")
 	}
+}
+
+// Every rule this estate ships carries the cases it was written to satisfy, and
+// every one of them holds. The harness reports an untested rule rather than
+// refusing it, because whether to ship one is a decision; this is where the
+// decision is made, and it is that we do not.
+func TestTheRulesTheStackMountsHoldTheCasesWrittenWithThem(t *testing.T) {
+	report, err := rulefile.Check(os.DirFS(filepath.Join("..", "..", "deploy", "rules")))
+	if err != nil {
+		t.Fatalf("the rules the local stack mounts were refused: %v", err)
+	}
+
+	for _, unheld := range report.Unheld {
+		t.Errorf("a case the ruleset was written to satisfy does not hold: %v", unheld)
+	}
+	for _, untested := range report.Untested {
+		t.Errorf("rule %q ships with no case written for it", untested)
+	}
+	if report.Cases == 0 {
+		t.Errorf("the ruleset the stack mounts is checked by nothing: %s", report)
+	}
+	t.Logf("the ruleset the stack mounts: %s", report)
 }

@@ -13,3 +13,4 @@ rediscovered by reading the code.
 - [7. A rule file is not the rule](0007-a-rule-file-is-not-the-rule.md)
 - [8. A ruleset is named by what is in it](0008-a-ruleset-is-named-by-what-is-in-it.md)
 - [9. An absent field answers no question](0009-an-absent-field-answers-no-question.md)
+- [10. A rule carries the cases it was written for](0010-a-rule-carries-the-cases-it-was-written-for.md)

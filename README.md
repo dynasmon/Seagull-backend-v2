@@ -5,11 +5,11 @@ backbone before anything else happens to it; the control plane is built around
 that pipeline rather than the other way around.
 
 This repository holds the foundation, the first vertical slice and the runtime
-the analysis pipeline will be built inside: telemetry travels from an agent to a
+the analysis pipeline is built inside: telemetry travels from an agent to a
 queryable store, every step of it is durable, and a second consumer reads the
-same stream, routes it and puts it into canonical form. Detection has a rule
-model and nothing that evaluates it yet; correlation and the control plane are
-not implemented.
+same stream, decides it against a ruleset and puts what it found back on the
+backbone in a contract of its own. Nothing materialises a detection yet;
+correlation and the control plane are not implemented.
 
 ## What runs today
 
@@ -22,9 +22,9 @@ cmd/ingest-gateway  ── admission control ──▶  Redpanda  security.event
       |                                              |                    |
 cmd/control-api     ── protocol descriptor           v                    v
                                         cmd/event-writer      cmd/analysis-engine
-                                                 |
-                                                 ▼
-                                    ClickHouse  security_events
+                                                 |                    |
+                                                 ▼                    ▼
+                                    ClickHouse  security_events   security.detections
                                                  |
                                                  ▼
                                        security.events.quarantine
@@ -46,9 +46,10 @@ partition.
 the writer advance independently and neither can hold the other back. It turns a
 record into a `seagull.event.v1.Event`, routes it by the class it carries, puts
 it into canonical form, decides it against the rules registered on that route,
-refuses what it cannot read without returning an error — one unreadable record
-must never hold a partition — and reports how long after admission each event
-reached it.
+publishes what it found to `security.detections` before advancing its group
+position, refuses what it cannot read without returning an error — one unreadable
+record must never hold a partition — and reports how long after admission each
+event reached it.
 
 Routing decides before the contract does, and that order separates two failures
 an operator answers differently. A class this build's contract does not declare
@@ -68,7 +69,7 @@ evidence — and it never rewrites a field where the representation is the
 meaning, such as an account name or the collected line itself. Every string the
 contract carries has a recorded decision and a reason, and a string added to the
 contract fails the suite until it has one. [ADR 5](docs/decisions/0005-the-canonical-form-is-for-analysis.md)
-carries the reasoning. Detection arrives behind the same route.
+carries the reasoning. Detection runs behind the same route.
 
 `store-migrator` applies the store schema and exits. It is the only thing that
 changes the shape of the store, and `event-writer` refuses to start against a
@@ -195,10 +196,10 @@ current ruleset registers on that route.
 
 Deciding is a pure function of a rule and an event. It reads nothing but the
 message in front of it, keeps nothing between calls, writes nothing into the
-event, does no I/O and cannot fail, so detection adds no failure mode to the
-engine: what is quarantined, what is retried and when the group position
-advances are all unchanged. A rule that does not match allocates nothing, which
-is the answer most events give most rules.
+event, does no I/O and cannot fail. A rule that does not match allocates nothing,
+which is the answer most events give most rules. Saying what was decided is where
+the stage can fail, and it fails as one batch rather than as one event: the whole
+batch is published or the group position stays where it is.
 
 A field the event does not carry answers no question. The contract does not
 distinguish an unset field from one holding its zero value, so neither does a
@@ -210,7 +211,10 @@ carries no user at all.
 A match carries evidence: the fields the rule read and what the event held in
 them, written the way a rule writes a literal. A disjunction is evidenced by the
 branch that held; one that held nowhere keeps every branch, because under a
-negation all of them failing is why the rule matched.
+negation all of them failing is why the rule matched. Evidence is a set of what
+the event said rather than a list of what the rule asked, so a rule refusing
+three private prefixes on one field is evidenced once — what was asked in full
+stays in the rule, and three copies of one answer would say nothing three times.
 
 ```text
 authentication.outcome equals, and the event holds failure
@@ -218,13 +222,10 @@ authentication.service.protocol equals, and the event holds "ssh"
 authentication.network.source.ip not starts_with, and the event holds "203.0.113.10"
 ```
 
-Nothing is emitted yet, and that is deliberate: a detection crosses a runtime
-boundary and needs a message in `Seagull-contracts` before it can leave the
-process. Until then a match is counted and reported, which is enough to say a
-rule fires and not enough to act on. A report names the rule, its revision, the
-severity, the ruleset, the event and the fields the rule read — never what the
-event held, because a field value can carry attacker input and evidence belongs
-in the detection record rather than in a log line.
+A report names the rule, its revision, the severity, the ruleset, the event and
+the fields the rule read — never what the event held, because a field value can
+carry attacker input and evidence belongs in the detection record rather than in
+a log line.
 
 ```text
 seagull_detection_evaluations_total{route="authentication"} 41288
@@ -236,6 +237,49 @@ Which rule fired is not a label: a ruleset is unbounded from the engine's point
 of view, and what fired belongs in the detection record where it can be queried.
 [ADR 9](docs/decisions/0009-an-absent-field-answers-no-question.md) records what
 an absent field means and what a match owes an analyst.
+
+## What a detection is
+
+A `seagull.detection.v1.Detection` is what was found: the rule that decided it
+at the revision it was decided at, the ruleset that held that rule, the agent
+and tenant it is about, the events it was decided from, and the evidence. It
+carries no status, no assignee and no disposition — those belong to an alert,
+which has a lifecycle and an owner and is a later card. v1 kept all of it in one
+`alerts` table and could not write an analytical result without touching a row an
+operator owned.
+
+It names the rule rather than repeating it. The ruleset is named by its own
+content, so the rule's description, its false-positive guidance and its response
+are recoverable from the set instead of copied into every detection the set
+makes.
+
+A detection is named by what decided it — the rule, the revision, and the events,
+sorted and length prefixed — and by nothing else. Deciding the same events
+against the same rule again produces the same name, which is what makes the
+output stage safe to retry: a batch published twice is rewritten downstream
+rather than counted twice. The ruleset is not part of the name, or an unrelated
+rule arriving would rename every detection the others made; it travels beside the
+name instead, so two detections that share one and disagree about the set they
+came from is a visible state.
+
+The engine publishes to `security.detections`, keyed by the agent the detection
+is about, and commits its group position only once the backbone has taken the
+batch — the same order the writer keeps against ClickHouse, retried with a
+widening delay until it succeeds or the process stops. Nothing is dropped to make
+progress, so a backbone that will not take a detection becomes visible consumer
+lag rather than a finding nobody was told about.
+
+```text
+seagull_detection_published_total 173
+seagull_detection_batches_total{outcome="published"} 41
+seagull_detection_batches_total{outcome="retried"} 2
+```
+
+Against `matches_total`, `published_total` is the number that says whether what
+the engine decided actually left the process. Whatever materialises a detection
+is a consumer of its own and knows nothing about the rules —
+[ADR 11](docs/decisions/0011-a-detection-is-not-an-alert.md) records why a
+detection, an alert and an event stay three different things.
 
 ## How a rule is held to what it was written for
 
@@ -325,7 +369,7 @@ cmd/                    one directory per process
 
 internal/
   event/                what a well formed event is
-  detection/            what a detection rule is, what compiles one, what checks one
+  detection/            what a detection rule is, what compiles one, what checks one, what a detection is
   agentidentity/        what a verified agent identity is
   protocol/             version negotiation between agent and platform
   ingest/               admission control and the ingest transport
@@ -429,6 +473,7 @@ numbers come from.
 | `SEAGULL_BACKBONE_EVENTS_PARTITIONS` | `12` | how far per-agent ordering spreads |
 | `SEAGULL_BACKBONE_EVENTS_RETENTION` | `168h` | how far back a replay can reach |
 | `SEAGULL_BACKBONE_QUARANTINE_TOPIC` | `security.events.quarantine` | refused records |
+| `SEAGULL_BACKBONE_DETECTIONS_TOPIC` | `security.detections` | what the rules decided |
 | `SEAGULL_BACKBONE_QUARANTINE_PARTITIONS` | `3` | |
 | `SEAGULL_BACKBONE_QUARANTINE_RETENTION` | `720h` | |
 | `SEAGULL_BACKBONE_REPLICAS` | `1` | replication factor of every topic |
@@ -445,6 +490,9 @@ the gateway and the writer verify it before they serve.
 | `SEAGULL_ANALYSIS_BATCH_EVENTS` | `5000` | records per poll |
 | `SEAGULL_ANALYSIS_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
 | `SEAGULL_ANALYSIS_START_TIMEOUT` | `30s` | budget for verifying the topology before serving |
+| `SEAGULL_DETECTION_PUBLISH_TIMEOUT` | `30s` | budget for making one batch of detections durable |
+| `SEAGULL_DETECTION_RETRY_DELAY` | `1s` | first wait after the backbone refuses a batch of detections |
+| `SEAGULL_DETECTION_RETRY_DELAY_MAX` | `30s` | ceiling that wait doubles towards |
 
 ### event-writer
 
@@ -526,6 +574,7 @@ Two topics, declared once in `internal/broker` and applied by
 |---|---|---|---|
 | `security.events.raw` | 12 | 7 days | admitted telemetry, keyed by agent |
 | `security.events.quarantine` | 3 | 30 days | refused records, kept longer because they are the ones still waiting to be read |
+| `security.detections` | 6 | 30 days | what the rules decided, keyed by the agent it is about; narrower than the stream it is made from and kept as long as a refused record, for the same reason |
 
 **Partitions and replication are refused, never converged.** Records are keyed
 by `agent_id`, so growing the partition count moves an agent to a different

@@ -2,6 +2,7 @@ package detection
 
 import (
 	"fmt"
+	"slices"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -110,10 +111,17 @@ func (n negation) holds(record protoreflect.Message, into *[]Evidence, negated b
 	return !n.term.holds(record, into, !negated)
 }
 
+// Evidence is a set of what the event said, not a list of what the rule asked.
+// A rule refusing three private prefixes asks three questions of one field and
+// gets one answer, and what was asked in full is not kept here — so the same
+// observation gathered again is the same observation, and writing it down twice
+// would say nothing and read like a fault.
 func (c comparison) holds(record protoreflect.Message, into *[]Evidence, negated bool) bool {
 	value, carried := c.read(record)
 	if into != nil {
-		*into = append(*into, c.saw(value, carried, negated))
+		if seen := c.saw(value, carried, negated); !slices.Contains(*into, seen) {
+			*into = append(*into, seen)
+		}
 	}
 	return c.answered(value, carried)
 }

@@ -41,6 +41,17 @@ func TestTheDefaultTopologyIsTheOneTheBackboneNeeds(t *testing.T) {
 		t.Errorf("refused records are kept %s and admitted ones %s: a refused record is the one still waiting to be read",
 			topology.Quarantine.Retention, topology.Events.Retention)
 	}
+	if topology.Detections.Name != "security.detections" {
+		t.Errorf("detections topic is %q", topology.Detections.Name)
+	}
+	if topology.Detections.Partitions >= topology.Events.Partitions {
+		t.Errorf("detections spread over %d partitions and the telemetry they are made from over %d",
+			topology.Detections.Partitions, topology.Events.Partitions)
+	}
+	if topology.Detections.Retention <= topology.Events.Retention {
+		t.Errorf("detections are kept %s and the events behind them %s: a detection is the one still waiting to be read",
+			topology.Detections.Retention, topology.Events.Retention)
+	}
 	for _, topic := range topology.Topics() {
 		if err := topic.Validate(); err != nil {
 			t.Errorf("the default topology is not valid: %v", err)
@@ -56,6 +67,9 @@ func TestEveryTopicPropertyIsConfigurablePerEnvironment(t *testing.T) {
 		"SEAGULL_BACKBONE_QUARANTINE_TOPIC":      "tenant.refused",
 		"SEAGULL_BACKBONE_QUARANTINE_PARTITIONS": "6",
 		"SEAGULL_BACKBONE_QUARANTINE_RETENTION":  "72h",
+		"SEAGULL_BACKBONE_DETECTIONS_TOPIC":      "tenant.detections",
+		"SEAGULL_BACKBONE_DETECTIONS_PARTITIONS": "9",
+		"SEAGULL_BACKBONE_DETECTIONS_RETENTION":  "96h",
 		"SEAGULL_BACKBONE_REPLICAS":              "3",
 	})
 
@@ -64,6 +78,9 @@ func TestEveryTopicPropertyIsConfigurablePerEnvironment(t *testing.T) {
 	}
 	if topology.Quarantine.Partitions != 6 || topology.Quarantine.Retention != 72*time.Hour {
 		t.Errorf("quarantine read back as %d partitions and %s", topology.Quarantine.Partitions, topology.Quarantine.Retention)
+	}
+	if topology.Detections.Partitions != 9 || topology.Detections.Retention != 96*time.Hour {
+		t.Errorf("detections read back as %d partitions and %s", topology.Detections.Partitions, topology.Detections.Retention)
 	}
 	for _, topic := range topology.Topics() {
 		if topic.Replicas != 3 {

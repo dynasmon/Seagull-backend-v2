@@ -35,10 +35,13 @@ type Topic struct {
 type Topology struct {
 	Events     Topic
 	Quarantine Topic
+	Detections Topic
 }
 
-// Refused records are kept far longer than admitted ones: an admitted event is
-// already in the store, a refused one is still waiting to be looked at.
+// Refused records and detections are both kept far longer than admitted events:
+// an admitted event is already in the store, and the other two are still waiting
+// for something to pick them up. Detections are rarer than the telemetry they
+// are made from, so the topic carrying them is narrower than the one it reads.
 func LoadTopology(parser *config.Parser) Topology {
 	replicas := int16(parser.Int("SEAGULL_BACKBONE_REPLICAS", 1, 1, 15))
 	return Topology{
@@ -58,10 +61,18 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:     cleanupDelete,
 			Compression: compressionZstd,
 		},
+		Detections: Topic{
+			Name:        parser.String("SEAGULL_BACKBONE_DETECTIONS_TOPIC", "security.detections"),
+			Partitions:  int32(parser.Int("SEAGULL_BACKBONE_DETECTIONS_PARTITIONS", 6, 1, 1_000)),
+			Replicas:    replicas,
+			Retention:   parser.Duration("SEAGULL_BACKBONE_DETECTIONS_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:     cleanupDelete,
+			Compression: compressionZstd,
+		},
 	}
 }
 
-func (t Topology) Topics() []Topic { return []Topic{t.Events, t.Quarantine} }
+func (t Topology) Topics() []Topic { return []Topic{t.Events, t.Quarantine, t.Detections} }
 
 func (t Topic) Validate() error {
 	switch {
@@ -165,6 +176,10 @@ func (p *Publisher) VerifyTopics(ctx context.Context, topics ...Topic) ([]string
 
 func (c *Consumer) VerifyTopics(ctx context.Context, topics ...Topic) ([]string, error) {
 	return verifyTopics(ctx, kadm.NewClient(c.client), topics)
+}
+
+func (d *Detections) VerifyTopics(ctx context.Context, topics ...Topic) ([]string, error) {
+	return verifyTopics(ctx, kadm.NewClient(d.client), topics)
 }
 
 // Readiness reaches the brokers, not the topics. A missing topic surfaces only

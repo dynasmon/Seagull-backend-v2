@@ -1,6 +1,7 @@
 package detection
 
 import (
+	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 )
 
@@ -99,8 +100,15 @@ func (t Technique) empty() bool {
 	return t.Tactic == "" && t.ID == "" && t.Name == ""
 }
 
-var severities = map[Severity]struct{}{
-	Low: {}, Medium: {}, High: {}, Critical: {},
+// Every severity a rule may carry, and the one it is reported as when a
+// detection leaves the process. One map rather than two, so a severity the
+// platform cannot report is a severity a rule cannot be written with, and
+// neither list can drift from the other.
+var severities = map[Severity]detectionv1.Severity{
+	Low:      detectionv1.Severity_SEVERITY_LOW,
+	Medium:   detectionv1.Severity_SEVERITY_MEDIUM,
+	High:     detectionv1.Severity_SEVERITY_HIGH,
+	Critical: detectionv1.Severity_SEVERITY_CRITICAL,
 }
 
 var statuses = map[Status]struct{}{

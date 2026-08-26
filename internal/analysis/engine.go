@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
+	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 )
 
@@ -33,22 +34,33 @@ type Source interface {
 }
 
 type EngineOptions struct {
-	Source  Source
-	Rules   Rules
-	Metrics *Metrics
-	Logger  *slog.Logger
+	Source     Source
+	Rules      Rules
+	Detections Detections
+	Metrics    *Metrics
+	Logger     *slog.Logger
+
+	PublishTimeout time.Duration
+	RetryDelay     time.Duration
+	MaxRetryDelay  time.Duration
 }
 
 // The second consumer of the raw telemetry the gateway admitted, and the first
 // one that reads it to decide something rather than to keep it. It routes an
-// event by its class, puts it into the canonical form that class defines, and
-// decides it against the rules registered on that route.
+// event by its class, puts it into the canonical form that class defines,
+// decides it against the rules registered on that route, and puts what it found
+// back on the backbone for somebody else to keep.
 type Engine struct {
-	source  Source
-	rules   Rules
-	metrics *Metrics
-	logger  *slog.Logger
-	now     func() time.Time
+	source     Source
+	rules      Rules
+	detections Detections
+	metrics    *Metrics
+	logger     *slog.Logger
+	now        func() time.Time
+
+	publishTimeout time.Duration
+	retryDelay     time.Duration
+	maxRetryDelay  time.Duration
 }
 
 func NewEngine(options EngineOptions) (*Engine, error) {
@@ -57,18 +69,28 @@ func NewEngine(options EngineOptions) (*Engine, error) {
 		return nil, errors.New("the analysis engine needs a source")
 	case options.Rules == nil:
 		return nil, errors.New("the analysis engine needs rules")
+	case options.Detections == nil:
+		return nil, errors.New("the analysis engine needs somewhere to put what it finds")
 	case options.Metrics == nil:
 		return nil, errors.New("the analysis engine needs metrics")
 	case options.Logger == nil:
 		return nil, errors.New("the analysis engine needs a logger")
+	case options.PublishTimeout <= 0:
+		return nil, errors.New("the analysis engine needs a positive publish budget")
+	case options.RetryDelay <= 0 || options.MaxRetryDelay < options.RetryDelay:
+		return nil, errors.New("the analysis engine needs a retry delay below its ceiling")
 	}
 
 	return &Engine{
-		source:  options.Source,
-		rules:   options.Rules,
-		metrics: options.Metrics,
-		logger:  options.Logger,
-		now:     time.Now,
+		source:         options.Source,
+		rules:          options.Rules,
+		detections:     options.Detections,
+		metrics:        options.Metrics,
+		logger:         options.Logger,
+		now:            time.Now,
+		publishTimeout: options.PublishTimeout,
+		retryDelay:     options.RetryDelay,
+		maxRetryDelay:  options.MaxRetryDelay,
 	}, nil
 }
 
@@ -79,6 +101,15 @@ func (e *Engine) Run(ctx context.Context) error { return e.source.Consume(ctx, e
 // A record that cannot become an event is counted and reported, and the rest of
 // the batch continues: one unreadable record must never hold a partition. Where
 // it goes after that is a question of its own and is not answered here.
+//
+// What the batch was found to be is published before this returns, and the group
+// position advances only after it does. A crash between the two replays the
+// batch and decides it again, which writes the same detections under the same
+// names rather than a second set of them.
+//
+// The whole batch shares one decision time: it is when the engine reached these
+// records, it is what a detection reports as the moment it was decided, and it
+// is deliberately no part of how a detection is named.
 func (e *Engine) handle(ctx context.Context, records []Record) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -87,6 +118,7 @@ func (e *Engine) handle(ctx context.Context, records []Record) error {
 
 	reached := e.now().UTC()
 	analysed := 0
+	var made []*detectionv1.Detection
 	for _, record := range records {
 		decoded, stage, readable := e.read(record)
 		if !readable {
@@ -97,12 +129,12 @@ func (e *Engine) handle(ctx context.Context, records []Record) error {
 		}
 		e.metrics.observeDelay(reached, decoded)
 		e.metrics.routed(stage.Route)
-		e.detect(decoded, stage.Route, record)
+		made = append(made, e.detect(decoded, stage.Route, record, reached)...)
 		analysed++
 	}
 
 	e.metrics.analysed(analysed)
-	return nil
+	return e.publish(ctx, made)
 }
 
 // A record becomes an event, and the event's class decides what runs on it.

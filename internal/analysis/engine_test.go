@@ -9,7 +9,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
+	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 )
 
@@ -35,6 +38,58 @@ func (o *oneBatch) Consume(ctx context.Context, deliver analysis.Deliver) error 
 	o.handled++
 	o.delivery = deliver(ctx, o.records)
 	return o.delivery
+}
+
+// Where the engine's findings go in a test: kept, so a test can read back what
+// left the process, and able to refuse a stated number of times, so the path
+// that retries until the backbone takes a batch can be driven without one.
+type collected struct {
+	guard    sync.Mutex
+	batches  [][]*detectionv1.Detection
+	attempts int
+	refusals int
+	refusal  error
+}
+
+func (c *collected) Publish(_ context.Context, made []*detectionv1.Detection) error {
+	c.guard.Lock()
+	defer c.guard.Unlock()
+
+	c.attempts++
+	if c.refusals != 0 {
+		if c.refusals > 0 {
+			c.refusals--
+		}
+		return c.refusal
+	}
+	c.batches = append(c.batches, made)
+	return nil
+}
+
+// Read while the engine is still running, so both sides take the lock.
+func (c *collected) tried() int {
+	c.guard.Lock()
+	defer c.guard.Unlock()
+	return c.attempts
+}
+
+func (c *collected) published() [][]*detectionv1.Detection {
+	c.guard.Lock()
+	defer c.guard.Unlock()
+	return slices.Clone(c.batches)
+}
+
+func (c *collected) all() []*detectionv1.Detection {
+	var made []*detectionv1.Detection
+	for _, batch := range c.published() {
+		made = append(made, batch...)
+	}
+	return made
+}
+
+// Refuses every batch it is ever handed.
+func alwaysRefusing() *collected {
+	return &collected{refusals: -1, refusal: errors.New("the backbone would not take the batch")}
 }
 
 type blockingSource struct{ entered chan struct{} }
@@ -139,18 +194,31 @@ func newEngine(t *testing.T, source analysis.Source) (*analysis.Engine, *bytes.B
 func engineOn(t *testing.T, source analysis.Source, rules analysis.Rules, level slog.Level) (*analysis.Engine, *bytes.Buffer, *metrics.Registry) {
 	t.Helper()
 
+	engine, written, registry, _ := engineReporting(t, source, rules, level, &collected{})
+	return engine, written, registry
+}
+
+// The same engine, with what it publishes handed back, for the tests that are
+// about what leaves the process rather than about what reaches it.
+func engineReporting(t *testing.T, source analysis.Source, rules analysis.Rules, level slog.Level, sink *collected) (*analysis.Engine, *bytes.Buffer, *metrics.Registry, *collected) {
+	t.Helper()
+
 	var written bytes.Buffer
 	registry := metrics.New("test")
 	engine, err := analysis.NewEngine(analysis.EngineOptions{
-		Source:  source,
-		Rules:   rules,
-		Metrics: analysis.NewMetrics(registry),
-		Logger:  slog.New(slog.NewJSONHandler(&written, &slog.HandlerOptions{Level: level})),
+		Source:         source,
+		Rules:          rules,
+		Detections:     sink,
+		Metrics:        analysis.NewMetrics(registry),
+		Logger:         slog.New(slog.NewJSONHandler(&written, &slog.HandlerOptions{Level: level})),
+		PublishTimeout: 5 * time.Second,
+		RetryDelay:     time.Millisecond,
+		MaxRetryDelay:  10 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("build engine: %v", err)
 	}
-	return engine, &written, registry
+	return engine, &written, registry, sink
 }
 
 // What the process would answer on its operational listener, which is where an
@@ -329,14 +397,31 @@ func TestTheEngineStopsWhenItsContextIsCancelled(t *testing.T) {
 }
 
 func TestTheEngineRefusesToStartWithoutWhatItNeeds(t *testing.T) {
-	registry := metrics.New("test")
 	logger := slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
 
+	complete := func(shape func(*analysis.EngineOptions)) analysis.EngineOptions {
+		options := analysis.EngineOptions{
+			Source:         &oneBatch{},
+			Rules:          nothingToRun(),
+			Detections:     &collected{},
+			Metrics:        analysis.NewMetrics(metrics.New(t.Name())),
+			Logger:         logger,
+			PublishTimeout: time.Second,
+			RetryDelay:     time.Millisecond,
+			MaxRetryDelay:  time.Second,
+		}
+		shape(&options)
+		return options
+	}
+
 	missing := map[string]analysis.EngineOptions{
-		"no source":  {Rules: nothingToRun(), Metrics: analysis.NewMetrics(registry), Logger: logger},
-		"no rules":   {Source: &oneBatch{}, Metrics: analysis.NewMetrics(metrics.New("without-rules")), Logger: logger},
-		"no metrics": {Source: &oneBatch{}, Rules: nothingToRun(), Logger: logger},
-		"no logger":  {Source: &oneBatch{}, Rules: nothingToRun(), Metrics: analysis.NewMetrics(metrics.New("other"))},
+		"no source":         complete(func(o *analysis.EngineOptions) { o.Source = nil }),
+		"no rules":          complete(func(o *analysis.EngineOptions) { o.Rules = nil }),
+		"no detections":     complete(func(o *analysis.EngineOptions) { o.Detections = nil }),
+		"no metrics":        complete(func(o *analysis.EngineOptions) { o.Metrics = nil }),
+		"no logger":         complete(func(o *analysis.EngineOptions) { o.Logger = nil }),
+		"no publish budget": complete(func(o *analysis.EngineOptions) { o.PublishTimeout = 0 }),
+		"no retry ceiling":  complete(func(o *analysis.EngineOptions) { o.MaxRetryDelay = 0 }),
 	}
 	for name, options := range missing {
 		t.Run(name, func(t *testing.T) {
@@ -631,4 +716,186 @@ func TestADetectionNamesEachFieldTheRuleReadOnce(t *testing.T) {
 	if len(fields) != 2 || fields[0] != "authentication.outcome" || fields[1] != "authentication.network.source.ip" {
 		t.Errorf("the detection names %v as what the rule read", fields)
 	}
+}
+
+// The whole point of the stage: what the rules decided leaves the process, in a
+// contract of its own, carrying enough to be acted on without anybody reading
+// the engine's log or the rule file.
+func TestWhatTheRulesDecidedLeavesTheProcess(t *testing.T) {
+	source := &oneBatch{records: []analysis.Record{
+		{Partition: 0, Offset: 1, Value: admitted(t, "event-one")},
+		{Partition: 0, Offset: 2, Value: admitted(t, "event-two")},
+	}}
+	rules := pinned{id: "ruleset-under-test", held: true, programs: []*detection.Program{
+		compiled(t, "authentication.ended_in_failure", "failure"),
+		compiled(t, "authentication.ended_in_success", "success"),
+	}}
+
+	engine, _, registry, sink := engineReporting(t, source, rules, slog.LevelInfo, &collected{})
+	if err := engine.Run(context.Background()); err != nil {
+		t.Fatalf("run the engine: %v", err)
+	}
+
+	made := sink.all()
+	if len(made) != 2 {
+		t.Fatalf("two events matched one rule each and %d detections left the process", len(made))
+	}
+	if len(sink.published()) != 1 {
+		t.Errorf("one batch of events was published as %d batches of detections", len(sink.published()))
+	}
+
+	for _, detection := range made {
+		if detection.GetRulesetId() != "ruleset-under-test" {
+			t.Errorf("a detection names ruleset %q and the process is pinned to another", detection.GetRulesetId())
+		}
+		if detection.GetRule().GetId() != "authentication.ended_in_failure" {
+			t.Errorf("a detection names rule %q and the event ended in failure", detection.GetRule().GetId())
+		}
+		if len(detection.GetSourceEventIds()) != 1 {
+			t.Errorf("a stateless rule decided one event and the detection names %d", len(detection.GetSourceEventIds()))
+		}
+		if len(detection.GetEvidence()) == 0 {
+			t.Error("a detection left the process with nothing to say why it was made")
+		}
+	}
+	if first, second := made[0].GetDetectionId(), made[1].GetDetectionId(); first == second {
+		t.Errorf("two different events were both detected as %s", first)
+	}
+
+	exposed := exposition(t, registry)
+	for _, expected := range []string{
+		`seagull_detection_published_total 2`,
+		`seagull_detection_batches_total{outcome="published"} 1`,
+	} {
+		if !strings.Contains(exposed, expected) {
+			t.Errorf("the engine does not report %q", expected)
+		}
+	}
+}
+
+// Nothing matched is not something to say: an empty batch must not reach the
+// backbone, because a producer that writes nothing is one an operator never has
+// to reason about.
+func TestABatchThatDecidedNothingPublishesNothing(t *testing.T) {
+	source := &oneBatch{records: []analysis.Record{
+		{Partition: 0, Offset: 1, Value: admitted(t, "event-one")},
+	}}
+
+	engine, _, _, sink := engineReporting(t, source, nothingToRun(), slog.LevelInfo, &collected{})
+	if err := engine.Run(context.Background()); err != nil {
+		t.Fatalf("run the engine: %v", err)
+	}
+	if sink.tried() != 0 {
+		t.Errorf("nothing matched and the engine reached the backbone %d times", sink.tried())
+	}
+}
+
+// The order the whole stage rests on. A batch is durable before the group
+// position advances, so a backbone that will not take a detection stops the
+// consumer instead of letting it step over a finding nobody was told about.
+func TestTheBatchIsNotHandledUntilItsDetectionsAreDurable(t *testing.T) {
+	source := &oneBatch{records: []analysis.Record{
+		{Partition: 0, Offset: 1, Value: admitted(t, "event-one")},
+	}}
+	rules := pinned{id: "ruleset-under-test", held: true, programs: []*detection.Program{
+		compiled(t, "authentication.ended_in_failure", "failure"),
+	}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	engine, written, registry, sink := engineReporting(t, source, rules, slog.LevelInfo, alwaysRefusing())
+
+	// The engine retries rather than giving up, so it is the context that ends
+	// the run, which is what a stopping process does.
+	go func() {
+		for sink.tried() < 3 {
+			time.Sleep(time.Millisecond)
+		}
+		cancel()
+	}()
+
+	if err := engine.Run(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("the engine ended with %v rather than by being stopped", err)
+	}
+	if source.delivery == nil {
+		t.Error("the batch was reported as handled although its detections never became durable")
+	}
+	if sink.tried() < 3 {
+		t.Errorf("the engine tried the backbone %d times and gave up", sink.tried())
+	}
+
+	if !strings.Contains(exposition(t, registry), `seagull_detection_batches_total{outcome="retried"}`) {
+		t.Error("the engine does not report that it had to try the backbone again")
+	}
+	if reported := entries(t, written); !reports(reported, "detections_not_durable") {
+		t.Error("the engine did not say that it could not publish what it found")
+	}
+}
+
+// A backbone that comes back is not an incident: the batch is published once the
+// refusals stop, and the group position advances then and not before.
+func TestABatchIsPublishedOnceTheBackboneTakesIt(t *testing.T) {
+	source := &oneBatch{records: []analysis.Record{
+		{Partition: 0, Offset: 1, Value: admitted(t, "event-one")},
+	}}
+	rules := pinned{id: "ruleset-under-test", held: true, programs: []*detection.Program{
+		compiled(t, "authentication.ended_in_failure", "failure"),
+	}}
+
+	refusing := &collected{refusals: 2, refusal: errors.New("the backbone would not take the batch")}
+	engine, _, _, sink := engineReporting(t, source, rules, slog.LevelInfo, refusing)
+
+	if err := engine.Run(context.Background()); err != nil {
+		t.Fatalf("run the engine: %v", err)
+	}
+	if source.delivery != nil {
+		t.Errorf("the batch was refused although the backbone took it in the end: %v", source.delivery)
+	}
+	if sink.tried() != 3 {
+		t.Errorf("the backbone refused twice and the engine reached it %d times", sink.tried())
+	}
+	if len(sink.all()) != 1 {
+		t.Errorf("one event matched one rule and %d detections were published", len(sink.all()))
+	}
+}
+
+// What makes retrying safe: the same batch decided again names the same
+// detections, so whatever materialises them rewrites what it holds rather than
+// counting a finding twice.
+func TestABatchDecidedTwiceNamesTheSameDetections(t *testing.T) {
+	rules := pinned{id: "ruleset-under-test", held: true, programs: []*detection.Program{
+		compiled(t, "authentication.ended_in_failure", "failure"),
+	}}
+	names := func() []string {
+		source := &oneBatch{records: []analysis.Record{
+			{Partition: 0, Offset: 1, Value: admitted(t, "event-one")},
+			{Partition: 0, Offset: 2, Value: admitted(t, "event-two")},
+		}}
+		engine, _, _, sink := engineReporting(t, source, rules, slog.LevelInfo, &collected{})
+		if err := engine.Run(context.Background()); err != nil {
+			t.Fatalf("run the engine: %v", err)
+		}
+
+		var named []string
+		for _, made := range sink.all() {
+			named = append(named, made.GetDetectionId())
+		}
+		return named
+	}
+
+	first, replayed := names(), names()
+	if len(first) == 0 {
+		t.Fatal("the batch decided nothing to compare")
+	}
+	if !slices.Equal(first, replayed) {
+		t.Errorf("the same batch was detected as %v and then as %v", first, replayed)
+	}
+}
+
+func reports(entries []map[string]any, message string) bool {
+	for _, entry := range entries {
+		if entry["msg"] == message {
+			return true
+		}
+	}
+	return false
 }

@@ -58,6 +58,7 @@ func provision(ctx context.Context) error {
 	logger.Info("backbone_topology_current",
 		slog.String("events_topic", settings.topology.Events.Name),
 		slog.String("quarantine_topic", settings.topology.Quarantine.Name),
+		slog.String("detections_topic", settings.topology.Detections.Name),
 		slog.Int("changes", len(changed)),
 	)
 	return nil

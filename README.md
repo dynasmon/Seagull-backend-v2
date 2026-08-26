@@ -6,10 +6,10 @@ that pipeline rather than the other way around.
 
 This repository holds the foundation, the first vertical slice and the runtime
 the analysis pipeline is built inside: telemetry travels from an agent to a
-queryable store, every step of it is durable, and a second consumer reads the
-same stream, decides it against a ruleset and puts what it found back on the
-backbone in a contract of its own. Nothing materialises a detection yet;
-correlation and the control plane are not implemented.
+queryable store, every step of it is durable, a second consumer reads the same
+stream and decides it against a ruleset, and what it finds crosses the backbone
+in a contract of its own and becomes queryable too. Correlation, alerts and the
+control plane are not implemented.
 
 ## What runs today
 
@@ -25,9 +25,12 @@ cmd/control-api     ── protocol descriptor           v                    v
                                                  |                    |
                                                  ▼                    ▼
                                     ClickHouse  security_events   security.detections
-                                                 |
-                                                 ▼
-                                       security.events.quarantine
+                                                 |                    |
+                                                 ▼                    ▼
+                                       security.events.quarantine  cmd/detection-writer
+                                                                      |
+                                                                      ▼
+                                                       ClickHouse  security_detections
 ```
 
 `ingest-gateway` authenticates an agent by its client certificate, admits or
@@ -70,6 +73,12 @@ meaning, such as an account name or the collected line itself. Every string the
 contract carries has a recorded decision and a reason, and a string added to the
 contract fails the suite until it has one. [ADR 5](docs/decisions/0005-the-canonical-form-is-for-analysis.md)
 carries the reasoning. Detection runs behind the same route.
+
+`detection-writer` consumes `security.detections` and makes a detection
+queryable. It is the same shape as the event writer — its own group, its own lag,
+commit only after the batch is durable, quarantine what it cannot store — and it
+never reads a rule, exactly as the analysis engine never reaches a store. The two
+meet on the backbone and nowhere else.
 
 `store-migrator` applies the store schema and exits. It is the only thing that
 changes the shape of the store, and `event-writer` refuses to start against a
@@ -276,10 +285,50 @@ seagull_detection_batches_total{outcome="retried"} 2
 ```
 
 Against `matches_total`, `published_total` is the number that says whether what
-the engine decided actually left the process. Whatever materialises a detection
-is a consumer of its own and knows nothing about the rules —
+the engine decided actually left the process. What materialises a detection is a
+consumer of its own and knows nothing about the rules —
 [ADR 11](docs/decisions/0011-a-detection-is-not-an-alert.md) records why a
 detection, an alert and an event stay three different things.
+
+## Where a detection is kept
+
+`detection-writer` consumes `security.detections` into ClickHouse
+`security_detections`, one row per detection, with the evidence stored as five
+parallel arrays rather than as a document: what a rule read is a contract field
+path and what the event held is a value, and both are worth filtering on. v1 kept
+the equivalent in a JSON column and nothing could query it.
+
+```sql
+SELECT rule_id, severity, count()
+FROM security_detections FINAL
+WHERE tenant_id = 'default' AND event_time > now() - INTERVAL 1 DAY
+GROUP BY rule_id, severity;
+
+SELECT detection_id, evidence_field, evidence_held
+FROM security_detections FINAL
+WHERE has(evidence_field, 'authentication.network.source.ip');
+```
+
+The table is a `ReplacingMergeTree` ordered by `(tenant_id, event_time,
+detection_id)` and partitioned by month, on the same timeline and the same
+partitioning as the events it was made from. The sort key ends in the name the
+engine gave the detection, so a replayed batch replaces rather than accumulates;
+`FINAL` is required of a query that must not see a replayed row, which is the
+same at-least-once story the event store tells rather than a claim of
+exactly-once.
+
+**Detections are kept for 730 days and telemetry for 365**, which is the right
+way round: the finding is what an analyst returns to, the raw log is bulk, and a
+detection carries its own evidence, so it stays readable after the events behind
+it expire.
+
+**There is no alerts table, and there will not be one here.** An alert is mutable,
+owned by a person, and has a state machine with an actor on every transition —
+a relational workload, and the opposite of an analytical one. It is not built
+yet because nothing produces one.
+[ADR 12](docs/decisions/0012-storage-is-owned-per-workload.md) records what each
+class of data needs, which classes have an owner today, and which are left as a
+question because they have no producer.
 
 ## How a rule is held to what it was written for
 
@@ -362,6 +411,7 @@ make down
 cmd/                    one directory per process
   ingest-gateway/       the only durable entry point for telemetry
   analysis-engine/      the backbone's analytical consumer
+  detection-writer/     what makes a detection queryable
   event-writer/         the backbone's consumer half, writing to the store
   store-migrator/       applies the store schema, then exits
   backbone-migrator/    applies the topic topology, then exits
@@ -375,6 +425,7 @@ internal/
   ingest/               admission control and the ingest transport
   analysis/             what analysing an event off the backbone means
   eventstore/           what a stored event is, and what is refused
+  detectionstore/       what a stored detection is, and what is refused
   rulefile/             the rule file format, with the cases written beside a rule
   ruleset/              the compiled rules a process is pinned to
   broker/               the Redpanda adapter
@@ -474,6 +525,7 @@ numbers come from.
 | `SEAGULL_BACKBONE_EVENTS_RETENTION` | `168h` | how far back a replay can reach |
 | `SEAGULL_BACKBONE_QUARANTINE_TOPIC` | `security.events.quarantine` | refused records |
 | `SEAGULL_BACKBONE_DETECTIONS_TOPIC` | `security.detections` | what the rules decided |
+| `SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_TOPIC` | `security.detections.quarantine` | records the detection writer refused |
 | `SEAGULL_BACKBONE_QUARANTINE_PARTITIONS` | `3` | |
 | `SEAGULL_BACKBONE_QUARANTINE_RETENTION` | `720h` | |
 | `SEAGULL_BACKBONE_REPLICAS` | `1` | replication factor of every topic |
@@ -517,6 +569,27 @@ the gateway and the writer verify it before they serve.
 The connection to the store carries no TLS, deliberately: the gateway already
 reaches Redpanda in the clear on the same internal network, and securing one leg
 of the data plane and not the other would describe a boundary that is not there.
+
+### detection-writer
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEAGULL_DETECTION_WRITER_CONSUMER_GROUP` | `detection-writer` | the consumer group that owns the offsets |
+| `SEAGULL_DETECTION_WRITER_BATCH_DETECTIONS` | `500` | records per poll, and per store batch |
+| `SEAGULL_DETECTION_WRITER_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
+| `SEAGULL_DETECTION_WRITER_RETRY_DELAY` | `1s` | first delay before a batch is retried |
+| `SEAGULL_DETECTION_WRITER_RETRY_DELAY_MAX` | `30s` | ceiling the delay backs off to |
+| `SEAGULL_DETECTION_STORE_ADDRESS` | required | the store's native protocol address, `clickhouse:9000` |
+| `SEAGULL_DETECTION_STORE_DATABASE` | `seagull` | the database holding `security_detections` |
+| `SEAGULL_DETECTION_STORE_USER` | `seagull` | |
+| `SEAGULL_DETECTION_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
+| `SEAGULL_DETECTION_STORE_TIMEOUT` | `30s` | budget for one write attempt, and to dial |
+
+A batch is smaller than the event writer's because detections are rarer than the
+telemetry they are made from, and waiting to fill five thousand of them would
+keep the first one out of the store for longer than anyone would accept. The
+store settings are the writer's own and point at the same server by default: two
+processes choosing the same adapter is not the same as sharing one.
 
 ### control-api
 
@@ -575,6 +648,7 @@ Two topics, declared once in `internal/broker` and applied by
 | `security.events.raw` | 12 | 7 days | admitted telemetry, keyed by agent |
 | `security.events.quarantine` | 3 | 30 days | refused records, kept longer because they are the ones still waiting to be read |
 | `security.detections` | 6 | 30 days | what the rules decided, keyed by the agent it is about; narrower than the stream it is made from and kept as long as a refused record, for the same reason |
+| `security.detections.quarantine` | 3 | 30 days | records the detection writer could not store; one quarantine per stream, because a refused record's partition and offset only mean something alongside the topic they came from |
 
 **Partitions and replication are refused, never converged.** Records are keyed
 by `agent_id`, so growing the partition count moves an agent to a different

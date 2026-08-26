@@ -52,6 +52,12 @@ func TestTheDefaultTopologyIsTheOneTheBackboneNeeds(t *testing.T) {
 		t.Errorf("detections are kept %s and the events behind them %s: a detection is the one still waiting to be read",
 			topology.Detections.Retention, topology.Events.Retention)
 	}
+	if topology.DetectionsQuarantine.Name != "security.detections.quarantine" {
+		t.Errorf("the detection quarantine topic is %q", topology.DetectionsQuarantine.Name)
+	}
+	if topology.DetectionsQuarantine.Name == topology.Quarantine.Name {
+		t.Error("both streams quarantine to one topic, and a refused record's offset only means something alongside its own topic")
+	}
 	for _, topic := range topology.Topics() {
 		if err := topic.Validate(); err != nil {
 			t.Errorf("the default topology is not valid: %v", err)
@@ -61,16 +67,19 @@ func TestTheDefaultTopologyIsTheOneTheBackboneNeeds(t *testing.T) {
 
 func TestEveryTopicPropertyIsConfigurablePerEnvironment(t *testing.T) {
 	topology := declared(t, map[string]string{
-		"SEAGULL_BACKBONE_EVENTS_TOPIC":          "tenant.events",
-		"SEAGULL_BACKBONE_EVENTS_PARTITIONS":     "24",
-		"SEAGULL_BACKBONE_EVENTS_RETENTION":      "48h",
-		"SEAGULL_BACKBONE_QUARANTINE_TOPIC":      "tenant.refused",
-		"SEAGULL_BACKBONE_QUARANTINE_PARTITIONS": "6",
-		"SEAGULL_BACKBONE_QUARANTINE_RETENTION":  "72h",
-		"SEAGULL_BACKBONE_DETECTIONS_TOPIC":      "tenant.detections",
-		"SEAGULL_BACKBONE_DETECTIONS_PARTITIONS": "9",
-		"SEAGULL_BACKBONE_DETECTIONS_RETENTION":  "96h",
-		"SEAGULL_BACKBONE_REPLICAS":              "3",
+		"SEAGULL_BACKBONE_EVENTS_TOPIC":                     "tenant.events",
+		"SEAGULL_BACKBONE_EVENTS_PARTITIONS":                "24",
+		"SEAGULL_BACKBONE_EVENTS_RETENTION":                 "48h",
+		"SEAGULL_BACKBONE_QUARANTINE_TOPIC":                 "tenant.refused",
+		"SEAGULL_BACKBONE_QUARANTINE_PARTITIONS":            "6",
+		"SEAGULL_BACKBONE_QUARANTINE_RETENTION":             "72h",
+		"SEAGULL_BACKBONE_DETECTIONS_TOPIC":                 "tenant.detections",
+		"SEAGULL_BACKBONE_DETECTIONS_PARTITIONS":            "9",
+		"SEAGULL_BACKBONE_DETECTIONS_RETENTION":             "96h",
+		"SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_TOPIC":      "tenant.detections.refused",
+		"SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_PARTITIONS": "2",
+		"SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_RETENTION":  "48h",
+		"SEAGULL_BACKBONE_REPLICAS":                         "3",
 	})
 
 	if topology.Events.Partitions != 24 || topology.Events.Retention != 48*time.Hour {
@@ -81,6 +90,10 @@ func TestEveryTopicPropertyIsConfigurablePerEnvironment(t *testing.T) {
 	}
 	if topology.Detections.Partitions != 9 || topology.Detections.Retention != 96*time.Hour {
 		t.Errorf("detections read back as %d partitions and %s", topology.Detections.Partitions, topology.Detections.Retention)
+	}
+	if topology.DetectionsQuarantine.Partitions != 2 || topology.DetectionsQuarantine.Retention != 48*time.Hour {
+		t.Errorf("the detection quarantine read back as %d partitions and %s",
+			topology.DetectionsQuarantine.Partitions, topology.DetectionsQuarantine.Retention)
 	}
 	for _, topic := range topology.Topics() {
 		if topic.Replicas != 3 {

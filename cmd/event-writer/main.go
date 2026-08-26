@@ -67,7 +67,7 @@ func writer(ctx context.Context) error {
 	// to consume when a topic it depends on is missing or reshaped.
 	topologyCtx, cancelTopology := context.WithTimeout(ctx, settings.store.Timeout)
 	defer cancelTopology()
-	drift, err := consumer.VerifyTopics(topologyCtx, settings.topology.Topics()...)
+	drift, err := consumer.VerifyTopics(topologyCtx, settings.topology.Events, settings.topology.Quarantine)
 	if err != nil {
 		return err
 	}

@@ -21,6 +21,10 @@ type configuration struct {
 	batchEvents  int
 	fetchMaxWait time.Duration
 	startTimeout time.Duration
+
+	publishTimeout time.Duration
+	retryDelay     time.Duration
+	maxRetryDelay  time.Duration
 }
 
 // The engine reads the same topic as the writer under a group of its own, so
@@ -37,6 +41,10 @@ func load(parser *config.Parser) (configuration, error) {
 		batchEvents:  parser.Int("SEAGULL_ANALYSIS_BATCH_EVENTS", 5_000, 1, 100_000),
 		fetchMaxWait: parser.Duration("SEAGULL_ANALYSIS_FETCH_MAX_WAIT", time.Second, 10*time.Millisecond, time.Minute),
 		startTimeout: parser.Duration("SEAGULL_ANALYSIS_START_TIMEOUT", 30*time.Second, time.Second, 5*time.Minute),
+
+		publishTimeout: parser.Duration("SEAGULL_DETECTION_PUBLISH_TIMEOUT", 30*time.Second, time.Second, 5*time.Minute),
+		retryDelay:     parser.Duration("SEAGULL_DETECTION_RETRY_DELAY", time.Second, 100*time.Millisecond, time.Minute),
+		maxRetryDelay:  parser.Duration("SEAGULL_DETECTION_RETRY_DELAY_MAX", 30*time.Second, time.Second, 10*time.Minute),
 	}
 
 	return loaded, parser.Err()

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -26,16 +27,19 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ruleset"
 	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
+	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 )
 
 // The runtime boundary of the second consumer: it joins a group of its own on
 // the topic the gateway publishes to, decides every event it can route against
-// the ruleset it is pinned to, and advances its committed position past both a
-// record it cannot read and a class it cannot route.
+// the ruleset it is pinned to, puts what it found on a topic of its own, and
+// advances its committed position past both a record it cannot read and a class
+// it cannot route.
 func TestTheEngineConsumesTheBackboneInAGroupOfItsOwn(t *testing.T) {
 	addresses := brokers(t)
 	topic := temporaryTopic(t, addresses)
+	found := temporaryTopic(t, addresses)
 	group := fmt.Sprintf("analysis-engine-%d", time.Now().UnixNano())
 
 	admitEvents(t, addresses, topic, 4)
@@ -69,12 +73,26 @@ func TestTheEngineConsumesTheBackboneInAGroupOfItsOwn(t *testing.T) {
 		t.Fatalf("the engine refused a topic it should accept: %v", err)
 	}
 
+	detections, err := broker.NewDetections(broker.Config{
+		Brokers:  addresses,
+		Topic:    found,
+		ClientID: "integration-test",
+	})
+	if err != nil {
+		t.Fatalf("build the detection publisher: %v", err)
+	}
+	t.Cleanup(detections.Close)
+
 	var reported bytes.Buffer
 	engine, err := analysis.NewEngine(analysis.EngineOptions{
-		Source:  analysedBy(consumer),
-		Rules:   pinnedTo(t, failedAuthentication(t)),
-		Metrics: analysis.NewMetrics(metrics.New("integration")),
-		Logger:  slog.New(slog.NewJSONHandler(&reported, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		Source:         analysedBy(consumer),
+		Rules:          pinnedTo(t, failedAuthentication(t)),
+		Detections:     detections,
+		Metrics:        analysis.NewMetrics(metrics.New("integration")),
+		Logger:         slog.New(slog.NewJSONHandler(&reported, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		PublishTimeout: 30 * time.Second,
+		RetryDelay:     100 * time.Millisecond,
+		MaxRetryDelay:  time.Second,
 	})
 	if err != nil {
 		t.Fatalf("build the engine: %v", err)
@@ -95,8 +113,63 @@ func TestTheEngineConsumesTheBackboneInAGroupOfItsOwn(t *testing.T) {
 
 	// Read only after the engine has stopped, so the buffer the test reads is
 	// the one the engine finished writing.
-	if detections := detectionsIn(t, reported.String()); len(detections) != 4 {
-		t.Fatalf("four admitted failures produced %d detections: %v", len(detections), detections)
+	events := detectionsIn(t, reported.String())
+	if len(events) != 4 {
+		t.Fatalf("four admitted failures produced %d detections: %v", len(events), events)
+	}
+
+	assertDetectionsReached(t, addresses, found, events)
+}
+
+// The half of the stage that a unit test cannot show: the detections the engine
+// decided are on the backbone, in their own contract, readable by a consumer
+// that knows nothing about this process.
+func assertDetectionsReached(t *testing.T, addresses []string, topic string, events []string) {
+	t.Helper()
+
+	records := consume(t, addresses, topic, len(events))
+	named := make(map[string]struct{}, len(records))
+	agents := make(map[string]struct{}, len(records))
+
+	for _, record := range records {
+		if schema := header(record, "schema"); schema != "seagull.detection.v1.Detection" {
+			t.Errorf("a detection arrived declaring schema %q", schema)
+		}
+
+		var made detectionv1.Detection
+		if err := proto.Unmarshal(record.Value, &made); err != nil {
+			t.Fatalf("a record on the detection topic is not a detection: %v", err)
+		}
+
+		if made.GetRule().GetId() != "authentication.failed" {
+			t.Errorf("a detection names rule %q", made.GetRule().GetId())
+		}
+		if made.GetRulesetId() == "" {
+			t.Error("a detection does not say which ruleset decided it")
+		}
+		if made.GetSeverity() != detectionv1.Severity_SEVERITY_HIGH {
+			t.Errorf("a high rule produced a detection of severity %s", made.GetSeverity())
+		}
+		if len(made.GetEvidence()) == 0 {
+			t.Error("a detection reached the backbone with nothing to say why it was made")
+		}
+		if got := string(record.Key); got != made.GetOrigin().GetAgentId() {
+			t.Errorf("a detection about agent %q is keyed by %q", made.GetOrigin().GetAgentId(), got)
+		}
+
+		named[made.GetDetectionId()] = struct{}{}
+		agents[made.GetOrigin().GetAgentId()] = struct{}{}
+		if !slices.Contains(events, made.GetSourceEventIds()[0]) {
+			t.Errorf("a detection names source event %v, which the engine never reported",
+				made.GetSourceEventIds())
+		}
+	}
+
+	if len(named) != len(events) {
+		t.Errorf("%d detections were published under %d names", len(events), len(named))
+	}
+	if len(agents) == 0 {
+		t.Error("no detection said which agent it was about")
 	}
 }
 

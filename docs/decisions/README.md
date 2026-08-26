@@ -14,3 +14,4 @@ rediscovered by reading the code.
 - [8. A ruleset is named by what is in it](0008-a-ruleset-is-named-by-what-is-in-it.md)
 - [9. An absent field answers no question](0009-an-absent-field-answers-no-question.md)
 - [10. A rule carries the cases it was written for](0010-a-rule-carries-the-cases-it-was-written-for.md)
+- [11. A detection is not an alert](0011-a-detection-is-not-an-alert.md)

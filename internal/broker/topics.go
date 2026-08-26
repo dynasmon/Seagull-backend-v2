@@ -33,9 +33,10 @@ type Topic struct {
 }
 
 type Topology struct {
-	Events     Topic
-	Quarantine Topic
-	Detections Topic
+	Events               Topic
+	Quarantine           Topic
+	Detections           Topic
+	DetectionsQuarantine Topic
 }
 
 // Refused records and detections are both kept far longer than admitted events:
@@ -69,10 +70,23 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:     cleanupDelete,
 			Compression: compressionZstd,
 		},
+		// One quarantine per stream, not one for the platform: a refused record
+		// carries the partition and offset it came from, and those only mean
+		// something alongside the topic they came from.
+		DetectionsQuarantine: Topic{
+			Name:        parser.String("SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_TOPIC", "security.detections.quarantine"),
+			Partitions:  int32(parser.Int("SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_PARTITIONS", 3, 1, 1_000)),
+			Replicas:    replicas,
+			Retention:   parser.Duration("SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:     cleanupDelete,
+			Compression: compressionZstd,
+		},
 	}
 }
 
-func (t Topology) Topics() []Topic { return []Topic{t.Events, t.Quarantine, t.Detections} }
+func (t Topology) Topics() []Topic {
+	return []Topic{t.Events, t.Quarantine, t.Detections, t.DetectionsQuarantine}
+}
 
 func (t Topic) Validate() error {
 	switch {

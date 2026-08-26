@@ -22,6 +22,8 @@ type Metrics struct {
 	evaluations *prometheus.CounterVec
 	matches     *prometheus.CounterVec
 	deciding    *prometheus.HistogramVec
+	emitted     prometheus.Counter
+	batches     *prometheus.CounterVec
 }
 
 // Created once per process and handed to the engine, as the writer does it.
@@ -90,6 +92,18 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Help:      "Time spent deciding one event against every rule on its route.",
 			Buckets:   []float64{0.000005, 0.000025, 0.0001, 0.00025, 0.001, 0.005, 0.025},
 		}, []string{"route"}),
+		emitted: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "detection",
+			Name:      "published_total",
+			Help:      "Detections the backbone made durable.",
+		}),
+		batches: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "detection",
+			Name:      "batches_total",
+			Help:      "Batches of detections by whether the backbone took them; a retry is counted apart from the batch it belongs to.",
+		}, []string{"outcome"}),
 	}
 	registry.MustRegister(
 		instruments.events,
@@ -102,6 +116,8 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 		instruments.evaluations,
 		instruments.matches,
 		instruments.deciding,
+		instruments.emitted,
+		instruments.batches,
 	)
 	return instruments
 }
@@ -157,6 +173,19 @@ func (m *Metrics) evaluated(route Route, rules int, took time.Duration) {
 func (m *Metrics) detected(route Route, severity detection.Severity) {
 	m.matches.WithLabelValues(string(route), string(severity)).Inc()
 }
+
+// Against matches_total this is the number that says whether what the engine
+// decided actually left the process: a gap between the two is findings nobody
+// downstream has been told about.
+func (m *Metrics) published(detections int) {
+	m.emitted.Add(float64(detections))
+	m.batches.WithLabelValues("published").Inc()
+}
+
+// Counted apart from the batch it belongs to, so the two together say how hard
+// the engine had to work to make one batch durable rather than how many batches
+// there were.
+func (m *Metrics) publishRetried() { m.batches.WithLabelValues("retried").Inc() }
 
 func (m *Metrics) refused(reason string) {
 	m.events.WithLabelValues("refused").Inc()

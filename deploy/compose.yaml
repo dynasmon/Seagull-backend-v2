@@ -13,6 +13,9 @@ x-backbone: &backbone
   SEAGULL_BACKBONE_DETECTIONS_TOPIC: security.detections
   SEAGULL_BACKBONE_DETECTIONS_PARTITIONS: ${SEAGULL_BACKBONE_DETECTIONS_PARTITIONS:-6}
   SEAGULL_BACKBONE_DETECTIONS_RETENTION: ${SEAGULL_BACKBONE_DETECTIONS_RETENTION:-720h}
+  SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_TOPIC: security.detections.quarantine
+  SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_PARTITIONS: ${SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_PARTITIONS:-3}
+  SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_RETENTION: ${SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_RETENTION:-720h}
   SEAGULL_BACKBONE_REPLICAS: ${SEAGULL_BACKBONE_REPLICAS:-1}
 
 # The development certificates are owned by whoever ran `make dev-pki`, and the
@@ -154,6 +157,29 @@ services:
       SEAGULL_EVENT_STORE_DATABASE: ${SEAGULL_EVENT_STORE_DATABASE:-seagull}
       SEAGULL_EVENT_STORE_USER: ${SEAGULL_EVENT_STORE_USER:-seagull}
       SEAGULL_EVENT_STORE_PASSWORD: ${SEAGULL_EVENT_STORE_PASSWORD:-}
+      SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
+      SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    <<: *hardening
+
+  detection-writer:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        COMPONENT: detection-writer
+        VERSION: ${SEAGULL_VERSION:-dev}
+    depends_on:
+      backbone-migrator:
+        condition: service_completed_successfully
+      store-migrator:
+        condition: service_completed_successfully
+    networks: [backbone]
+    environment:
+      <<: *backbone
+      SEAGULL_DETECTION_STORE_ADDRESS: clickhouse:9000
+      SEAGULL_DETECTION_STORE_DATABASE: ${SEAGULL_DETECTION_STORE_DATABASE:-seagull}
+      SEAGULL_DETECTION_STORE_USER: ${SEAGULL_DETECTION_STORE_USER:-seagull}
+      SEAGULL_DETECTION_STORE_PASSWORD: ${SEAGULL_DETECTION_STORE_PASSWORD:-}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
     <<: *hardening

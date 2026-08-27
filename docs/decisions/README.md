@@ -16,3 +16,4 @@ rediscovered by reading the code.
 - [10. A rule carries the cases it was written for](0010-a-rule-carries-the-cases-it-was-written-for.md)
 - [11. A detection is not an alert](0011-a-detection-is-not-an-alert.md)
 - [12. Storage is owned per workload, and an alert is not a detection](0012-storage-is-owned-per-workload.md)
+- [13. A query is a scope, a window and a question](0013-a-query-is-a-scope-a-window-and-a-question.md)

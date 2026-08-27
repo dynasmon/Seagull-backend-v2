@@ -28,22 +28,23 @@ const (
 // refuses one that is not, so a capability added tomorrow is governed by the
 // rules below instead of by nothing. The longest matching prefix wins.
 var layers = map[string]layer{
-	"cmd":                    executable,
-	"internal/agentidentity": domain,
-	"internal/analysis":      capability,
-	"internal/broker":        adapter,
-	"internal/clickhouse":    adapter,
-	"internal/detection":     domain,
-	"internal/devpki":        development,
-	"internal/event":         domain,
-	"internal/eventstore":    capability,
-	"internal/ingest":        capability,
-	"internal/platform":      platform,
-	"internal/protocol":      domain,
-	"internal/rulefile":      adapter,
-	"internal/ruleset":       capability,
-	"tests":                  suite,
-	"tools":                  tool,
+	"cmd":                     executable,
+	"internal/agentidentity":  domain,
+	"internal/analysis":       capability,
+	"internal/broker":         adapter,
+	"internal/clickhouse":     adapter,
+	"internal/detection":      domain,
+	"internal/detectionstore": capability,
+	"internal/devpki":         development,
+	"internal/event":          domain,
+	"internal/eventstore":     capability,
+	"internal/ingest":         capability,
+	"internal/platform":       platform,
+	"internal/protocol":       domain,
+	"internal/rulefile":       adapter,
+	"internal/ruleset":        capability,
+	"tests":                   suite,
+	"tools":                   tool,
 }
 
 // What each layer may name among the packages this module owns, on top of its
@@ -110,6 +111,14 @@ var within = map[string]restriction{
 			modulePath + "/internal/platform/tlsx",
 		},
 		because: "what analysing an event means has no transport of its own: this half is reached from the backbone",
+	},
+	"internal/detectionstore": {
+		prefixes: []string{
+			"net/http",
+			modulePath + "/internal/platform/httpx",
+			modulePath + "/internal/platform/tlsx",
+		},
+		because: "what a stored detection is has no transport of its own: this half is reached from the backbone",
 	},
 	"internal/eventstore": {
 		prefixes: []string{

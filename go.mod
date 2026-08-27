@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.40.3
-	github.com/dynasmon/Seagull-contracts v0.2.0
+	github.com/dynasmon/Seagull-contracts v0.3.0
 	github.com/prometheus/client_golang v1.20.5
 	github.com/twmb/franz-go v1.18.0
 	github.com/twmb/franz-go/pkg/kadm v1.14.0

@@ -38,6 +38,7 @@ var layers = map[string]layer{
 	"internal/devpki":         development,
 	"internal/event":          domain,
 	"internal/eventstore":     capability,
+	"internal/hunt":           capability,
 	"internal/ingest":         capability,
 	"internal/platform":       platform,
 	"internal/protocol":       domain,

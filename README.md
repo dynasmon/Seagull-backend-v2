@@ -4,12 +4,13 @@ A security event processing platform. Telemetry becomes durable on an event
 backbone before anything else happens to it; the control plane is built around
 that pipeline rather than the other way around.
 
-This repository holds the foundation, the first vertical slice and the runtime
-the analysis pipeline is built inside: telemetry travels from an agent to a
-queryable store, every step of it is durable, a second consumer reads the same
-stream and decides it against a ruleset, and what it finds crosses the backbone
-in a contract of its own and becomes queryable too. Correlation, alerts and the
-control plane are not implemented.
+This repository holds the foundation, the first vertical slice, the runtime the
+analysis pipeline is built inside, and the plane a person reads the result from:
+telemetry travels from an agent to a queryable store, every step of it is
+durable, a second consumer reads the same stream and decides it against a
+ruleset, what it finds crosses the backbone in a contract of its own and becomes
+queryable too, and both stores can be asked questions within a scope, a window
+and a budget. Correlation, alerts and the control plane are not implemented.
 
 ## What runs today
 
@@ -31,6 +32,8 @@ cmd/control-api     ── protocol descriptor           v                    v
                                                                       |
                                                                       ▼
                                                        ClickHouse  security_detections
+
+cmd/query-api       ── mutual TLS, protobuf ──▶  both tables, read only
 ```
 
 `ingest-gateway` authenticates an agent by its client certificate, admits or
@@ -91,6 +94,12 @@ data plane refuse to start when a topic they depend on is missing or reshaped.
 `control-api` serves the protocol descriptor an agent needs before it can talk
 to anything else. It exists mainly to prove that a second executable reuses the
 platform foundation without copying it.
+
+`query-api` is the read plane. It holds the only read connection to the store,
+consumes no topic and writes nothing, so an expensive question can reach neither
+the pipeline that is still admitting telemetry nor the surface an operator acts
+from. A caller is authenticated by certificate and the tenants they may read come
+from it, so a query is answered within a scope the request cannot widen.
 
 ## What a detection rule is
 
@@ -330,6 +339,69 @@ yet because nothing produces one.
 class of data needs, which classes have an owner today, and which are left as a
 question because they have no producer.
 
+## How what was stored is read back
+
+`query-api` answers questions about both tables. A query is three things, and
+only the last of them comes from the caller:
+
+```text
+scope    which tenants may be read      from the caller's certificate
+window   which stretch of time          required, half open, bounded
+question which records within it        the caller's, held to the contract
+```
+
+A question is written in the vocabulary of the contract, never of the store —
+`authentication.user.name`, not `auth_user_name` — and the field, the operator
+and every literal are checked against what the contract says the field carries
+before the store is asked anything:
+
+```protobuf
+Query {
+  range: { start: 2026-08-26T00:00:00Z, end: 2026-08-27T00:00:00Z }
+  where: all {
+    { field: "authentication.outcome",         operator: EQUALS,   values: ["failure"] }
+    { field: "authentication.service.name",    operator: EQUALS,   values: ["sshd"] }
+    { field: "authentication.network.source.ip", operator: STARTS_WITH, values: ["203.0.113."] }
+  }
+  limit: 100
+}
+```
+
+`POST /v1/hunt/events` answers with `seagull.event.v1.Event` records and
+`POST /v1/hunt/detections` with `seagull.detection.v1.Detection` records — the
+messages that crossed the backbone, rebuilt from the projection, so a reader
+never learns a second vocabulary. Records come back newest first.
+
+The pivot an investigation is built out of works because a detection names the
+events it was decided from and the store keeps that as a column:
+
+```text
+source_event_ids  equals  <event_id>     the detections made from this event
+evidence.field    equals  <field path>   the detections a rule read this field for
+```
+
+**The scope is not a filter.** A query cannot be compiled without one, an empty
+one reads nothing rather than everything, and the tenant condition is the first
+thing in every statement the adapter builds. Today it comes from the caller's
+certificate — the common name says who is asking, the organisation says which
+tenants they may read — so the listener has no plaintext mode and no mode without
+a client certificate authority.
+
+**A page is resumed by a key, not by an offset**, and the cursor carries a
+signature of the query that issued it, so page two of one question cannot be
+spent on another with a wider scope or different filters. A page that carried
+anything is followed by a cursor; only an empty page says the range is
+exhausted, because a store answers within a budget and can return fewer records
+than it holds.
+
+Every question is bounded: 32 predicates, 8 levels of nesting, 256 literals to a
+predicate and 512 bytes to a literal are structural, and the widest window, the
+page size, the read budget and how much of the store one read may examine are
+configured. There is no regular expression and no wildcard, for the same reason
+the rule language has none: a pattern hands the caller control of how much of the
+store a question reads. [ADR 13](docs/decisions/0013-a-query-is-a-scope-a-window-and-a-question.md)
+carries the reasoning, including why there is no parser yet.
+
 ## How a rule is held to what it was written for
 
 A rule carries the cases it was written to satisfy, in the same file and in the
@@ -378,7 +450,7 @@ records why a case is beside the rule rather than in it.
 ## Getting started from a clean clone
 
 ```bash
-make dev-pki            # mint a development CA, gateway and agent certificates
+make dev-pki            # mint a development CA, server, agent and caller certificates
 make up                 # build the images and start Redpanda + both services
 make verify             # the full gate: lint, tests, race detector
 ```
@@ -386,17 +458,23 @@ make verify             # the full gate: lint, tests, race detector
 `make up` writes nothing outside the repository and reads nothing that is not in
 it. The development material lands in `.local/pki`, which is ignored by Git.
 
-Send a batch through the running gateway:
+Send a batch through the running gateway, and ask the query plane what became of
+it:
 
 ```bash
 go run ./tools/devprobe -endpoint https://127.0.0.1:8443
+go run ./tools/devprobe -hunt https://127.0.0.1:8444
 ```
+
+The caller certificate `make dev-pki` mints is authorised for the `default`
+tenant, which is the one the local gateway stamps on everything it admits.
 
 If a port is already taken on your machine, publish somewhere else:
 
 ```bash
 SEAGULL_GATEWAY_PUBLISH=127.0.0.1:18443 \
-SEAGULL_CONTROL_API_PUBLISH=127.0.0.1:18080 make up
+SEAGULL_CONTROL_API_PUBLISH=127.0.0.1:18080 \
+SEAGULL_QUERY_API_PUBLISH=127.0.0.1:18444 make up
 ```
 
 Stop everything and drop its state:
@@ -416,6 +494,7 @@ cmd/                    one directory per process
   store-migrator/       applies the store schema, then exits
   backbone-migrator/    applies the topic topology, then exits
   control-api/          the control plane entry point
+  query-api/            the read plane, and the only reader of the store
 
 internal/
   event/                what a well formed event is
@@ -426,6 +505,7 @@ internal/
   analysis/             what analysing an event off the backbone means
   eventstore/           what a stored event is, and what is refused
   detectionstore/       what a stored detection is, and what is refused
+  hunt/                 what a query is, who may ask it, and the transport it arrives on
   rulefile/             the rule file format, with the cases written beside a rule
   ruleset/              the compiled rules a process is pinned to
   broker/               the Redpanda adapter
@@ -445,7 +525,7 @@ internal/
 tests/
   fixtures/             event builders shared by the suites
   architecture/         the dependency rules, enforced
-  e2e/                  the gateway over real mutual TLS
+  e2e/                  the gateway and the query plane over real mutual TLS
   integration/          the data plane against a live Redpanda and ClickHouse
   load/                 the gateway under load, against a live Redpanda
 
@@ -603,6 +683,29 @@ processes choosing the same adapter is not the same as sharing one.
 Without TLS material the control API only starts on loopback. A listener that
 reaches further and carries no certificate is refused at startup.
 
+### query-api
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEAGULL_QUERY_API_ADDRESS` | `127.0.0.1:8444` | the query listener |
+| `SEAGULL_QUERY_API_TLS_CERT` | required | server certificate |
+| `SEAGULL_QUERY_API_TLS_KEY` | required | server private key |
+| `SEAGULL_QUERY_API_CALLER_CA` | required | the authority that signs a caller's certificate |
+| `SEAGULL_QUERY_API_WINDOW` | `720h` | the widest stretch of time a query may ask about |
+| `SEAGULL_QUERY_API_PAGE` | `50` | records in a page when the caller asks for no limit |
+| `SEAGULL_QUERY_API_PAGE_MAX` | `500` | ceiling on the page a caller may ask for |
+| `SEAGULL_QUERY_API_READ_BUDGET` | `15s` | how long one read may run in the store |
+| `SEAGULL_QUERY_API_MAX_ROWS_READ` | `50000000` | how much of the store one read may examine |
+| `SEAGULL_QUERY_API_CURSOR_KEY` | generated | signs a page token; set it when more than one replica serves one address |
+| `SEAGULL_QUERY_API_MAX_BODY` | `256KiB` | ceiling on a query body |
+| `SEAGULL_QUERY_STORE_ADDRESS` | required | ClickHouse address, read only |
+
+There is no plaintext mode and no mode without a caller authority: the scope a
+query is answered within comes from the caller's certificate, so without one
+there is nobody to be authorised as. The write timeout has to outlast the read
+budget or a query is cut off after the store has already paid for it, and the
+process refuses to start when it does not.
+
 ## The acknowledgement contract
 
 An agent may drop its local copy of a batch only when the gateway answers `200`
@@ -732,6 +835,11 @@ depending on the platform.
 import eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 ```
 
+`v0.3.0` carries `seagull.event.v1`, `seagull.ingest.v1`, `seagull.platform.v1`,
+`seagull.detection.v1` and `seagull.hunt.v1`. A page of a hunt is made of the
+same records the pipeline published, so asking a question and consuming the
+stream speak one language.
+
 Changing a message means a release of that repository, where `buf breaking`
 decides whether the change is allowed.
 
@@ -745,9 +853,12 @@ make test-load         # the ingest load scenarios against a live Redpanda
 make bench             # the hot path, one core, no infrastructure
 ```
 
-The end-to-end suite starts a real mutual TLS listener with a certificate
+The end-to-end suite starts real mutual TLS listeners with a certificate
 authority minted in the test, so no fixture files are needed and nothing depends
-on the machine it runs on. It also runs under a goroutine leak detector.
+on the machine it runs on. It also runs under a goroutine leak detector. It
+covers the gateway and the query plane, where it proves that a caller with no
+certificate is refused by the handshake and a caller authorised for nothing never
+reaches the store.
 
 `make test-integration` starts the broker and the store through
 `deploy/compose.test.yaml`, which is the only place either is reachable from the

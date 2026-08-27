@@ -172,13 +172,15 @@ func (s *Store) VerifySchema(ctx context.Context) error {
 		return fmt.Errorf("the event store is missing %d migration(s): %s — run store-migrator",
 			len(outstanding), strings.Join(names, ", "))
 	}
-	return s.verifyColumns(ctx)
+	return columnsPresent(ctx, s.connection, s.database, table, storedColumns)
 }
 
-// Verify the schema that migrations actually produced.
-func (s *Store) verifyColumns(ctx context.Context) error {
-	rows, err := s.connection.Query(ctx,
-		"SELECT name FROM system.columns WHERE database = ? AND table = ?", s.database, table)
+// Verify the schema that migrations actually produced. Shared by both stores in
+// this database, because a table and the adapter writing it drift apart the same
+// way whichever table it is.
+func columnsPresent(ctx context.Context, connection driver.Conn, database, table string, wanted []string) error {
+	rows, err := connection.Query(ctx,
+		"SELECT name FROM system.columns WHERE database = ? AND table = ?", database, table)
 	if err != nil {
 		return fmt.Errorf("read the columns of %s: %w", table, err)
 	}
@@ -197,13 +199,13 @@ func (s *Store) verifyColumns(ctx context.Context) error {
 	}
 
 	var missing []string
-	for _, column := range storedColumns {
+	for _, column := range wanted {
 		if _, ok := present[column]; !ok {
 			missing = append(missing, column)
 		}
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("%s.%s does not hold %s", s.database, table, strings.Join(missing, ", "))
+		return fmt.Errorf("%s.%s does not hold %s", database, table, strings.Join(missing, ", "))
 	}
 	return nil
 }

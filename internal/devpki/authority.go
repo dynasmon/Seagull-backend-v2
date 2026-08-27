@@ -77,14 +77,21 @@ func NewAuthority(commonName string, validity time.Duration) (*Authority, error)
 func (a *Authority) Material() Material { return a.material }
 
 func (a *Authority) IssueServer(commonName string, hosts []string, validity time.Duration) (Material, error) {
-	return a.issue(commonName, hosts, validity, x509.ExtKeyUsageServerAuth)
+	return a.issue(commonName, nil, hosts, validity, x509.ExtKeyUsageServerAuth)
 }
 
 func (a *Authority) IssueClient(commonName string, validity time.Duration) (Material, error) {
-	return a.issue(commonName, nil, validity, x509.ExtKeyUsageClientAuth)
+	return a.issue(commonName, nil, nil, validity, x509.ExtKeyUsageClientAuth)
 }
 
-func (a *Authority) issue(commonName string, hosts []string, validity time.Duration, usage x509.ExtKeyUsage) (Material, error) {
+// A caller of the read plane is named by its common name and authorised by its
+// organisation: the tenants it may read travel in the certificate, so the
+// authority decides the scope and the request never does.
+func (a *Authority) IssueCaller(commonName string, tenants []string, validity time.Duration) (Material, error) {
+	return a.issue(commonName, tenants, nil, validity, x509.ExtKeyUsageClientAuth)
+}
+
+func (a *Authority) issue(commonName string, organisation, hosts []string, validity time.Duration, usage x509.ExtKeyUsage) (Material, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return Material{}, fmt.Errorf("generate leaf key: %w", err)
@@ -97,7 +104,7 @@ func (a *Authority) issue(commonName string, hosts []string, validity time.Durat
 	now := time.Now().UTC()
 	template := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: commonName},
+		Subject:               pkix.Name{CommonName: commonName, Organization: organisation},
 		NotBefore:             now.Add(-time.Minute),
 		NotAfter:              now.Add(validity),
 		KeyUsage:              x509.KeyUsageDigitalSignature,

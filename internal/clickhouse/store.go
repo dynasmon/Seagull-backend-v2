@@ -99,6 +99,50 @@ func values(row eventstore.Row) []any {
 	}
 }
 
+// The same columns in the same order, to read a row back out. A page of a hunt
+// is scanned through these, so a column added to `values` without being added
+// here fails `agreesWithSchema` rather than shifting every field of an answer.
+func eventPointers(row *eventstore.Row) []any {
+	return []any{
+		&row.EventID,
+		&row.SchemaVersion,
+		&row.EventClass,
+		&row.EventTime,
+		&row.ObservedTime,
+		&row.IngestTime,
+
+		&row.TenantID,
+		&row.AgentID,
+		&row.HostHostname,
+		&row.HostIP,
+		&row.HostOS,
+		&row.HostArchitecture,
+
+		&row.Collector,
+		&row.Source,
+		&row.Sequence,
+
+		&row.Gateway,
+		&row.BatchID,
+
+		&row.AuthActivity,
+		&row.AuthOutcome,
+		&row.AuthOutcomeReason,
+		&row.AuthMethod,
+		&row.AuthUserName,
+		&row.AuthUserDomain,
+		&row.AuthUserUID,
+		&row.AuthServiceName,
+		&row.AuthServiceProtocol,
+		&row.AuthSourceIP,
+		&row.AuthSourcePort,
+		&row.AuthDestinationIP,
+		&row.AuthDestinationPort,
+		&row.AuthTransport,
+		&row.AuthRawRecord,
+	}
+}
+
 type Config struct {
 	Address  string
 	Database string
@@ -224,6 +268,9 @@ func agreesWithSchema() error {
 	}
 	if length := len(values(eventstore.Row{})); length != len(storedColumns) {
 		return fmt.Errorf("the store names %d columns and supplies %d values", len(storedColumns), length)
+	}
+	if length := len(eventPointers(&eventstore.Row{})); length != len(storedColumns) {
+		return fmt.Errorf("the store names %d columns and reads %d of them back", len(storedColumns), length)
 	}
 	return nil
 }

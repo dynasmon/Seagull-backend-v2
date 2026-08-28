@@ -1,0 +1,57 @@
+# Who may do what, and where. Development material; an estate replaces this file.
+#
+# Read at startup and never changed by a running process. A permission is written
+# `resource:action`; anything undeclared is refused when the file is read.
+
+schema_version: 1
+
+roles:
+  - name: analyst
+    description: reads what the platform observed and what it decided about it
+    permissions:
+      - events:read
+      - detections:read
+      - alerts:read
+
+  - name: responder
+    description: works alerts through their lifecycle without changing what detects them
+    permissions:
+      - events:read
+      - detections:read
+      - alerts:read
+      - alerts:write
+
+  - name: engineer
+    description: writes and publishes the rules the analysis engine runs
+    permissions:
+      - events:read
+      - detections:read
+      - rulesets:read
+      - rulesets:write
+
+  - name: administrator
+    description: administers the platform itself, including who may use it
+    permissions:
+      - agents:read
+      - agents:write
+      - agents:delete
+      - alerts:read
+      - alerts:write
+      - detections:read
+      - events:read
+      - policies:read
+      - rulesets:read
+      - rulesets:write
+      - sessions:read
+      - sessions:delete
+
+# A subject is the common name of a verified client certificate. An empty list is
+# never a wildcard.
+bindings:
+  - subject: dev-analyst
+    roles: [analyst]
+    tenants: [default]
+
+  - subject: dev-admin
+    roles: [administrator]
+    tenants: [default]

@@ -9,6 +9,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/ratelimit"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/run"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/tlsx"
@@ -73,7 +74,7 @@ func gateway(ctx context.Context) error {
 
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{
 		Admitter:       admitter,
-		Limiter:        ingest.NewLimiter(settings.ratePerSecond, settings.rateBurst, settings.trackedAgents),
+		Limiter:        ratelimit.NewLimiter(settings.ratePerSecond, settings.rateBurst, settings.trackedAgents),
 		MaxBodyBytes:   settings.maxBodyBytes,
 		PublishTimeout: settings.publishTimeout,
 	})

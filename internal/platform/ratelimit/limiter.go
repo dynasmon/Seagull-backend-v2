@@ -1,4 +1,7 @@
-package ingest
+// Package ratelimit holds one caller to a share of a process. It is
+// infrastructure and not a policy: what a caller is, and what share they get,
+// are decided by whoever builds the limiter.
+package ratelimit
 
 import (
 	"container/list"
@@ -8,8 +11,12 @@ import (
 )
 
 // A per-instance budget, not a cluster-wide quota: it exists so that one noisy
-// or captured agent cannot spend the whole gateway, and the tracked set is
-// capped so that many distinct agent identities cannot exhaust memory either.
+// or captured caller cannot spend the whole process, and the tracked set is
+// capped so that many distinct callers cannot exhaust memory either.
+//
+// What names a caller is the caller's business — an agent identity at the
+// gateway, a certificate subject at the control plane. The budget is the same
+// shape either way, which is why this is here and not inside one of them.
 type Limiter struct {
 	perSecond rate.Limit
 	burst     int
@@ -21,7 +28,7 @@ type Limiter struct {
 }
 
 type bucketEntry struct {
-	agentID string
+	key     string
 	limiter *rate.Limiter
 }
 
@@ -35,21 +42,21 @@ func NewLimiter(perSecond float64, burst, capacity int) *Limiter {
 	}
 }
 
-func (l *Limiter) Allow(agentID string) bool {
+func (l *Limiter) Allow(key string) bool {
 	if l == nil || l.perSecond <= 0 {
 		return true
 	}
 
 	l.mu.Lock()
-	element, known := l.buckets[agentID]
+	element, known := l.buckets[key]
 	if known {
 		l.order.MoveToFront(element)
 	} else {
 		element = l.order.PushFront(&bucketEntry{
-			agentID: agentID,
+			key:     key,
 			limiter: rate.NewLimiter(l.perSecond, l.burst),
 		})
-		l.buckets[agentID] = element
+		l.buckets[key] = element
 		l.evictLocked()
 	}
 	limiter := element.Value.(*bucketEntry).limiter
@@ -65,7 +72,7 @@ func (l *Limiter) evictLocked() {
 			return
 		}
 		l.order.Remove(oldest)
-		delete(l.buckets, oldest.Value.(*bucketEntry).agentID)
+		delete(l.buckets, oldest.Value.(*bucketEntry).key)
 	}
 }
 

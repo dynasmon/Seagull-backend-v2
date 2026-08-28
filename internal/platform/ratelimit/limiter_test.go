@@ -1,15 +1,15 @@
-package ingest_test
+package ratelimit_test
 
 import (
 	"fmt"
 	"sync"
 	"testing"
 
-	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/ratelimit"
 )
 
 func TestBurstIsAllowedAndTheRestIsRefused(t *testing.T) {
-	limiter := ingest.NewLimiter(1, 3, 100)
+	limiter := ratelimit.NewLimiter(1, 3, 100)
 
 	for attempt := range 3 {
 		if !limiter.Allow("web-01") {
@@ -21,8 +21,8 @@ func TestBurstIsAllowedAndTheRestIsRefused(t *testing.T) {
 	}
 }
 
-func TestAgentsHaveSeparateBudgets(t *testing.T) {
-	limiter := ingest.NewLimiter(1, 1, 100)
+func TestCallersHaveSeparateBudgets(t *testing.T) {
+	limiter := ratelimit.NewLimiter(1, 1, 100)
 
 	if !limiter.Allow("web-01") || !limiter.Allow("web-02") {
 		t.Fatal("agents must not share a budget")
@@ -32,8 +32,8 @@ func TestAgentsHaveSeparateBudgets(t *testing.T) {
 	}
 }
 
-func TestTrackedAgentsAreBounded(t *testing.T) {
-	limiter := ingest.NewLimiter(100, 100, 8)
+func TestTrackedCallersAreBounded(t *testing.T) {
+	limiter := ratelimit.NewLimiter(100, 100, 8)
 
 	for index := range 1000 {
 		limiter.Allow(fmt.Sprintf("agent-%d", index))
@@ -45,7 +45,7 @@ func TestTrackedAgentsAreBounded(t *testing.T) {
 }
 
 func TestZeroRateDisablesTheLimiter(t *testing.T) {
-	limiter := ingest.NewLimiter(0, 0, 8)
+	limiter := ratelimit.NewLimiter(0, 0, 8)
 
 	for range 1000 {
 		if !limiter.Allow("web-01") {
@@ -53,19 +53,19 @@ func TestZeroRateDisablesTheLimiter(t *testing.T) {
 		}
 	}
 	if limiter.Tracked() != 0 {
-		t.Fatal("a disabled limiter must not allocate per-agent state")
+		t.Fatal("a disabled limiter must not allocate per-caller state")
 	}
 }
 
 func TestNilLimiterAllows(t *testing.T) {
-	var limiter *ingest.Limiter
+	var limiter *ratelimit.Limiter
 	if !limiter.Allow("web-01") {
 		t.Fatal("an absent limiter must not refuse")
 	}
 }
 
 func TestLimiterIsSafeUnderConcurrency(t *testing.T) {
-	limiter := ingest.NewLimiter(1000, 1000, 16)
+	limiter := ratelimit.NewLimiter(1000, 1000, 16)
 
 	var group sync.WaitGroup
 	for worker := range 32 {

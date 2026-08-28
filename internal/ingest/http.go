@@ -13,6 +13,7 @@ import (
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/log"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/ratelimit"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
 )
 
@@ -25,14 +26,14 @@ const (
 
 type HandlerOptions struct {
 	Admitter       *Admitter
-	Limiter        *Limiter
+	Limiter        *ratelimit.Limiter
 	MaxBodyBytes   int64
 	PublishTimeout time.Duration
 }
 
 type Handler struct {
 	admitter       *Admitter
-	limiter        *Limiter
+	limiter        *ratelimit.Limiter
 	maxBodyBytes   int64
 	publishTimeout time.Duration
 }

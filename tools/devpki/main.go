@@ -14,18 +14,19 @@ func main() {
 	directory := flag.String("directory", ".local/pki", "where the development material is written")
 	agentID := flag.String("agent-id", "dev-agent-01", "common name of the development agent certificate")
 	caller := flag.String("caller", "dev-analyst", "common name of the development query caller certificate")
+	admin := flag.String("admin", "dev-admin", "common name of the development control plane administrator certificate")
 	tenants := flag.String("tenants", "default", "tenants the query caller certificate is authorised to read")
-	hosts := flag.String("hosts", "localhost,127.0.0.1,ingest-gateway,query-api", "names and addresses the gateway certificate covers")
+	hosts := flag.String("hosts", "localhost,127.0.0.1,ingest-gateway,query-api,control-api", "names and addresses the gateway certificate covers")
 	validity := flag.Duration("validity", 90*24*time.Hour, "how long the issued certificates stay valid")
 	flag.Parse()
 
-	if err := generate(*directory, *agentID, *caller, strings.Split(*tenants, ","), strings.Split(*hosts, ","), *validity); err != nil {
+	if err := generate(*directory, *agentID, *caller, *admin, strings.Split(*tenants, ","), strings.Split(*hosts, ","), *validity); err != nil {
 		fmt.Fprintf(os.Stderr, "devpki: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func generate(directory, agentID, caller string, tenants, hosts []string, validity time.Duration) error {
+func generate(directory, agentID, caller, admin string, tenants, hosts []string, validity time.Duration) error {
 	authority, err := devpki.NewAuthority("Seagull Development Agent CA", validity+24*time.Hour)
 	if err != nil {
 		return err
@@ -43,7 +44,12 @@ func generate(directory, agentID, caller string, tenants, hosts []string, validi
 		return err
 	}
 
-	bundle, err := devpki.Write(directory, authority.Material(), server, client, reader)
+	administrator, err := authority.IssueCaller(admin, tenants, validity)
+	if err != nil {
+		return err
+	}
+
+	bundle, err := devpki.Write(directory, authority.Material(), server, client, reader, administrator)
 	if err != nil {
 		return err
 	}
@@ -55,5 +61,7 @@ func generate(directory, agentID, caller string, tenants, hosts []string, validi
 	fmt.Printf("agent key   %s\n", bundle.ClientKey)
 	fmt.Printf("caller      %s\n", bundle.CallerCertificate)
 	fmt.Printf("caller key  %s\n", bundle.CallerKey)
+	fmt.Printf("admin       %s\n", bundle.AdminCertificate)
+	fmt.Printf("admin key   %s\n", bundle.AdminKey)
 	return nil
 }

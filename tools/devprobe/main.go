@@ -16,46 +16,141 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
+	"github.com/dynasmon/Seagull-backend-v2/internal/hunt"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
 	"github.com/dynasmon/Seagull-backend-v2/internal/protocol"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
+	huntv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/hunt/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
 )
 
 func main() {
 	endpoint := flag.String("endpoint", "https://127.0.0.1:8443", "gateway base URL")
+	huntEndpoint := flag.String("hunt", "", "query plane base URL; asks what was stored instead of sending a batch")
+	window := flag.Duration("window", time.Hour, "how far back a hunt looks")
 	pki := flag.String("pki", ".local/pki", "directory holding the development material")
 	batchID := flag.String("batch-id", "probe-0001", "batch identifier")
 	eventID := flag.String("event-id", "99999999-8888-4777-8666-555555555555", "event identifier")
 	flag.Parse()
 
-	if err := probe(*endpoint, *pki, *batchID, *eventID); err != nil {
+	run := func() error { return probe(*endpoint, *pki, *batchID, *eventID) }
+	if *huntEndpoint != "" {
+		run = func() error { return ask(*huntEndpoint, *pki, *window) }
+	}
+	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "devprobe: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func probe(endpoint, pki, batchID, eventID string) error {
-	authority, err := os.ReadFile(pki + "/agent-ca.pem")
+// The query plane authorises by certificate, so this speaks as the caller
+// `make dev-pki` mints rather than as the agent.
+func ask(endpoint, pki string, window time.Duration) error {
+	client, err := speaker(pki, "caller")
 	if err != nil {
 		return err
 	}
-	keypair, err := tls.LoadX509KeyPair(pki+"/agent.pem", pki+"/agent-key.pem")
-	if err != nil {
+
+	now := time.Now().UTC()
+	query := &huntv1.Query{
+		Range: &huntv1.TimeRange{Start: timestamppb.New(now.Add(-window)), End: timestamppb.New(now)},
+		Limit: 5,
+	}
+
+	for _, path := range []string{hunt.EventsPath, hunt.DetectionsPath} {
+		status, body, err := post(client, endpoint+path, hunt.ContentType, query)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s status %d\n", path, status)
+
+		if status != http.StatusOK {
+			var refusal huntv1.Refusal
+			if err := proto.Unmarshal(body, &refusal); err != nil {
+				return err
+			}
+			fmt.Printf("refusal %s", prototext.Format(&refusal))
+			continue
+		}
+		if err := report(path, body); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func report(path string, body []byte) error {
+	if path == hunt.DetectionsPath {
+		var page huntv1.DetectionPage
+		if err := proto.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		fmt.Printf("detections %d\n", len(page.GetDetections()))
+		for _, made := range page.GetDetections() {
+			fmt.Printf("  %s %s %s\n", made.GetEventTime().AsTime().Format(time.RFC3339),
+				made.GetRule().GetId(), made.GetSeverity())
+		}
+		return nil
+	}
+
+	var page huntv1.EventPage
+	if err := proto.Unmarshal(body, &page); err != nil {
 		return err
+	}
+	fmt.Printf("events %d\n", len(page.GetEvents()))
+	for _, record := range page.GetEvents() {
+		fmt.Printf("  %s %s %s\n", record.GetTime().GetEventTime().AsTime().Format(time.RFC3339),
+			record.GetEventId(), record.GetAuthentication().GetUser().GetName())
+	}
+	return nil
+}
+
+func post(client *http.Client, url, contentType string, message proto.Message) (int, []byte, error) {
+	encoded, err := proto.Marshal(message)
+	if err != nil {
+		return 0, nil, err
+	}
+	response, err := client.Post(url, contentType, bytes.NewReader(encoded))
+	if err != nil {
+		return 0, nil, err
+	}
+	defer response.Body.Close()
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return 0, nil, err
+	}
+	return response.StatusCode, body, nil
+}
+
+func speaker(pki, name string) (*http.Client, error) {
+	authority, err := os.ReadFile(pki + "/agent-ca.pem")
+	if err != nil {
+		return nil, err
+	}
+	keypair, err := tls.LoadX509KeyPair(pki+"/"+name+".pem", pki+"/"+name+"-key.pem")
+	if err != nil {
+		return nil, err
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(authority) {
-		return fmt.Errorf("authority certificate is unusable")
+		return nil, fmt.Errorf("authority certificate is unusable")
 	}
 
-	client := &http.Client{
+	return &http.Client{
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{
 			RootCAs:      pool,
 			Certificates: []tls.Certificate{keypair},
 			MinVersion:   tls.VersionTLS13,
 		}},
-		Timeout: 15 * time.Second,
+		Timeout: 30 * time.Second,
+	}, nil
+}
+
+func probe(endpoint, pki, batchID, eventID string) error {
+	client, err := speaker(pki, "agent")
+	if err != nil {
+		return err
 	}
 
 	encoded, err := proto.Marshal(sample(batchID, eventID))

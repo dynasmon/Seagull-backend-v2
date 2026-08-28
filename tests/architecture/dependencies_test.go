@@ -31,6 +31,7 @@ var layers = map[string]layer{
 	"cmd":                     executable,
 	"internal/agentidentity":  domain,
 	"internal/analysis":       capability,
+	"internal/authz":          domain,
 	"internal/broker":         adapter,
 	"internal/clickhouse":     adapter,
 	"internal/detection":      domain,

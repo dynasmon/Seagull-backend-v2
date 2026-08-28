@@ -19,6 +19,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/devpki"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/ratelimit"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/tlsx"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
@@ -130,9 +131,9 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		t.Fatalf("build admitter: %v", err)
 	}
 
-	var limiter *ingest.Limiter
+	var limiter *ratelimit.Limiter
 	if options.ratePerSecond > 0 {
-		limiter = ingest.NewLimiter(options.ratePerSecond, options.rateBurst, 64)
+		limiter = ratelimit.NewLimiter(options.ratePerSecond, options.rateBurst, 64)
 	}
 
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{

@@ -17,3 +17,4 @@ rediscovered by reading the code.
 - [11. A detection is not an alert](0011-a-detection-is-not-an-alert.md)
 - [12. Storage is owned per workload, and an alert is not a detection](0012-storage-is-owned-per-workload.md)
 - [13. A query is a scope, a window and a question](0013-a-query-is-a-scope-a-window-and-a-question.md)
+- [14. A token says who, and the policy says what](0014-a-token-says-who-and-the-policy-says-what.md)

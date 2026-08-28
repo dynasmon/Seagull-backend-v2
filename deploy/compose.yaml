@@ -230,6 +230,39 @@ services:
       - ../.local/pki:/run/pki:ro
     <<: *hardening
 
+  # The read plane. It holds the only read connection to the store, consumes no
+  # topic and writes nothing, so an expensive question cannot reach the pipeline
+  # that is still admitting telemetry nor the surface an operator acts from. The
+  # scope a query is answered within comes from the caller's certificate, so this
+  # listener has no plaintext mode at all.
+  query-api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        COMPONENT: query-api
+        VERSION: ${SEAGULL_VERSION:-dev}
+    depends_on:
+      store-migrator:
+        condition: service_completed_successfully
+    networks: [backbone, agents]
+    ports:
+      - "${SEAGULL_QUERY_API_PUBLISH:-127.0.0.1:8444}:8444"
+    environment:
+      SEAGULL_QUERY_API_ADDRESS: 0.0.0.0:8444
+      SEAGULL_QUERY_API_TLS_CERT: /run/pki/gateway.pem
+      SEAGULL_QUERY_API_TLS_KEY: /run/pki/gateway-key.pem
+      SEAGULL_QUERY_API_CALLER_CA: /run/pki/agent-ca.pem
+      SEAGULL_QUERY_STORE_ADDRESS: clickhouse:9000
+      SEAGULL_QUERY_STORE_DATABASE: ${SEAGULL_EVENT_STORE_DATABASE:-seagull}
+      SEAGULL_QUERY_STORE_USER: ${SEAGULL_EVENT_STORE_USER:-seagull}
+      SEAGULL_QUERY_STORE_PASSWORD: ${SEAGULL_EVENT_STORE_PASSWORD:-}
+      SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
+      SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    volumes:
+      - ../.local/pki:/run/pki:ro
+    <<: *hardening
+
 volumes:
   redpanda: {}
   clickhouse: {}

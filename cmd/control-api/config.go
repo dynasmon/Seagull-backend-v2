@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"net"
 	"time"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
@@ -17,65 +15,48 @@ type configuration struct {
 	address         string
 	certificateFile string
 	keyFile         string
+	callerCAFile    string
+
+	policyFile     string
+	sessionKey     config.Secret
+	sessionLife    time.Duration
+	sessionsPer    int
+	sessionsTotal  int
+	ratePerSecond  float64
+	rateBurst      int
+	trackedCallers int
 
 	readTimeout  time.Duration
 	writeTimeout time.Duration
 	idleTimeout  time.Duration
-	maxBodyBytes int64
 }
 
 func load(parser *config.Parser) (configuration, error) {
 	loaded := configuration{
 		service: service.LoadConfig(serviceName, parser),
 
-		address:         parser.String("SEAGULL_CONTROL_API_ADDRESS", "127.0.0.1:8080"),
-		certificateFile: parser.FilePath("SEAGULL_CONTROL_API_TLS_CERT", ""),
-		keyFile:         parser.FilePath("SEAGULL_CONTROL_API_TLS_KEY", ""),
+		address:         parser.String("SEAGULL_CONTROL_API_ADDRESS", "127.0.0.1:8445"),
+		certificateFile: parser.RequiredFilePath("SEAGULL_CONTROL_API_TLS_CERT"),
+		keyFile:         parser.RequiredFilePath("SEAGULL_CONTROL_API_TLS_KEY"),
+		callerCAFile:    parser.RequiredFilePath("SEAGULL_CONTROL_API_CALLER_CA"),
+
+		policyFile:     parser.RequiredFilePath("SEAGULL_CONTROL_API_POLICY"),
+		sessionKey:     parser.Secret("SEAGULL_CONTROL_API_SESSION_KEY"),
+		sessionLife:    parser.Duration("SEAGULL_CONTROL_API_SESSION_LIFETIME", 15*time.Minute, time.Minute, 24*time.Hour),
+		sessionsPer:    parser.Int("SEAGULL_CONTROL_API_SESSIONS_PER_CALLER", 8, 1, 64),
+		sessionsTotal:  parser.Int("SEAGULL_CONTROL_API_SESSIONS_MAX", 4096, 1, 1_000_000),
+		rateBurst:      parser.Int("SEAGULL_CONTROL_API_RATE_BURST", 40, 1, 100_000),
+		trackedCallers: parser.Int("SEAGULL_CONTROL_API_TRACKED_CALLERS", 4096, 1, 1_000_000),
 
 		readTimeout:  parser.Duration("SEAGULL_CONTROL_API_READ_TIMEOUT", 15*time.Second, time.Second, 5*time.Minute),
 		writeTimeout: parser.Duration("SEAGULL_CONTROL_API_WRITE_TIMEOUT", 15*time.Second, time.Second, 5*time.Minute),
 		idleTimeout:  parser.Duration("SEAGULL_CONTROL_API_IDLE_TIMEOUT", 60*time.Second, time.Second, 30*time.Minute),
-		maxBodyBytes: parser.Bytes("SEAGULL_CONTROL_API_MAX_BODY", 1<<20, 4<<10, 8<<20),
 	}
+
+	loaded.ratePerSecond = float64(parser.Int("SEAGULL_CONTROL_API_RATE_PER_SECOND", 20, 0, 10_000))
 
 	if err := parser.Err(); err != nil {
 		return configuration{}, err
 	}
-	if err := loaded.refuseExposedPlaintext(); err != nil {
-		return configuration{}, err
-	}
 	return loaded, nil
-}
-
-// Serving the control API in the clear is a local development convenience. A
-// listener reachable beyond loopback has to carry TLS or the process refuses to
-// start, so an exposed deployment cannot happen by leaving a variable unset.
-func (c configuration) refuseExposedPlaintext() error {
-	if c.certificateFile != "" && c.keyFile != "" {
-		return nil
-	}
-	if c.certificateFile != "" || c.keyFile != "" {
-		return fmt.Errorf(
-			"invalid configuration: SEAGULL_CONTROL_API_TLS_CERT and SEAGULL_CONTROL_API_TLS_KEY are set together or not at all",
-		)
-	}
-	if loopbackOnly(c.address) {
-		return nil
-	}
-	return fmt.Errorf(
-		"invalid configuration: SEAGULL_CONTROL_API_ADDRESS %q reaches beyond loopback and no TLS material is configured",
-		c.address,
-	)
-}
-
-func loopbackOnly(address string) bool {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return false
-	}
-	if host == "localhost" {
-		return true
-	}
-	parsed := net.ParseIP(host)
-	return parsed != nil && parsed.IsLoopback()
 }

@@ -14,12 +14,14 @@ type Bundle struct {
 	ClientKey            string
 	CallerCertificate    string
 	CallerKey            string
+	AdminCertificate     string
+	AdminKey             string
 }
 
 // Private keys are written owner-readable only: development material still
 // lands on a real filesystem, and a permissive default here becomes the habit
 // that reaches production.
-func Write(directory string, authority Material, server Material, client Material, caller Material) (Bundle, error) {
+func Write(directory string, authority Material, server Material, client Material, caller Material, admin Material) (Bundle, error) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return Bundle{}, fmt.Errorf("create pki directory: %w", err)
 	}
@@ -32,6 +34,8 @@ func Write(directory string, authority Material, server Material, client Materia
 		ClientKey:            filepath.Join(directory, "agent-key.pem"),
 		CallerCertificate:    filepath.Join(directory, "caller.pem"),
 		CallerKey:            filepath.Join(directory, "caller-key.pem"),
+		AdminCertificate:     filepath.Join(directory, "admin.pem"),
+		AdminKey:             filepath.Join(directory, "admin-key.pem"),
 	}
 
 	files := []struct {
@@ -46,6 +50,8 @@ func Write(directory string, authority Material, server Material, client Materia
 		{bundle.ClientKey, client.PrivateKeyPEM, 0o600},
 		{bundle.CallerCertificate, caller.CertificatePEM, 0o644},
 		{bundle.CallerKey, caller.PrivateKeyPEM, 0o600},
+		{bundle.AdminCertificate, admin.CertificatePEM, 0o644},
+		{bundle.AdminKey, admin.PrivateKeyPEM, 0o600},
 	}
 	for _, file := range files {
 		if err := os.WriteFile(file.path, file.content, file.mode); err != nil {

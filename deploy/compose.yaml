@@ -219,15 +219,18 @@ services:
         VERSION: ${SEAGULL_VERSION:-dev}
     networks: [agents]
     ports:
-      - "${SEAGULL_CONTROL_API_PUBLISH:-127.0.0.1:8080}:8080"
+      - "${SEAGULL_CONTROL_API_PUBLISH:-127.0.0.1:8445}:8445"
     environment:
-      SEAGULL_CONTROL_API_ADDRESS: 0.0.0.0:8080
+      SEAGULL_CONTROL_API_ADDRESS: 0.0.0.0:8445
       SEAGULL_CONTROL_API_TLS_CERT: /run/pki/gateway.pem
       SEAGULL_CONTROL_API_TLS_KEY: /run/pki/gateway-key.pem
+      SEAGULL_CONTROL_API_CALLER_CA: /run/pki/agent-ca.pem
+      SEAGULL_CONTROL_API_POLICY: /etc/seagull/policy.yml
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
     volumes:
       - ../.local/pki:/run/pki:ro
+      - ./policy.yml:/etc/seagull/policy.yml:ro
     <<: *hardening
 
   # The read plane. It holds the only read connection to the store, consumes no

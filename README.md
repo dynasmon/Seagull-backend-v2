@@ -21,7 +21,7 @@ Seagull Agent
 cmd/ingest-gateway  ── admission control ──▶  Redpanda  security.events.raw
       |                                             (durable before the ack)
       |                                              |                    |
-cmd/control-api     ── protocol descriptor           v                    v
+cmd/control-api     ── mutual TLS, sessions, RBAC     v                    v
                                         cmd/event-writer      cmd/analysis-engine
                                                  |                    |
                                                  ▼                    ▼
@@ -91,9 +91,13 @@ store that is behind the schema it ships.
 is the only thing that creates or configures a topic, and both halves of the
 data plane refuse to start when a topic they depend on is missing or reshaped.
 
-`control-api` serves the protocol descriptor an agent needs before it can talk
-to anything else. It exists mainly to prove that a second executable reuses the
-platform foundation without copying it.
+`control-api` is the administrative surface. It terminates mutual TLS, exchanges
+a verified certificate for a short-lived session bound to that certificate, and
+decides every request against a policy of typed permissions it is pinned to. The
+token says who; the policy says what, resolved fresh on each request, so a role
+taken away lands at the next request rather than at the next expiry. Every route
+declares what it requires and a route that declares nothing cannot be
+registered. ADR 14.
 
 `query-api` is the read plane. It holds the only read connection to the store,
 consumes no topic and writes nothing, so an expensive question can reach neither
@@ -675,13 +679,22 @@ processes choosing the same adapter is not the same as sharing one.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SEAGULL_CONTROL_API_ADDRESS` | `127.0.0.1:8080` | the API listener |
-| `SEAGULL_CONTROL_API_TLS_CERT` | empty | server certificate |
-| `SEAGULL_CONTROL_API_TLS_KEY` | empty | server private key |
-| `SEAGULL_CONTROL_API_MAX_BODY` | `1MiB` | ceiling on a request body |
+| `SEAGULL_CONTROL_API_ADDRESS` | `127.0.0.1:8445` | the API listener |
+| `SEAGULL_CONTROL_API_TLS_CERT` | required | server certificate |
+| `SEAGULL_CONTROL_API_TLS_KEY` | required | server private key |
+| `SEAGULL_CONTROL_API_CALLER_CA` | required | authority that issues caller certificates |
+| `SEAGULL_CONTROL_API_POLICY` | required | the policy document to pin to |
+| `SEAGULL_CONTROL_API_SESSION_KEY` | empty | key sessions are signed with; drawn at random when unset |
+| `SEAGULL_CONTROL_API_SESSION_LIFETIME` | `15m` | how long a session lasts |
+| `SEAGULL_CONTROL_API_SESSIONS_PER_CALLER` | `8` | sessions one subject may hold at once |
+| `SEAGULL_CONTROL_API_SESSIONS_MAX` | `4096` | sessions the process will hold |
+| `SEAGULL_CONTROL_API_RATE_PER_SECOND` | `20` | per-caller request budget |
+| `SEAGULL_CONTROL_API_RATE_BURST` | `40` | burst above that budget |
 
-Without TLS material the control API only starts on loopback. A listener that
-reaches further and carries no certificate is refused at startup.
+The control plane authenticates a caller by certificate, so it has no plaintext
+mode and no mode without a caller authority: without one there is nobody to be
+authorised as. An unset session key is drawn at random, which means sessions stop
+being spendable when the process stops.
 
 ### query-api
 

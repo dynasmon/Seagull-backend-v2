@@ -91,6 +91,47 @@ func detectionValues(row detectionstore.Row) []any {
 // same shape of workload — append only, immutable, queried by time range — and
 // differ only in volume. An alert does not, and is why the third table in this
 // database will not be an alert table.
+// The same columns in the same order, to read a row back out. A page of a hunt
+// is scanned through these, so a column added to `detectionValues` without being
+// added here fails `detectionsAgreeWithSchema` rather than shifting every field
+// of an answer.
+func detectionPointers(row *detectionstore.Row) []any {
+	return []any{
+		&row.DetectionID,
+		&row.SchemaVersion,
+
+		&row.RuleID,
+		&row.RuleRevision,
+		&row.RuleName,
+		&row.RuleSourceCatalogue,
+		&row.RuleSourceIdentifier,
+		&row.RulesetID,
+
+		&row.Severity,
+		&row.TechniqueTactic,
+		&row.TechniqueID,
+		&row.TechniqueName,
+
+		&row.EventClass,
+		&row.TenantID,
+		&row.AgentID,
+		&row.HostHostname,
+		&row.HostIP,
+		&row.HostOS,
+		&row.HostArchitecture,
+
+		&row.SourceEventIDs,
+		&row.EventTime,
+		&row.DetectedTime,
+
+		&row.EvidenceField,
+		&row.EvidenceOperator,
+		&row.EvidenceNegated,
+		&row.EvidenceHeld,
+		&row.EvidenceAbsent,
+	}
+}
+
 type DetectionStore struct {
 	connection driver.Conn
 	database   string
@@ -176,6 +217,9 @@ func detectionsAgreeWithSchema() error {
 	}
 	if length := len(detectionValues(detectionstore.Row{})); length != len(detectionColumns) {
 		return fmt.Errorf("the detection store names %d columns and supplies %d values", len(detectionColumns), length)
+	}
+	if length := len(detectionPointers(&detectionstore.Row{})); length != len(detectionColumns) {
+		return fmt.Errorf("the detection store names %d columns and reads %d of them back", len(detectionColumns), length)
 	}
 	return nil
 }

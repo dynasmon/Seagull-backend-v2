@@ -85,6 +85,15 @@ func engine(ctx context.Context) error {
 		return err
 	}
 
+	// The rule tree this process ships with is what it runs until the control
+	// plane has published something: an engine that cannot reach a control plane
+	// still detects, and a published ruleset takes over the moment it is read.
+	published, err := publishedRulesets(ctx, settings, platform, registry)
+	if err != nil {
+		return err
+	}
+	defer published.reader.Close()
+
 	component, err := analysis.NewEngine(analysis.EngineOptions{
 		Source:         source{consumer: consumer},
 		Rules:          rules{registry: registry},
@@ -101,6 +110,7 @@ func engine(ctx context.Context) error {
 
 	platform.Health().Register("backbone", consumer.Ping)
 	platform.Health().Register("detections", detections.Ping)
+	platform.Add(published.follower(platform.Logger(), registry))
 	platform.Add(component)
 
 	platform.Logger().Info("analysis_engine_configured",
@@ -108,6 +118,8 @@ func engine(ctx context.Context) error {
 		slog.String("detections_topic", settings.topology.Detections.Name),
 		slog.String("group", settings.group),
 		slog.String("rules", settings.rules),
+		slog.String("rulesets_topic", settings.topology.Rulesets.Name),
+		slog.String("ruleset", string(registry.Current().ID())),
 		slog.Int("batch_events", settings.batchEvents),
 	)
 

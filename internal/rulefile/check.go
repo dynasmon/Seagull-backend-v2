@@ -46,7 +46,12 @@ func Check(fsys fs.FS) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
+	return Checked(written), nil
+}
 
+// The same run over rules that were read from somewhere else, which is what a
+// control plane holds: documents it was handed rather than a tree it can walk.
+func Checked(written []Written) Report {
 	report := Report{Rules: len(written)}
 	for _, rule := range written {
 		if len(rule.Cases) == 0 {
@@ -60,5 +65,5 @@ func Check(fsys fs.FS) (Report, error) {
 			}
 		}
 	}
-	return report, nil
+	return report
 }

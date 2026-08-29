@@ -22,6 +22,7 @@ type ServerOptions struct {
 	Guard           *Guard
 	Sessions        *Sessions
 	Registry        *Registry
+	Rulesets        Rulesets
 	Metrics         *Metrics
 	Instrumentation *httpx.Instrumentation
 	Logger          *slog.Logger
@@ -35,6 +36,7 @@ type ServerOptions struct {
 type Server struct {
 	sessions *Sessions
 	registry *Registry
+	rulesets Rulesets
 	metrics  *Metrics
 	now      func() time.Time
 }
@@ -79,6 +81,8 @@ func NewHandler(options ServerOptions) (http.Handler, error) {
 		return nil, errors.New("the control listener needs a session store")
 	case options.Registry == nil:
 		return nil, errors.New("the control listener needs a policy")
+	case options.Rulesets == nil:
+		return nil, errors.New("the control listener administers rulesets and needs somewhere to keep them")
 	case options.Metrics == nil:
 		return nil, errors.New("the control listener needs metrics")
 	case options.Instrumentation == nil:
@@ -91,6 +95,7 @@ func NewHandler(options ServerOptions) (http.Handler, error) {
 	server := &Server{
 		sessions: options.Sessions,
 		registry: options.Registry,
+		rulesets: options.Rulesets,
 		metrics:  options.Metrics,
 		now:      options.Now,
 	}
@@ -109,13 +114,13 @@ func NewHandler(options ServerOptions) (http.Handler, error) {
 // Every route names what it requires here, and NewServer refuses one that does
 // not: an endpoint nobody decided about cannot reach the mux.
 func (s *Server) routes() []route {
-	return []route{
+	return append([]route{
 		{http.MethodGet, DescriptorPath, "descriptor", Certificate(), s.descriptor()},
 		{http.MethodPost, SessionPath, "session_open", Certificate(), s.openSession()},
 		{http.MethodGet, SessionPath, "session_describe", Session(), s.describeSession()},
 		{http.MethodDelete, SessionPath, "session_revoke", Session(), s.revokeSession()},
 		{http.MethodGet, SessionsPath, "session_list", Session(), s.listSessions()},
-	}
+	}, rulesetRoutes(s)...)
 }
 
 func (s *Server) descriptor() http.Handler {

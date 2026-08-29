@@ -63,6 +63,16 @@ func Compose(programs []*detection.Program) (*Snapshot, error) {
 
 func (s *Snapshot) ID() ID { return s.id }
 
+func (s *Snapshot) All() iter.Seq[*detection.Program] {
+	return func(yield func(*detection.Program) bool) {
+		for _, program := range s.programs {
+			if !yield(program) {
+				return
+			}
+		}
+	}
+}
+
 // Every rule the ruleset holds, whether or not it runs.
 func (s *Snapshot) Rules() int { return len(s.programs) }
 

@@ -16,6 +16,7 @@ x-backbone: &backbone
   SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_TOPIC: security.detections.quarantine
   SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_PARTITIONS: ${SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_PARTITIONS:-3}
   SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_RETENTION: ${SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_RETENTION:-720h}
+  SEAGULL_BACKBONE_RULESETS_TOPIC: security.rulesets
   SEAGULL_BACKBONE_REPLICAS: ${SEAGULL_BACKBONE_REPLICAS:-1}
 
 # The development certificates are owned by whoever ran `make dev-pki`, and the
@@ -217,10 +218,14 @@ services:
       args:
         COMPONENT: control-api
         VERSION: ${SEAGULL_VERSION:-dev}
-    networks: [agents]
+    depends_on:
+      backbone-migrator:
+        condition: service_completed_successfully
+    networks: [backbone, agents]
     ports:
       - "${SEAGULL_CONTROL_API_PUBLISH:-127.0.0.1:8445}:8445"
     environment:
+      <<: *backbone
       SEAGULL_CONTROL_API_ADDRESS: 0.0.0.0:8445
       SEAGULL_CONTROL_API_TLS_CERT: /run/pki/gateway.pem
       SEAGULL_CONTROL_API_TLS_KEY: /run/pki/gateway-key.pem

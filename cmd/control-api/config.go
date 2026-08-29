@@ -3,6 +3,7 @@ package main
 import (
 	"time"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 )
@@ -16,6 +17,11 @@ type configuration struct {
 	certificateFile string
 	keyFile         string
 	callerCAFile    string
+
+	brokers      []string
+	topology     broker.Topology
+	startTimeout time.Duration
+	logRecords   int
 
 	policyFile     string
 	sessionKey     config.Secret
@@ -39,6 +45,11 @@ func load(parser *config.Parser) (configuration, error) {
 		certificateFile: parser.RequiredFilePath("SEAGULL_CONTROL_API_TLS_CERT"),
 		keyFile:         parser.RequiredFilePath("SEAGULL_CONTROL_API_TLS_KEY"),
 		callerCAFile:    parser.RequiredFilePath("SEAGULL_CONTROL_API_CALLER_CA"),
+
+		brokers:      parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
+		topology:     broker.LoadTopology(parser),
+		startTimeout: parser.Duration("SEAGULL_CONTROL_API_START_TIMEOUT", 30*time.Second, time.Second, 5*time.Minute),
+		logRecords:   parser.Int("SEAGULL_CONTROL_API_RULESET_RECORDS", 256, 1, 10_000),
 
 		policyFile:     parser.RequiredFilePath("SEAGULL_CONTROL_API_POLICY"),
 		sessionKey:     parser.Secret("SEAGULL_CONTROL_API_SESSION_KEY"),

@@ -21,6 +21,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/tlsx"
 	"github.com/dynasmon/Seagull-backend-v2/internal/policyfile"
 	controlv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/control/v1"
+	rulesetv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ruleset/v1"
 )
 
 const controlPolicy = `
@@ -33,6 +34,13 @@ roles:
       - events:read
       - detections:read
 
+  - name: engineer
+    description: writes and publishes the rules the engine runs
+    permissions:
+      - detections:read
+      - rulesets:read
+      - rulesets:write
+
   - name: administrator
     description: administers the platform
     permissions:
@@ -44,6 +52,10 @@ roles:
 bindings:
   - subject: e2e-analyst
     roles: [analyst]
+    tenants: [default]
+
+  - subject: e2e-engineer
+    roles: [engineer]
     tenants: [default]
 
   - subject: e2e-admin
@@ -140,6 +152,7 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 		Guard:           guard,
 		Sessions:        sessions,
 		Registry:        registry,
+		Rulesets:        &recordingRulesets{},
 		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
@@ -361,5 +374,83 @@ func TestACallerSpendingMoreThanItsShareIsRefusedOverRealTLS(t *testing.T) {
 	}
 	if code := refusalCode(t, body); code != control.CodeRateLimited {
 		t.Errorf("a throttled caller was refused with %q", code)
+	}
+}
+
+// A ruleset store that keeps what it is given, so that what this suite proves
+// about the ruleset routes is the part it can prove over a real connection:
+// which identity reaches them and which is refused.
+type recordingRulesets struct {
+	published []string
+	active    string
+}
+
+func (r *recordingRulesets) Validate([]*rulesetv1.Document) *rulesetv1.ValidationResponse {
+	return &rulesetv1.ValidationResponse{Valid: true, RulesetId: "e2e01", Rules: 1, Running: 1}
+}
+
+func (r *recordingRulesets) Check([]*rulesetv1.Document) (*rulesetv1.ValidationResponse, *rulesetv1.CheckResponse) {
+	return r.Validate(nil), &rulesetv1.CheckResponse{Held: true, Rules: 1, Cases: 1}
+}
+
+func (r *recordingRulesets) Publish(_ context.Context, _ *rulesetv1.PublishRequest, by string, _ time.Time) (*rulesetv1.PublishResponse, error) {
+	r.published = append(r.published, by)
+	return &rulesetv1.PublishResponse{RulesetId: "e2e01", Published: true, Validation: r.Validate(nil)}, nil
+}
+
+func (r *recordingRulesets) List() *rulesetv1.VersionList {
+	return &rulesetv1.VersionList{Versions: []*rulesetv1.Summary{{Id: "e2e01", Active: r.active == "e2e01"}}}
+}
+
+func (r *recordingRulesets) Version(id string) (*rulesetv1.Version, bool) {
+	if id != "e2e01" {
+		return nil, false
+	}
+	return &rulesetv1.Version{Id: id}, true
+}
+
+func (r *recordingRulesets) Activate(_ context.Context, id, _, by string, _ time.Time) (*rulesetv1.ActivationResponse, error) {
+	if id != "e2e01" {
+		return nil, control.ErrUnknownRuleset
+	}
+	replaced := r.active
+	r.active = id
+	return &rulesetv1.ActivationResponse{Active: &rulesetv1.Active{RulesetId: id, ActivatedBy: by}, Replaced: replaced}, nil
+}
+
+func TestOnlyAnEngineerPublishesARulesetOverRealMutualTLS(t *testing.T) {
+	plane := startControlAPI(t, nil)
+
+	analyst := plane.caller(t, "e2e-analyst")
+	opened := plane.open(t, analyst)
+	request := &rulesetv1.PublishRequest{Documents: []*rulesetv1.Document{{Name: "rules.yml", Content: []byte("schema_version: 1")}}}
+
+	response, body := plane.send(t, analyst, http.MethodPost, control.RulesetsPath, opened.GetToken(), request)
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("an analyst publishing answered %d: %s", response.StatusCode, body)
+	}
+	if code := refusalCode(t, body); code != control.CodeForbidden {
+		t.Errorf("an analyst was refused with %q", code)
+	}
+
+	engineer := plane.caller(t, "e2e-engineer")
+	held := plane.open(t, engineer)
+
+	response, body = plane.send(t, engineer, http.MethodPost, control.RulesetsPath, held.GetToken(), request)
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("an engineer publishing answered %d: %s", response.StatusCode, body)
+	}
+
+	response, body = plane.send(t, engineer, http.MethodPost, "/v1/rulesets/e2e01/activate", held.GetToken(), &rulesetv1.ActivationRequest{Note: "rolling out"})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("an engineer activating answered %d: %s", response.StatusCode, body)
+	}
+
+	var activated rulesetv1.ActivationResponse
+	if err := proto.Unmarshal(body, &activated); err != nil {
+		t.Fatalf("decode the activation: %v", err)
+	}
+	if activated.GetActive().GetActivatedBy() != "e2e-engineer" {
+		t.Errorf("the activation was attributed to %q", activated.GetActive().GetActivatedBy())
 	}
 }

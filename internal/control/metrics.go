@@ -21,6 +21,8 @@ type Metrics struct {
 	opened      prometheus.Counter
 	revoked     *prometheus.CounterVec
 	ratelimited prometheus.Counter
+	published   *prometheus.CounterVec
+	activated   *prometheus.CounterVec
 }
 
 func NewMetrics(registry *metrics.Registry) *Metrics {
@@ -91,12 +93,25 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "rate_limited_total",
 			Help:      "Requests refused for spending more than a caller's share.",
 		}),
+		published: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "rulesets_published_total",
+			Help:      "Attempts to publish a ruleset, by what came of them.",
+		}, []string{"outcome"}),
+		activated: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "rulesets_activated_total",
+			Help:      "Attempts to activate a published ruleset, by what came of them.",
+		}, []string{"outcome"}),
 	}
 
 	registry.MustRegister(
 		instruments.policy, instruments.roles, instruments.bindings, instruments.pinnedAt,
 		instruments.reloads, instruments.authn, instruments.authz,
 		instruments.sessions, instruments.opened, instruments.revoked, instruments.ratelimited,
+		instruments.published, instruments.activated,
 	)
 	return instruments
 }
@@ -157,5 +172,17 @@ func (m *Metrics) sessionsEnded(cause string, count, live int) {
 func (m *Metrics) limited() {
 	if m != nil {
 		m.ratelimited.Inc()
+	}
+}
+
+func (m *Metrics) rulesetPublished(outcome string) {
+	if m != nil {
+		m.published.WithLabelValues(outcome).Inc()
+	}
+}
+
+func (m *Metrics) rulesetActivated(outcome string) {
+	if m != nil {
+		m.activated.WithLabelValues(outcome).Inc()
 	}
 }

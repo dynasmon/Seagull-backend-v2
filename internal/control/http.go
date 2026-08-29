@@ -56,8 +56,8 @@ func respond(w http.ResponseWriter, status int, message proto.Message) {
 	_, _ = w.Write(encoded)
 }
 
-func read(w http.ResponseWriter, r *http.Request, into proto.Message) bool {
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxBodyBytes))
+func readWithin(w http.ResponseWriter, r *http.Request, into proto.Message, ceiling int64) bool {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, ceiling))
 	if err != nil {
 		Refuse(w, http.StatusRequestEntityTooLarge, "body_too_large", "the request body is larger than this route reads")
 		return false
@@ -81,7 +81,7 @@ func (s *Server) openSession() http.Handler {
 		}
 
 		var asked controlv1.SessionRequest
-		if !read(w, r, &asked) {
+		if !readWithin(w, r, &asked, MaxBodyBytes) {
 			return
 		}
 
@@ -119,7 +119,7 @@ func (s *Server) revokeSession() http.Handler {
 		}
 
 		var asked controlv1.RevocationRequest
-		if !read(w, r, &asked) {
+		if !readWithin(w, r, &asked, MaxBodyBytes) {
 			return
 		}
 

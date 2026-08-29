@@ -29,6 +29,10 @@ const (
 	CodeForbidden        = "forbidden"
 	CodeRateLimited      = "rate_limited"
 	CodeUnguarded        = "route_unguarded"
+	CodeNoDocuments      = "no_documents"
+	CodeUnknownRuleset   = "unknown_ruleset"
+	CodePublishFailed    = "ruleset_not_published"
+	CodeActivationFailed = "ruleset_not_activated"
 )
 
 // No value of this type means "anybody": the zero value refuses, so a route

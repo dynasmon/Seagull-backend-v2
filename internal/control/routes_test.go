@@ -2,9 +2,11 @@ package control_test
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -13,15 +15,22 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/httpx"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 	controlv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/control/v1"
+	rulesetv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ruleset/v1"
 )
 
 func routes(t *testing.T, h *harness) http.Handler {
+	t.Helper()
+	return routesWith(t, h, newStubRulesets())
+}
+
+func routesWith(t *testing.T, h *harness, store control.Rulesets) http.Handler {
 	t.Helper()
 
 	handler, err := control.NewHandler(control.ServerOptions{
 		Guard:           h.guard,
 		Sessions:        h.sessions,
 		Registry:        h.registry,
+		Rulesets:        store,
 		Metrics:         h.metrics,
 		Instrumentation: httpx.NewInstrumentation(metrics.New("control-api-routes")),
 	})
@@ -29,6 +38,98 @@ func routes(t *testing.T, h *harness) http.Handler {
 		t.Fatalf("build the routes: %v", err)
 	}
 	return handler
+}
+
+// Enough of a ruleset store to prove the routes: what the listener owns is who
+// may ask, what it answers with and which status it answers at, and none of
+// that is the rule language's business.
+type stubRulesets struct {
+	valid     bool
+	held      bool
+	versions  map[string]*rulesetv1.Version
+	active    string
+	unreached error
+
+	publishedBy string
+	activatedBy string
+	activated   string
+}
+
+func newStubRulesets() *stubRulesets {
+	return &stubRulesets{
+		valid:    true,
+		held:     true,
+		versions: map[string]*rulesetv1.Version{"ab01": {Id: "ab01", PublishedBy: "dev-engineer"}},
+		active:   "ab01",
+	}
+}
+
+func (s *stubRulesets) validation() *rulesetv1.ValidationResponse {
+	if !s.valid {
+		return &rulesetv1.ValidationResponse{Faults: []*rulesetv1.Fault{{Source: "rules.yml", Line: 4, Reason: "is not part of a rule file"}}}
+	}
+	return &rulesetv1.ValidationResponse{Valid: true, RulesetId: "cd02", Rules: 2, Running: 1}
+}
+
+func (s *stubRulesets) Validate([]*rulesetv1.Document) *rulesetv1.ValidationResponse {
+	return s.validation()
+}
+
+func (s *stubRulesets) Check([]*rulesetv1.Document) (*rulesetv1.ValidationResponse, *rulesetv1.CheckResponse) {
+	if !s.valid {
+		return s.validation(), nil
+	}
+	return s.validation(), &rulesetv1.CheckResponse{Held: s.held, Rules: 2, Cases: 3}
+}
+
+func (s *stubRulesets) Publish(_ context.Context, _ *rulesetv1.PublishRequest, by string, _ time.Time) (*rulesetv1.PublishResponse, error) {
+	if s.unreached != nil {
+		return nil, s.unreached
+	}
+	validation, report := s.Check(nil)
+	answer := &rulesetv1.PublishResponse{RulesetId: validation.GetRulesetId(), Validation: validation, Check: report}
+	if !validation.GetValid() || !report.GetHeld() {
+		return answer, nil
+	}
+	s.publishedBy = by
+	s.versions[validation.GetRulesetId()] = &rulesetv1.Version{Id: validation.GetRulesetId(), PublishedBy: by}
+	answer.Published = true
+	return answer, nil
+}
+
+func (s *stubRulesets) List() *rulesetv1.VersionList {
+	listed := make([]*rulesetv1.Summary, 0, len(s.versions))
+	for id, version := range s.versions {
+		listed = append(listed, &rulesetv1.Summary{Id: id, PublishedBy: version.GetPublishedBy(), Active: id == s.active})
+	}
+	return &rulesetv1.VersionList{Versions: listed, Active: &rulesetv1.Active{RulesetId: s.active}}
+}
+
+func (s *stubRulesets) Version(id string) (*rulesetv1.Version, bool) {
+	version, published := s.versions[id]
+	return version, published
+}
+
+func (s *stubRulesets) Activate(_ context.Context, id, _, by string, _ time.Time) (*rulesetv1.ActivationResponse, error) {
+	if _, published := s.versions[id]; !published {
+		return nil, control.ErrUnknownRuleset
+	}
+	replaced := s.active
+	s.active, s.activatedBy, s.activated = id, by, id
+	return &rulesetv1.ActivationResponse{Active: &rulesetv1.Active{RulesetId: id, ActivatedBy: by}, Replaced: replaced}, nil
+}
+
+func session(t *testing.T, handler http.Handler, subject string) string {
+	t.Helper()
+
+	recorder := call(t, handler, http.MethodPost, control.SessionPath, subject, "", &controlv1.SessionRequest{})
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("open a session for %q: %d %s", subject, recorder.Code, recorder.Body)
+	}
+
+	var opened controlv1.SessionResponse
+	decode(t, recorder, &opened)
+	return opened.GetToken()
 }
 
 func call(t *testing.T, handler http.Handler, method, path, subject, token string, body proto.Message) *httptest.ResponseRecorder {

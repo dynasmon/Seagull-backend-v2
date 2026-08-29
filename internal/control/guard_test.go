@@ -32,6 +32,14 @@ func policy(t *testing.T) *authz.Policy {
 	if err != nil {
 		t.Fatalf("build a role: %v", err)
 	}
+	engineer, err := authz.NewRole("engineer", "writes and publishes rules", []authz.Permission{
+		{Resource: authz.Detections, Action: authz.Read},
+		{Resource: authz.Rulesets, Action: authz.Read},
+		{Resource: authz.Rulesets, Action: authz.Write},
+	})
+	if err != nil {
+		t.Fatalf("build a role: %v", err)
+	}
 	administrator, err := authz.NewRole("administrator", "administers", []authz.Permission{
 		{Resource: authz.Events, Action: authz.Read},
 		{Resource: authz.Rulesets, Action: authz.Write},
@@ -42,10 +50,11 @@ func policy(t *testing.T) *authz.Policy {
 		t.Fatalf("build a role: %v", err)
 	}
 
-	bindings := make([]authz.Binding, 0, 2)
+	bindings := make([]authz.Binding, 0, 3)
 	for subject, roles := range map[string][]string{
-		"dev-analyst": {"analyst"},
-		"dev-admin":   {"administrator"},
+		"dev-analyst":  {"analyst"},
+		"dev-engineer": {"engineer"},
+		"dev-admin":    {"administrator"},
 	} {
 		binding, err := authz.NewBinding(subject, roles, []string{"default"})
 		if err != nil {
@@ -54,7 +63,7 @@ func policy(t *testing.T) *authz.Policy {
 		bindings = append(bindings, binding)
 	}
 
-	compiled, err := authz.Compile([]authz.Role{analyst, administrator}, bindings)
+	compiled, err := authz.Compile([]authz.Role{analyst, engineer, administrator}, bindings)
 	if err != nil {
 		t.Fatalf("compile the policy: %v", err)
 	}

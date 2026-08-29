@@ -196,3 +196,56 @@ func detailOf(partitions int32, replicas int) kadm.TopicDetail {
 	}
 	return kadm.TopicDetail{Topic: "security.events.raw", Partitions: details}
 }
+
+// A ruleset is kept for as long as the platform runs, because a detection made
+// six months ago names the ruleset that decided it and an operator has to be
+// able to read that ruleset back.
+func TestTheRulesetTopicIsCompactedAndKeepsEveryVersion(t *testing.T) {
+	topology := declared(t, map[string]string{})
+
+	if topology.Rulesets.Name != "security.rulesets" {
+		t.Errorf("rulesets topic is %q", topology.Rulesets.Name)
+	}
+	if topology.Rulesets.Cleanup != cleanupCompact {
+		t.Errorf("the ruleset topic is cleaned up by %q", topology.Rulesets.Cleanup)
+	}
+	if topology.Rulesets.Retention != 0 {
+		t.Errorf("a compacted topic declared a retention of %s", topology.Rulesets.Retention)
+	}
+	if err := topology.Rulesets.Validate(); err != nil {
+		t.Errorf("the shipped ruleset topic is refused: %v", err)
+	}
+	if !slices.ContainsFunc(topology.Topics(), func(topic Topic) bool { return topic.Name == topology.Rulesets.Name }) {
+		t.Error("the ruleset topic is not in the topology the migrator applies")
+	}
+
+	for _, entry := range topology.Rulesets.settings() {
+		if entry.key == retentionKey && entry.value != "-1" {
+			t.Errorf("a compacted topic asks for retention.ms=%s", entry.value)
+		}
+	}
+}
+
+// One partition, so that a published ruleset and the record activating it are
+// read in the order they were written. A second one would let an engine see the
+// pointer before the ruleset it names.
+func TestTheRulesetTopicHasOnePartitionAndItIsNotASetting(t *testing.T) {
+	topology := declared(t, map[string]string{"SEAGULL_BACKBONE_RULESETS_PARTITIONS": "12"})
+
+	if topology.Rulesets.Partitions != 1 {
+		t.Errorf("the ruleset topic spreads over %d partitions", topology.Rulesets.Partitions)
+	}
+}
+
+func TestATopicThatDeletesStillNeedsARetention(t *testing.T) {
+	topic := Topic{Name: "security.events.raw", Partitions: 1, Replicas: 1, Cleanup: cleanupDelete, Compression: compressionZstd}
+
+	if err := topic.Validate(); err == nil {
+		t.Error("a topic that deletes was accepted without a retention")
+	}
+
+	topic.Cleanup, topic.Retention = cleanupCompact, time.Hour
+	if err := topic.Validate(); err == nil {
+		t.Error("a compacted topic was accepted with a retention that will never apply")
+	}
+}

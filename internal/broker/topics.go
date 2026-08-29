@@ -20,6 +20,7 @@ const (
 	compressionKey = "compression.type"
 
 	cleanupDelete   = "delete"
+	cleanupCompact  = "compact"
 	compressionZstd = "zstd"
 )
 
@@ -37,6 +38,7 @@ type Topology struct {
 	Quarantine           Topic
 	Detections           Topic
 	DetectionsQuarantine Topic
+	Rulesets             Topic
 }
 
 // Refused records and detections are both kept far longer than admitted events:
@@ -81,11 +83,18 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:     cleanupDelete,
 			Compression: compressionZstd,
 		},
+		Rulesets: Topic{
+			Name:        parser.String("SEAGULL_BACKBONE_RULESETS_TOPIC", "security.rulesets"),
+			Partitions:  1,
+			Replicas:    replicas,
+			Cleanup:     cleanupCompact,
+			Compression: compressionZstd,
+		},
 	}
 }
 
 func (t Topology) Topics() []Topic {
-	return []Topic{t.Events, t.Quarantine, t.Detections, t.DetectionsQuarantine}
+	return []Topic{t.Events, t.Quarantine, t.Detections, t.DetectionsQuarantine, t.Rulesets}
 }
 
 func (t Topic) Validate() error {
@@ -96,10 +105,12 @@ func (t Topic) Validate() error {
 		return fmt.Errorf("%s needs at least one partition", t.Name)
 	case t.Replicas < 1:
 		return fmt.Errorf("%s needs at least one replica", t.Name)
-	case t.Retention <= 0:
-		return fmt.Errorf("%s needs a positive retention", t.Name)
 	case t.Cleanup == "":
 		return fmt.Errorf("%s needs a cleanup policy", t.Name)
+	case t.Cleanup == cleanupDelete && t.Retention <= 0:
+		return fmt.Errorf("%s needs a positive retention", t.Name)
+	case t.Cleanup == cleanupCompact && t.Retention > 0:
+		return fmt.Errorf("%s is compacted and keeps the latest of every key, so it declares no retention", t.Name)
 	case t.Compression == "":
 		return fmt.Errorf("%s needs a compression type", t.Name)
 	}
@@ -108,11 +119,18 @@ func (t Topic) Validate() error {
 
 type setting struct{ key, value string }
 
+func retentionOf(t Topic) string {
+	if t.Retention <= 0 {
+		return "-1"
+	}
+	return strconv.FormatInt(t.Retention.Milliseconds(), 10)
+}
+
 // Ordered, not a map: the migrator reports what it changed, and a run has to
 // describe the same divergence in the same words every time.
 func (t Topic) settings() []setting {
 	return []setting{
-		{key: retentionKey, value: strconv.FormatInt(t.Retention.Milliseconds(), 10)},
+		{key: retentionKey, value: retentionOf(t)},
 		{key: cleanupKey, value: t.Cleanup},
 		{key: compressionKey, value: t.Compression},
 	}

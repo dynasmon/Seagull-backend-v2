@@ -18,6 +18,7 @@ type configuration struct {
 	group    string
 	rules    string
 
+	logRecords   int
 	batchEvents  int
 	fetchMaxWait time.Duration
 	startTimeout time.Duration
@@ -38,6 +39,7 @@ func load(parser *config.Parser) (configuration, error) {
 		group:    parser.String("SEAGULL_ANALYSIS_CONSUMER_GROUP", serviceName),
 		rules:    parser.FilePath("SEAGULL_DETECTION_RULES", "/etc/seagull/rules"),
 
+		logRecords:   parser.Int("SEAGULL_ANALYSIS_RULESET_RECORDS", 256, 1, 10_000),
 		batchEvents:  parser.Int("SEAGULL_ANALYSIS_BATCH_EVENTS", 5_000, 1, 100_000),
 		fetchMaxWait: parser.Duration("SEAGULL_ANALYSIS_FETCH_MAX_WAIT", time.Second, 10*time.Millisecond, time.Minute),
 		startTimeout: parser.Duration("SEAGULL_ANALYSIS_START_TIMEOUT", 30*time.Second, time.Second, 5*time.Minute),

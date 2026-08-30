@@ -35,6 +35,7 @@ roles:
       - agents:read
       - agents:write
       - agents:delete
+      - alerts:delete
       - alerts:read
       - alerts:write
       - detections:read

@@ -33,6 +33,14 @@ roles:
     permissions:
       - events:read
       - detections:read
+      - alerts:read
+
+  - name: responder
+    description: works alerts through their lifecycle
+    permissions:
+      - detections:read
+      - alerts:read
+      - alerts:write
 
   - name: engineer
     description: writes and publishes the rules the engine runs
@@ -46,6 +54,9 @@ roles:
     permissions:
       - events:read
       - rulesets:write
+      - alerts:read
+      - alerts:write
+      - alerts:delete
       - sessions:read
       - sessions:delete
 
@@ -58,9 +69,21 @@ bindings:
     roles: [engineer]
     tenants: [default]
 
+  - subject: e2e-responder
+    roles: [responder]
+    tenants: [default]
+
+  - subject: e2e-colleague
+    roles: [responder]
+    tenants: [default]
+
   - subject: e2e-admin
     roles: [administrator]
     tenants: [default]
+
+  - subject: e2e-outsider
+    roles: [responder]
+    tenants: [another-tenant]
 `
 
 type controlPlane struct {
@@ -153,6 +176,7 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 		Sessions:        sessions,
 		Registry:        registry,
 		Rulesets:        &recordingRulesets{},
+		Alerts:          newRaisedAlerts(),
 		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),

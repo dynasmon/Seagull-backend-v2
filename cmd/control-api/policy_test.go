@@ -63,6 +63,8 @@ func TestTheShippedAnalystCannotAdminister(t *testing.T) {
 	for _, permission := range []authz.Permission{
 		{Resource: authz.Rulesets, Action: authz.Write},
 		{Resource: authz.Agents, Action: authz.Delete},
+		{Resource: authz.Alerts, Action: authz.Write},
+		{Resource: authz.Alerts, Action: authz.Delete},
 		{Resource: authz.Sessions, Action: authz.Delete},
 		{Resource: authz.Policies, Action: authz.Read},
 	} {
@@ -72,6 +74,26 @@ func TestTheShippedAnalystCannotAdminister(t *testing.T) {
 	}
 	if !grant.Allows(authz.Permission{Resource: authz.Events, Action: authz.Read}) {
 		t.Error("the shipped analyst cannot read events")
+	}
+	if !grant.Allows(authz.Permission{Resource: authz.Alerts, Action: authz.Read}) {
+		t.Error("the shipped analyst cannot read alerts")
+	}
+}
+
+// The administrator certificate is the one the development PKI issues for the
+// control plane, so it has to be able to work an alert through its whole
+// lifecycle or the shipped stack demonstrates nothing.
+func TestTheShippedAdministratorCanWorkAnAlertToItsEnd(t *testing.T) {
+	grant, err := shipped(t).Grant("dev-admin")
+	if err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+
+	for _, action := range []authz.Action{authz.Read, authz.Write, authz.Delete} {
+		permission := authz.Permission{Resource: authz.Alerts, Action: action}
+		if !grant.Allows(permission) {
+			t.Errorf("the shipped administrator does not hold %s", permission)
+		}
 	}
 }
 

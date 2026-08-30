@@ -19,3 +19,4 @@ rediscovered by reading the code.
 - [13. A query is a scope, a window and a question](0013-a-query-is-a-scope-a-window-and-a-question.md)
 - [14. A token says who, and the policy says what](0014-a-token-says-who-and-the-policy-says-what.md)
 - [15. A ruleset is published to a log, and the pointer is the only mutable thing](0015-a-ruleset-is-published-to-a-log.md)
+- [16. An alert is a detection somebody owns](0016-an-alert-is-a-detection-somebody-owns.md)

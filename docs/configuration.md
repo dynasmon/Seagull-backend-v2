@@ -145,6 +145,44 @@ keep the first one out of the store for longer than anyone would accept. The
 store settings are the writer's own and point at the same server by default: two
 processes choosing the same adapter is not the same as sharing one.
 
+### alert-writer
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEAGULL_ALERT_WRITER_CONSUMER_GROUP` | `alert-writer` | the consumer group that owns the offsets |
+| `SEAGULL_ALERT_WRITER_BATCH_DETECTIONS` | `500` | records per poll, and per store batch |
+| `SEAGULL_ALERT_WRITER_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
+| `SEAGULL_ALERT_WRITER_RETRY_DELAY` | `1s` | first delay before a batch is retried |
+| `SEAGULL_ALERT_WRITER_RETRY_DELAY_MAX` | `30s` | ceiling the delay backs off to |
+| `SEAGULL_ALERT_SEVERITY_FLOOR` | `medium` | how much a detection has to matter before it becomes somebody's work |
+
+It reads `security.detections` in a group of its own, beside `detection-writer`
+and never through it: a relational store nobody can reach stops alerts being
+opened and does not stop detections being stored. A detection below the floor is
+still stored, still queryable and still part of a hunt; it just does not become
+work. It quarantines nothing — `detection-writer` already writes exactly the
+records this cannot use to the detection quarantine, verbatim — and instead
+steps over them, counted by reason in `alertstore_skipped_total`.
+
+### alert-writer, control-api and alert-migrator
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEAGULL_ALERT_STORE_ADDRESS` | required | PostgreSQL address, `postgres:5432` |
+| `SEAGULL_ALERT_STORE_DATABASE` | `seagull` | the database holding `alerts` and `alert_transitions` |
+| `SEAGULL_ALERT_STORE_USER` | `seagull` | |
+| `SEAGULL_ALERT_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
+| `SEAGULL_ALERT_STORE_SSLMODE` | `prefer` | `disable` only on a network you already trust |
+| `SEAGULL_ALERT_STORE_MAX_CONNECTIONS` | `8` | connections one process will hold |
+| `SEAGULL_ALERT_STORE_TIMEOUT` | `30s` | budget for one statement |
+| `SEAGULL_ALERT_STORE_CONNECT_TIMEOUT` | `10s` | budget to dial |
+
+`alert-migrator` applies the schema and exits, as `store-migrator` does for
+ClickHouse. Both processes that read the store verify the schema before they
+serve and refuse to run against one behind what they ship. The writer only ever
+inserts and the control plane only ever updates, which is what keeps a replayed
+detection away from somebody's triage.
+
 ### control-api
 
 | Variable | Default | Meaning |
@@ -170,7 +208,8 @@ being spendable when the process stops.
 
 It also reads `SEAGULL_BACKBONE_BROKERS` and the ruleset topic, and reads that
 topic whole before it serves: a control plane that had seen half the log would
-report an estate nobody has.
+report an estate nobody has. It holds the only mutating connection to the alert
+store and takes the `SEAGULL_ALERT_STORE_*` settings above.
 
 ### query-api
 

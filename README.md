@@ -80,26 +80,31 @@ so one poison record cannot hold up a partition.
 Seagull Agent
       │  mutual TLS · protobuf
       ▼
- ingest-gateway ──────▶ Redpanda  security.events.raw
-                            │  (durable before the acknowledgement)
-              ┌─────────────┴─────────────┐
-              ▼                           ▼
-        event-writer                analysis-engine
-              │                     route · normalise · detect
-              ▼                           │
-   ClickHouse security_events      security.detections
-              │                           │
-              ▼                           ▼
-  security.events.quarantine       detection-writer
-                                          │
-                                          ▼
-                              ClickHouse security_detections
+ ingest-gateway ─────▶ Redpanda  security.events.raw
+                           │  (durable before the acknowledgement)
+             ┌─────────────┴─────────────┐
+             ▼                           ▼
+       event-writer                analysis-engine
+             │                     route · normalise · detect
+             ▼                           │
+  ClickHouse security_events      security.detections
+             │                           │
+             ▼                 ┌─────────┴─────────┐
+ security.events.quarantine    ▼                   ▼
+                        detection-writer      alert-writer
+                               │            at or above a severity floor
+                               ▼                   │
+                  ClickHouse security_detections   ▼
+                                            PostgreSQL alerts · trail
+                                                    ▲
+ control-api ───────────────────────────────────────┘
+   │   open · acknowledged · in investigation · resolved / false positive
+   │
+   └───▶ Redpanda security.rulesets ──▶ analysis-engine
+         compiles, tests and publishes   compacted: every version,
+         a ruleset; activates one        one pointer at the one to run
 
- control-api ──▶ Redpanda security.rulesets ──▶ analysis-engine
-   compiles, tests and publishes    compacted: every version,
-   a ruleset; activates one         one pointer at the one to run
-
- query-api ──▶ both tables, read only, within a scope
+ query-api ──▶ both ClickHouse tables, read only, within a scope
 ```
 
 Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
@@ -110,9 +115,10 @@ Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 | `analysis-engine` | Reads the event stream under its own group, routes and normalises, and decides events against the ruleset it is pinned to. |
 | `event-writer` | Makes admitted telemetry queryable, quarantining what it cannot store. |
 | `detection-writer` | Makes a detection queryable, on the same terms and as a consumer of its own. |
-| `control-api` | The administrative surface: sessions, authorisation, and ruleset validation, publication and rollback. |
-| `query-api` | The read plane, and the only reader of the store. |
-| `backbone-migrator`, `store-migrator` | Apply the topic topology and the store schema, then exit. Nothing migrates on the way to serving traffic. |
+| `alert-writer` | Opens a piece of work from a detection at or above a severity floor, in a group of its own. It inserts and never updates. |
+| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, and the alert lifecycle. |
+| `query-api` | The read plane, and the only reader of the analytical store. |
+| `backbone-migrator`, `store-migrator`, `alert-migrator` | Apply the topic topology, the analytical schema and the relational schema, then exit. Nothing migrates on the way to serving traffic. |
 
 Dependencies point one way — `cmd` → capability → domain, with adapters plugged
 in at the edges and `internal/platform` never learning about the product. That
@@ -122,6 +128,11 @@ violation fails the build rather than a review.
 Two capabilities never reach each other through Go. They meet on the backbone,
 which is what keeps the shape of an alert table out of the thing that decides
 what an alert is about.
+
+An alert is named by the detection it is about, so a replayed batch finds the
+alert it already opened rather than opening a second one — and the process that
+opens alerts never updates one, so nothing a reprocessed batch does can reach
+somebody's triage. [ADR 16](docs/decisions/0016-an-alert-is-a-detection-somebody-owns.md).
 
 ## Getting started
 

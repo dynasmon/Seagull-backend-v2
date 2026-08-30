@@ -15,10 +15,13 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/control"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	"github.com/dynasmon/Seagull-backend-v2/internal/hunt"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
 	"github.com/dynasmon/Seagull-backend-v2/internal/protocol"
+	alertv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/alert/v1"
+	controlv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/control/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	huntv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/hunt/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
@@ -27,6 +30,7 @@ import (
 func main() {
 	endpoint := flag.String("endpoint", "https://127.0.0.1:8443", "gateway base URL")
 	huntEndpoint := flag.String("hunt", "", "query plane base URL; asks what was stored instead of sending a batch")
+	alertEndpoint := flag.String("alerts", "", "control plane base URL; works an alert through its lifecycle instead of sending a batch")
 	window := flag.Duration("window", time.Hour, "how far back a hunt looks")
 	pki := flag.String("pki", ".local/pki", "directory holding the development material")
 	batchID := flag.String("batch-id", "probe-0001", "batch identifier")
@@ -36,6 +40,9 @@ func main() {
 	run := func() error { return probe(*endpoint, *pki, *batchID, *eventID) }
 	if *huntEndpoint != "" {
 		run = func() error { return ask(*huntEndpoint, *pki, *window) }
+	}
+	if *alertEndpoint != "" {
+		run = func() error { return triage(*alertEndpoint, *pki) }
 	}
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "devprobe: %v\n", err)
@@ -103,6 +110,129 @@ func report(path string, body []byte) error {
 			record.GetEventId(), record.GetAuthentication().GetUser().GetName())
 	}
 	return nil
+}
+
+// The control plane exchanges a completed handshake for a session and decides
+// every request against the policy, so this speaks as the administrator
+// `make dev-pki` mints and carries the token it is given.
+func triage(endpoint, pki string) error {
+	client, err := speaker(pki, "admin")
+	if err != nil {
+		return err
+	}
+
+	status, body, err := post(client, endpoint+control.SessionPath, control.ContentType, &controlv1.SessionRequest{})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusCreated {
+		return refused("session", status, body)
+	}
+	var opened controlv1.SessionResponse
+	if err := proto.Unmarshal(body, &opened); err != nil {
+		return err
+	}
+	fmt.Printf("session %s for %s\n", opened.GetSession().GetId(), opened.GetSession().GetGrant().GetSubject())
+
+	status, body, err = send(client, http.MethodPost, endpoint+control.AlertSearch, opened.GetToken(),
+		&alertv1.Query{States: []alertv1.State{alertv1.State_STATE_OPEN}, Limit: 5})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return refused("search", status, body)
+	}
+	var page alertv1.Page
+	if err := proto.Unmarshal(body, &page); err != nil {
+		return err
+	}
+
+	fmt.Printf("open alerts %d\n", len(page.GetAlerts()))
+	for _, one := range page.GetAlerts() {
+		fmt.Printf("  %s %s %s %s\n", one.GetRaisedAt().AsTime().Format(time.RFC3339),
+			one.GetAlertId(), one.GetRule().GetId(), one.GetSeverity())
+	}
+	if len(page.GetAlerts()) == 0 {
+		return nil
+	}
+	return walk(client, endpoint, opened.GetToken(), page.GetAlerts()[0].GetAlertId())
+}
+
+func walk(client *http.Client, endpoint, token, id string) error {
+	for _, step := range []*alertv1.TransitionRequest{
+		{To: alertv1.State_STATE_ACKNOWLEDGED},
+		{To: alertv1.State_STATE_IN_INVESTIGATION, Note: "checking whether the source is ours"},
+		{To: alertv1.State_STATE_FALSE_POSITIVE, Note: "the scanner is ours"},
+	} {
+		status, body, err := send(client, http.MethodPost, endpoint+"/v1/alerts/"+id+"/transition", token, step)
+		if err != nil {
+			return err
+		}
+		if status != http.StatusOK {
+			return refused("transition", status, body)
+		}
+		var moved alertv1.Alert
+		if err := proto.Unmarshal(body, &moved); err != nil {
+			return err
+		}
+		fmt.Printf("  -> %s at revision %d by %s\n", moved.GetState(), moved.GetRevision(), moved.GetChangedBy())
+	}
+
+	status, body, err := send(client, http.MethodGet, endpoint+"/v1/alerts/"+id+"/history", token, nil)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return refused("history", status, body)
+	}
+	var trail alertv1.History
+	if err := proto.Unmarshal(body, &trail); err != nil {
+		return err
+	}
+
+	fmt.Printf("trail %d\n", len(trail.GetTransitions()))
+	for _, line := range trail.GetTransitions() {
+		fmt.Printf("  %d %s -> %s by %s %q\n", line.GetRevision(), line.GetFrom(), line.GetTo(), line.GetActor(), line.GetNote())
+	}
+	return nil
+}
+
+func refused(what string, status int, body []byte) error {
+	var refusal controlv1.Refusal
+	if err := proto.Unmarshal(body, &refusal); err != nil {
+		return fmt.Errorf("%s answered %d", what, status)
+	}
+	return fmt.Errorf("%s answered %d: %s %s", what, status, refusal.GetCode(), refusal.GetDetail())
+}
+
+func send(client *http.Client, method, url, token string, message proto.Message) (int, []byte, error) {
+	var payload []byte
+	if message != nil {
+		encoded, err := proto.Marshal(message)
+		if err != nil {
+			return 0, nil, err
+		}
+		payload = encoded
+	}
+
+	request, err := http.NewRequest(method, url, bytes.NewReader(payload))
+	if err != nil {
+		return 0, nil, err
+	}
+	request.Header.Set("Content-Type", control.ContentType)
+	request.Header.Set("Authorization", "Bearer "+token)
+
+	response, err := client.Do(request)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer response.Body.Close()
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return 0, nil, err
+	}
+	return response.StatusCode, body, nil
 }
 
 func post(client *http.Client, url, contentType string, message proto.Message) (int, []byte, error) {

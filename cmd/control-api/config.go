@@ -6,6 +6,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
+	"github.com/dynasmon/Seagull-backend-v2/internal/postgres"
 )
 
 const serviceName = "control-api"
@@ -31,6 +32,8 @@ type configuration struct {
 	ratePerSecond  float64
 	rateBurst      int
 	trackedCallers int
+
+	alerts postgres.Config
 
 	readTimeout  time.Duration
 	writeTimeout time.Duration
@@ -58,6 +61,8 @@ func load(parser *config.Parser) (configuration, error) {
 		sessionsTotal:  parser.Int("SEAGULL_CONTROL_API_SESSIONS_MAX", 4096, 1, 1_000_000),
 		rateBurst:      parser.Int("SEAGULL_CONTROL_API_RATE_BURST", 40, 1, 100_000),
 		trackedCallers: parser.Int("SEAGULL_CONTROL_API_TRACKED_CALLERS", 4096, 1, 1_000_000),
+
+		alerts: postgres.LoadConfig("SEAGULL_ALERT_STORE", parser),
 
 		readTimeout:  parser.Duration("SEAGULL_CONTROL_API_READ_TIMEOUT", 15*time.Second, time.Second, 5*time.Minute),
 		writeTimeout: parser.Duration("SEAGULL_CONTROL_API_WRITE_TIMEOUT", 15*time.Second, time.Second, 5*time.Minute),

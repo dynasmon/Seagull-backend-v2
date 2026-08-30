@@ -28,6 +28,15 @@ func policy(t *testing.T) *authz.Policy {
 	analyst, err := authz.NewRole("analyst", "reads", []authz.Permission{
 		{Resource: authz.Events, Action: authz.Read},
 		{Resource: authz.Detections, Action: authz.Read},
+		{Resource: authz.Alerts, Action: authz.Read},
+	})
+	if err != nil {
+		t.Fatalf("build a role: %v", err)
+	}
+	responder, err := authz.NewRole("responder", "works alerts", []authz.Permission{
+		{Resource: authz.Detections, Action: authz.Read},
+		{Resource: authz.Alerts, Action: authz.Read},
+		{Resource: authz.Alerts, Action: authz.Write},
 	})
 	if err != nil {
 		t.Fatalf("build a role: %v", err)
@@ -43,6 +52,9 @@ func policy(t *testing.T) *authz.Policy {
 	administrator, err := authz.NewRole("administrator", "administers", []authz.Permission{
 		{Resource: authz.Events, Action: authz.Read},
 		{Resource: authz.Rulesets, Action: authz.Write},
+		{Resource: authz.Alerts, Action: authz.Read},
+		{Resource: authz.Alerts, Action: authz.Write},
+		{Resource: authz.Alerts, Action: authz.Delete},
 		{Resource: authz.Sessions, Action: authz.Read},
 		{Resource: authz.Sessions, Action: authz.Delete},
 	})
@@ -50,11 +62,12 @@ func policy(t *testing.T) *authz.Policy {
 		t.Fatalf("build a role: %v", err)
 	}
 
-	bindings := make([]authz.Binding, 0, 3)
+	bindings := make([]authz.Binding, 0, 4)
 	for subject, roles := range map[string][]string{
-		"dev-analyst":  {"analyst"},
-		"dev-engineer": {"engineer"},
-		"dev-admin":    {"administrator"},
+		"dev-analyst":   {"analyst"},
+		"dev-engineer":  {"engineer"},
+		"dev-responder": {"responder"},
+		"dev-admin":     {"administrator"},
 	} {
 		binding, err := authz.NewBinding(subject, roles, []string{"default"})
 		if err != nil {
@@ -63,7 +76,7 @@ func policy(t *testing.T) *authz.Policy {
 		bindings = append(bindings, binding)
 	}
 
-	compiled, err := authz.Compile([]authz.Role{analyst, engineer, administrator}, bindings)
+	compiled, err := authz.Compile([]authz.Role{analyst, engineer, responder, administrator}, bindings)
 	if err != nil {
 		t.Fatalf("compile the policy: %v", err)
 	}

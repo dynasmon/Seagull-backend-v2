@@ -289,11 +289,13 @@ services:
     depends_on:
       backbone-migrator:
         condition: service_completed_successfully
+      alert-migrator:
+        condition: service_completed_successfully
     networks: [backbone, agents]
     ports:
       - "${SEAGULL_CONTROL_API_PUBLISH:-127.0.0.1:8445}:8445"
     environment:
-      <<: *backbone
+      <<: [*backbone, *alertstore]
       SEAGULL_CONTROL_API_ADDRESS: 0.0.0.0:8445
       SEAGULL_CONTROL_API_TLS_CERT: /run/pki/gateway.pem
       SEAGULL_CONTROL_API_TLS_KEY: /run/pki/gateway-key.pem

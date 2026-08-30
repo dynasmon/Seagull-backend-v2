@@ -23,6 +23,7 @@ type ServerOptions struct {
 	Sessions        *Sessions
 	Registry        *Registry
 	Rulesets        Rulesets
+	Alerts          Alerts
 	Metrics         *Metrics
 	Instrumentation *httpx.Instrumentation
 	Logger          *slog.Logger
@@ -37,6 +38,7 @@ type Server struct {
 	sessions *Sessions
 	registry *Registry
 	rulesets Rulesets
+	alerts   Alerts
 	metrics  *Metrics
 	now      func() time.Time
 }
@@ -83,6 +85,8 @@ func NewHandler(options ServerOptions) (http.Handler, error) {
 		return nil, errors.New("the control listener needs a policy")
 	case options.Rulesets == nil:
 		return nil, errors.New("the control listener administers rulesets and needs somewhere to keep them")
+	case options.Alerts == nil:
+		return nil, errors.New("the control listener works alerts and needs somewhere to read and move them")
 	case options.Metrics == nil:
 		return nil, errors.New("the control listener needs metrics")
 	case options.Instrumentation == nil:
@@ -96,6 +100,7 @@ func NewHandler(options ServerOptions) (http.Handler, error) {
 		sessions: options.Sessions,
 		registry: options.Registry,
 		rulesets: options.Rulesets,
+		alerts:   options.Alerts,
 		metrics:  options.Metrics,
 		now:      options.Now,
 	}
@@ -120,7 +125,7 @@ func (s *Server) routes() []route {
 		{http.MethodGet, SessionPath, "session_describe", Session(), s.describeSession()},
 		{http.MethodDelete, SessionPath, "session_revoke", Session(), s.revokeSession()},
 		{http.MethodGet, SessionsPath, "session_list", Session(), s.listSessions()},
-	}, rulesetRoutes(s)...)
+	}, append(rulesetRoutes(s), alertRoutes(s)...)...)
 }
 
 func (s *Server) descriptor() http.Handler {

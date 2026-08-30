@@ -39,31 +39,6 @@ const insertTransition = `INSERT INTO alert_transitions
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 ON CONFLICT (alert_id, revision) DO NOTHING`
 
-// Superseded by Record once the writer folds; kept while the writer still calls
-// it so that every branch tip compiles.
-func (s *Store) Raise(ctx context.Context, raised []*alertv1.Alert) (int, error) {
-	candidates := make([]alert.Candidate, 0, len(raised))
-	for _, one := range raised {
-		candidates = append(candidates, alert.Candidate{
-			Alert:       one,
-			DetectionID: one.GetDetectionId(),
-			Key:         one.GetAlertId(),
-			At:          one.GetFirstSeen().AsTime(),
-		})
-	}
-	outcomes, err := s.Record(ctx, candidates)
-	if err != nil {
-		return 0, err
-	}
-	added := 0
-	for _, outcome := range outcomes {
-		if outcome == alert.OutcomeRaised {
-			added++
-		}
-	}
-	return added, nil
-}
-
 func (s *Store) Alert(ctx context.Context, id string, tenants []string) (*alertv1.Alert, error) {
 	rows, err := s.pool.Query(ctx,
 		"SELECT "+columns+" FROM alerts WHERE alert_id = $1 AND tenant_id = ANY($2)", id, tenants)

@@ -30,6 +30,8 @@ const (
 var layers = map[string]layer{
 	"cmd":                     executable,
 	"internal/agentidentity":  domain,
+	"internal/alert":          domain,
+	"internal/alertstore":     capability,
 	"internal/analysis":       capability,
 	"internal/authz":          domain,
 	"internal/broker":         adapter,
@@ -44,6 +46,7 @@ var layers = map[string]layer{
 	"internal/ingest":         capability,
 	"internal/platform":       platform,
 	"internal/policyfile":     adapter,
+	"internal/postgres":       adapter,
 	"internal/protocol":       domain,
 	"internal/rulefile":       adapter,
 	"internal/ruleset":        capability,
@@ -90,17 +93,18 @@ var outside = map[layer]restriction{
 			"net/http",
 			"database/sql",
 			"github.com/ClickHouse",
+			"github.com/jackc",
 			"github.com/prometheus/client_golang",
 			"github.com/twmb/franz-go",
 		},
 		because: "a domain states what something is and needs nothing that runs to state it",
 	},
 	capability: {
-		prefixes: []string{"database/sql", "github.com/ClickHouse", "github.com/twmb/franz-go"},
+		prefixes: []string{"database/sql", "github.com/ClickHouse", "github.com/jackc", "github.com/twmb/franz-go"},
 		because:  "a capability describes what it needs; the adapter holding a client is chosen by an executable",
 	},
 	executable: {
-		prefixes: []string{"database/sql", "github.com/ClickHouse", "github.com/twmb/franz-go"},
+		prefixes: []string{"database/sql", "github.com/ClickHouse", "github.com/jackc", "github.com/twmb/franz-go"},
 		because:  "an executable chooses an adapter; it does not open a connection itself",
 	},
 }
@@ -115,6 +119,14 @@ var within = map[string]restriction{
 			modulePath + "/internal/platform/tlsx",
 		},
 		because: "what analysing an event means has no transport of its own: this half is reached from the backbone",
+	},
+	"internal/alertstore": {
+		prefixes: []string{
+			"net/http",
+			modulePath + "/internal/platform/httpx",
+			modulePath + "/internal/platform/tlsx",
+		},
+		because: "what putting a detection in front of a person means has no transport of its own: this half is reached from the backbone",
 	},
 	"internal/detectionstore": {
 		prefixes: []string{

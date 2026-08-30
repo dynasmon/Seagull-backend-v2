@@ -19,6 +19,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/tlsx"
 	"github.com/dynasmon/Seagull-backend-v2/internal/policyfile"
+	"github.com/dynasmon/Seagull-backend-v2/internal/postgres"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ruleset"
 )
 
@@ -88,6 +89,18 @@ func controlAPI(ctx context.Context) error {
 	}
 	defer published.close()
 
+	raised, err := postgres.New(ctx, settings.alerts)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = raised.Close() }()
+
+	alertCtx, cancelAlerts := context.WithTimeout(ctx, settings.alerts.Timeout)
+	defer cancelAlerts()
+	if err := raised.VerifySchema(alertCtx); err != nil {
+		return err
+	}
+
 	transport, err := mutualTransport(settings)
 	if err != nil {
 		return err
@@ -100,6 +113,7 @@ func controlAPI(ctx context.Context) error {
 		Sessions:        sessions,
 		Registry:        registry,
 		Rulesets:        rulesets{catalogue: published.catalogue, publisher: published.publisher},
+		Alerts:          raised,
 		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
@@ -123,9 +137,11 @@ func controlAPI(ctx context.Context) error {
 		slog.String("rulesets_topic", settings.topology.Rulesets.Name),
 		slog.Int("rulesets_published", published.catalogue.Count()),
 		slog.String("ruleset_active", published.catalogue.Activation().GetRulesetId()),
+		slog.String("alert_store_database", settings.alerts.Database),
 	)
 
 	platform.Health().Register("backbone", published.publisher.Ping)
+	platform.Health().Register("alert-store", raised.Ping)
 	platform.Add(published.follower(platform.Logger()))
 	platform.Add(listener)
 	platform.Add(sweeper{sessions: sessions, every: settings.sessionLife})

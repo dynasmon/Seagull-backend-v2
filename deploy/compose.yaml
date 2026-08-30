@@ -19,6 +19,15 @@ x-backbone: &backbone
   SEAGULL_BACKBONE_RULESETS_TOPIC: security.rulesets
   SEAGULL_BACKBONE_REPLICAS: ${SEAGULL_BACKBONE_REPLICAS:-1}
 
+# One declaration of the relational store, read by the command that applies its
+# schema and by the two processes that verify it before they serve.
+x-alertstore: &alertstore
+  SEAGULL_ALERT_STORE_ADDRESS: postgres:5432
+  SEAGULL_ALERT_STORE_DATABASE: ${SEAGULL_ALERT_STORE_DATABASE:-seagull}
+  SEAGULL_ALERT_STORE_USER: ${SEAGULL_ALERT_STORE_USER:-seagull}
+  SEAGULL_ALERT_STORE_PASSWORD: ${SEAGULL_ALERT_STORE_PASSWORD:-seagull}
+  SEAGULL_ALERT_STORE_SSLMODE: ${SEAGULL_ALERT_STORE_SSLMODE:-disable}
+
 # The development certificates are owned by whoever ran `make dev-pki`, and the
 # private keys stay owner-readable. `make up` passes that identity through so a
 # bind mount works without loosening the permissions on a key.
@@ -117,6 +126,42 @@ services:
     restart: "no"
     <<: *hardening
 
+  # The relational store. Alerts are mutable, low volume and owned by a person,
+  # which is the opposite of the analytical workload beside it.
+  postgres:
+    image: postgres:16.4-alpine
+    networks: [backbone]
+    environment:
+      POSTGRES_DB: ${SEAGULL_ALERT_STORE_DATABASE:-seagull}
+      POSTGRES_USER: ${SEAGULL_ALERT_STORE_USER:-seagull}
+      POSTGRES_PASSWORD: ${SEAGULL_ALERT_STORE_PASSWORD:-seagull}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SEAGULL_ALERT_STORE_USER:-seagull} -d ${SEAGULL_ALERT_STORE_DATABASE:-seagull}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Applied by a command that runs to completion, never by a process on its way
+  # to serving traffic. The writer and the control plane verify the result.
+  alert-migrator:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        COMPONENT: alert-migrator
+        VERSION: ${SEAGULL_VERSION:-dev}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [backbone]
+    environment:
+      <<: *alertstore
+      SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
+    restart: "no"
+    <<: *hardening
+
   # The rules are mounted rather than built in: the image is FROM scratch and
   # carries no filesystem, and a ruleset changes on its own cadence.
   analysis-engine:
@@ -181,6 +226,29 @@ services:
       SEAGULL_DETECTION_STORE_DATABASE: ${SEAGULL_DETECTION_STORE_DATABASE:-seagull}
       SEAGULL_DETECTION_STORE_USER: ${SEAGULL_DETECTION_STORE_USER:-seagull}
       SEAGULL_DETECTION_STORE_PASSWORD: ${SEAGULL_DETECTION_STORE_PASSWORD:-}
+      SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
+      SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    <<: *hardening
+
+  # Opens a piece of work from what the engine decided. It consumes the same
+  # topic as detection-writer in a group of its own, so a store it cannot reach
+  # holds alerts and never telemetry.
+  alert-writer:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        COMPONENT: alert-writer
+        VERSION: ${SEAGULL_VERSION:-dev}
+    depends_on:
+      backbone-migrator:
+        condition: service_completed_successfully
+      alert-migrator:
+        condition: service_completed_successfully
+    networks: [backbone]
+    environment:
+      <<: [*backbone, *alertstore]
+      SEAGULL_ALERT_SEVERITY_FLOOR: ${SEAGULL_ALERT_SEVERITY_FLOOR:-medium}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
     <<: *hardening
@@ -274,3 +342,4 @@ services:
 volumes:
   redpanda: {}
   clickhouse: {}
+  postgres: {}

@@ -16,3 +16,8 @@ services:
     networks: [backbone, backbone-testing]
     ports:
       - "127.0.0.1:19000:9000"
+
+  postgres:
+    networks: [backbone, backbone-testing]
+    ports:
+      - "127.0.0.1:15432:5432"

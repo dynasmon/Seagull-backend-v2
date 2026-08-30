@@ -5,11 +5,12 @@ DIST ?= dist
 PKI ?= .local/pki
 COMPOSE := docker compose -f deploy/compose.yaml
 COMPOSE_TEST := docker compose -f deploy/compose.yaml -f deploy/compose.test.yaml
-COMPONENTS := ingest-gateway control-api query-api analysis-engine event-writer detection-writer store-migrator backbone-migrator
+COMPONENTS := ingest-gateway control-api query-api analysis-engine event-writer detection-writer alert-writer store-migrator backbone-migrator alert-migrator
 VERSION ?= dev
 REVISION ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 TEST_BROKERS ?= 127.0.0.1:19092
 TEST_EVENT_STORE ?= 127.0.0.1:19000
+TEST_ALERT_STORE ?= 127.0.0.1:15432
 
 .PHONY: help fmt fmt-check vet mod-check lint test test-race test-integration \
         test-load bench build images vulncheck dev-pki up down logs clean verify
@@ -22,7 +23,7 @@ help:
 	@echo "lint                fmt-check and vet"
 	@echo "test                run the unit, architecture and end-to-end suites"
 	@echo "test-race           run the same suites under the race detector"
-	@echo "test-integration    run the data plane suites against a live Redpanda and ClickHouse"
+	@echo "test-integration    run the data plane suites against a live Redpanda, ClickHouse and PostgreSQL"
 	@echo "test-load           run the ingest load scenarios against a live Redpanda"
 	@echo "bench               run the hot-path benchmarks"
 	@echo "build               build every component into $(DIST)"
@@ -62,9 +63,10 @@ test-race:
 	$(GO) test -race ./internal/... ./tests/...
 
 test-integration:
-	$(COMPOSE_TEST) up -d --wait redpanda clickhouse
+	$(COMPOSE_TEST) up -d --wait redpanda clickhouse postgres
 	SEAGULL_TEST_BROKERS=$(TEST_BROKERS) \
 	SEAGULL_TEST_EVENT_STORE=$(TEST_EVENT_STORE) \
+	SEAGULL_TEST_ALERT_STORE=$(TEST_ALERT_STORE) \
 	  $(GO) test -tags integration -count=1 ./tests/integration/...
 
 test-load:

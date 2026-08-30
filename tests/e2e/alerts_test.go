@@ -28,6 +28,7 @@ type raisedAlerts struct {
 	mutex sync.Mutex
 	held  map[string]*alertv1.Alert
 	trail map[string][]*alertv1.Transition
+	made  map[string][]*alertv1.Occurrence
 }
 
 func newRaisedAlerts() *raisedAlerts {
@@ -45,6 +46,7 @@ func newRaisedAlerts() *raisedAlerts {
 	return &raisedAlerts{
 		held:  map[string]*alertv1.Alert{openAlert: made},
 		trail: map[string][]*alertv1.Transition{openAlert: {alert.Raised(made)}},
+		made:  map[string][]*alertv1.Occurrence{openAlert: {{DetectionId: openAlert}}},
 	}
 }
 
@@ -83,6 +85,16 @@ func (r *raisedAlerts) History(_ context.Context, id string, tenants []string) (
 		return nil, err
 	}
 	return &alertv1.History{AlertId: id, Transitions: r.trail[id]}, nil
+}
+
+func (r *raisedAlerts) Occurrences(_ context.Context, id string, tenants []string) (*alertv1.Occurrences, error) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	if _, err := r.read(id, tenants); err != nil {
+		return nil, err
+	}
+	return &alertv1.Occurrences{AlertId: id, Occurrences: r.made[id]}, nil
 }
 
 func (r *raisedAlerts) Move(_ context.Context, id string, tenants []string, asked alert.Move) (*alertv1.Alert, error) {
@@ -149,6 +161,37 @@ func TestAnAlertIsTriagedOverRealMutualTLSAndEveryStepIsAttributable(t *testing.
 		if line.GetActor() != "e2e-responder" {
 			t.Errorf("a move is attributed to %q", line.GetActor())
 		}
+	}
+}
+
+// Folding raises a count, so the count has to be readable back to the detections
+// behind it or suppression has destroyed the evidence an investigation needs.
+func TestAnAlertNamesEveryDetectionItIsMadeOf(t *testing.T) {
+	plane := startControlAPI(t, nil)
+	analyst := plane.caller(t, "e2e-analyst")
+	token := plane.open(t, analyst).GetToken()
+
+	response, body := plane.send(t, analyst, http.MethodGet, "/v1/alerts/"+openAlert+"/occurrences", token, nil)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("reading what the alert is made of answered %d: %s", response.StatusCode, body)
+	}
+
+	var made alertv1.Occurrences
+	if err := proto.Unmarshal(body, &made); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if made.GetAlertId() != openAlert {
+		t.Errorf("it answered about %q", made.GetAlertId())
+	}
+	if len(made.GetOccurrences()) != 1 {
+		t.Fatalf("the alert names %d detections", len(made.GetOccurrences()))
+	}
+
+	outsider := plane.caller(t, "e2e-outsider")
+	outsiderToken := plane.open(t, outsider).GetToken()
+	response, _ = plane.send(t, outsider, http.MethodGet, "/v1/alerts/"+openAlert+"/occurrences", outsiderToken, nil)
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("a caller in another tenant read what the alert is made of: %d", response.StatusCode)
 	}
 }
 

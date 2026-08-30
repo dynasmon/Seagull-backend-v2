@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/alert"
+	"github.com/dynasmon/Seagull-backend-v2/internal/alertfile"
 	"github.com/dynasmon/Seagull-backend-v2/internal/alertstore"
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
@@ -36,6 +38,11 @@ func writer(ctx context.Context) error {
 	}
 
 	floor, err := alert.ParseFloor(settings.floor)
+	if err != nil {
+		return err
+	}
+
+	tuning, err := alerting(settings.tuning)
 	if err != nil {
 		return err
 	}
@@ -86,6 +93,7 @@ func writer(ctx context.Context) error {
 	component, err := alertstore.NewWriter(alertstore.WriterOptions{
 		Source:        source{consumer: consumer},
 		Sink:          store,
+		Tuning:        tuning,
 		Floor:         floor,
 		Metrics:       alertstore.NewMetrics(platform.Metrics()),
 		Logger:        platform.Logger(),
@@ -106,8 +114,25 @@ func writer(ctx context.Context) error {
 		slog.String("group", settings.group),
 		slog.Int("batch_detections", settings.batchDetections),
 		slog.String("severity_floor", settings.floor),
+		slog.String("alerting_document", settings.tuning),
+		slog.String("tuning", tuning.ID()),
+		slog.Int("folds", tuning.Rules()),
+		slog.Int("suppressions", tuning.Suppressions()),
 		slog.String("store_database", settings.store.Database),
 	)
 
 	return platform.Run(ctx)
+}
+
+// A document nobody declared is the built-in fold: alerts still fold per rule
+// and per agent, and nothing is silenced after being closed.
+func alerting(path string) (*alert.Tuning, error) {
+	if path == "" {
+		return alert.NewTuning(alertfile.Defaults, nil, nil)
+	}
+	directory, name := filepath.Split(path)
+	if directory == "" {
+		directory = "."
+	}
+	return alertfile.Tuning(os.DirFS(directory), name)
 }

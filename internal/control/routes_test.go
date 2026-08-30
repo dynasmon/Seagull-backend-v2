@@ -25,12 +25,18 @@ func routes(t *testing.T, h *harness) http.Handler {
 
 func routesWith(t *testing.T, h *harness, store control.Rulesets) http.Handler {
 	t.Helper()
+	return listener(t, h, store, newStubAlerts())
+}
+
+func listener(t *testing.T, h *harness, store control.Rulesets, raised control.Alerts) http.Handler {
+	t.Helper()
 
 	handler, err := control.NewHandler(control.ServerOptions{
 		Guard:           h.guard,
 		Sessions:        h.sessions,
 		Registry:        h.registry,
 		Rulesets:        store,
+		Alerts:          raised,
 		Metrics:         h.metrics,
 		Instrumentation: httpx.NewInstrumentation(metrics.New("control-api-routes")),
 	})

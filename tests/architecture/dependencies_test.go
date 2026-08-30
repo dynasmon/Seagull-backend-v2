@@ -31,6 +31,7 @@ var layers = map[string]layer{
 	"cmd":                     executable,
 	"internal/agentidentity":  domain,
 	"internal/alert":          domain,
+	"internal/alertfile":      adapter,
 	"internal/alertstore":     capability,
 	"internal/analysis":       capability,
 	"internal/authz":          domain,
@@ -143,6 +144,10 @@ var within = map[string]restriction{
 			modulePath + "/internal/platform/tlsx",
 		},
 		because: "what a stored event is has no transport of its own: this half is reached from the backbone",
+	},
+	"internal/alertfile": {
+		prefixes: []string{"net/http", "os", "database/sql"},
+		because:  "an alerting document is a document, and where it is read from is chosen by an executable",
 	},
 	"internal/policyfile": {
 		prefixes: []string{"net/http", "os", "database/sql"},

@@ -72,6 +72,7 @@ func Raise(made *detectionv1.Detection, at time.Time) (*alertv1.Alert, error) {
 	}
 
 	raised := timestamppb.New(at.UTC())
+	happened := timestamppb.New(Happened(made, at))
 	return &alertv1.Alert{
 		AlertId:       made.GetDetectionId(),
 		SchemaVersion: SchemaVersion,
@@ -88,6 +89,9 @@ func Raise(made *detectionv1.Detection, at time.Time) (*alertv1.Alert, error) {
 		ChangedBy:     Platform,
 		ChangedAt:     raised,
 		Revision:      1,
+		Occurrences:   1,
+		FirstSeen:     happened,
+		LastSeen:      happened,
 	}, nil
 }
 

@@ -39,6 +39,7 @@ var layers = map[string]layer{
 	"internal/clickhouse":     adapter,
 	"internal/control":        capability,
 	"internal/detection":      domain,
+	"internal/detectionstate": domain,
 	"internal/detectionstore": capability,
 	"internal/devpki":         development,
 	"internal/event":          domain,

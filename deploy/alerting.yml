@@ -1,0 +1,28 @@
+# How detections become work, and which never do. Development material; an
+# estate replaces this file.
+#
+# Read at startup and never changed by a running process. Every window is
+# measured in event time, so replaying a batch decides what it decided the first
+# time however long afterwards it runs.
+
+schema_version: 1
+
+# What an alert is keyed by, and how long one absorbs what shares its key. A
+# cooldown of zero means a closed alert never silences what comes after it.
+defaults:
+  key: [rule, agent]
+  window: 15m
+  cooldown: 0s
+
+# v1 chose the key by matching a prefix of the rule id, so a rule renamed was a
+# rule that stopped deduplicating. Here the estate says it.
+rules:
+  - id: ssh.failed_password_from_outside
+    key: [rule, agent, "evidence:authentication.source.ip"]
+    window: 1h
+    cooldown: 30m
+
+# A suppression hides work and never activity: the detection is still stored,
+# still queryable and still counted. It has to say why, and it should say until
+# when.
+suppressions: []

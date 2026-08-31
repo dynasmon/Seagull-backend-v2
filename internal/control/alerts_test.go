@@ -26,6 +26,7 @@ const raised = "bc84b318fe13e6f6ad86d64da0730a07"
 type stubAlerts struct {
 	held      map[string]*alertv1.Alert
 	trail     map[string][]*alertv1.Transition
+	made      map[string][]*alertv1.Occurrence
 	unreached error
 	scoped    [][]string
 }
@@ -45,6 +46,7 @@ func newStubAlerts() *stubAlerts {
 			Revision:    1,
 		}},
 		trail: map[string][]*alertv1.Transition{},
+		made:  map[string][]*alertv1.Occurrence{raised: {{DetectionId: raised}}},
 	}
 }
 
@@ -79,6 +81,13 @@ func (s *stubAlerts) History(ctx context.Context, id string, tenants []string) (
 		return nil, err
 	}
 	return &alertv1.History{AlertId: id, Transitions: s.trail[id]}, nil
+}
+
+func (s *stubAlerts) Occurrences(ctx context.Context, id string, tenants []string) (*alertv1.Occurrences, error) {
+	if _, err := s.Alert(ctx, id, tenants); err != nil {
+		return nil, err
+	}
+	return &alertv1.Occurrences{AlertId: id, Occurrences: s.made[id]}, nil
 }
 
 func (s *stubAlerts) Move(ctx context.Context, id string, tenants []string, asked alert.Move) (*alertv1.Alert, error) {

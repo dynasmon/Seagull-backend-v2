@@ -92,10 +92,11 @@ Seagull Agent
              ▼                 ┌─────────┴─────────┐
  security.events.quarantine    ▼                   ▼
                         detection-writer      alert-writer
-                               │            at or above a severity floor
-                               ▼                   │
-                  ClickHouse security_detections   ▼
-                                            PostgreSQL alerts · trail
+                               │            above a severity floor, folded
+                               ▼            on a declared key, suppressed
+                  ClickHouse security_detections   │
+                                                   ▼
+                                     PostgreSQL alerts · trail · occurrences
                                                     ▲
  control-api ───────────────────────────────────────┘
    │   open · acknowledged · in investigation · resolved / false positive
@@ -115,7 +116,7 @@ Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 | `analysis-engine` | Reads the event stream under its own group, routes and normalises, and decides events against the ruleset it is pinned to. |
 | `event-writer` | Makes admitted telemetry queryable, quarantining what it cannot store. |
 | `detection-writer` | Makes a detection queryable, on the same terms and as a consumer of its own. |
-| `alert-writer` | Opens a piece of work from a detection at or above a severity floor, in a group of its own. It inserts and never updates. |
+| `alert-writer` | Opens a piece of work from a detection at or above a severity floor, folding what shares a key and suppressing what the estate declared it does not want. It inserts and never updates. |
 | `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, and the alert lifecycle. |
 | `query-api` | The read plane, and the only reader of the analytical store. |
 | `backbone-migrator`, `store-migrator`, `alert-migrator` | Apply the topic topology, the analytical schema and the relational schema, then exit. Nothing migrates on the way to serving traffic. |
@@ -129,10 +130,17 @@ Two capabilities never reach each other through Go. They meet on the backbone,
 which is what keeps the shape of an alert table out of the thing that decides
 what an alert is about.
 
-An alert is named by the detection it is about, so a replayed batch finds the
+An alert is named by the detection that raised it, so a replayed batch finds the
 alert it already opened rather than opening a second one — and the process that
 opens alerts never updates one, so nothing a reprocessed batch does can reach
 somebody's triage. [ADR 16](docs/decisions/0016-an-alert-is-a-detection-somebody-owns.md).
+
+Noise is removed from the alert plane and never from the detection stream:
+detections that are the same piece of work fold into one alert with a count,
+the estate can declare which never become work at all, and both are counted so
+what was reduced is readable. The detection keeps its full evidence for 730 days
+whatever happens, and an alert names every detection it is made of.
+[ADR 17](docs/decisions/0017-noise-is-removed-from-the-alert-and-never-from-the-detection.md).
 
 ## Getting started
 

@@ -155,6 +155,7 @@ processes choosing the same adapter is not the same as sharing one.
 | `SEAGULL_ALERT_WRITER_RETRY_DELAY` | `1s` | first delay before a batch is retried |
 | `SEAGULL_ALERT_WRITER_RETRY_DELAY_MAX` | `30s` | ceiling the delay backs off to |
 | `SEAGULL_ALERT_SEVERITY_FLOOR` | `medium` | how much a detection has to matter before it becomes somebody's work |
+| `SEAGULL_ALERTING_DOCUMENT` | empty | how alerts fold and which never become work; the built-in fold is used when unset |
 
 It reads `security.detections` in a group of its own, beside `detection-writer`
 and never through it: a relational store nobody can reach stops alerts being
@@ -163,6 +164,44 @@ still stored, still queryable and still part of a hunt; it just does not become
 work. It quarantines nothing — `detection-writer` already writes exactly the
 records this cannot use to the detection quarantine, verbatim — and instead
 steps over them, counted by reason in `alertstore_skipped_total`.
+
+The alerting document says what an alert is keyed by, how long one absorbs what
+shares its key, how long a closed one silences what follows it, and which
+detections never become work at all. Without one the built-in fold applies:
+`[rule, agent]` over fifteen minutes, and no cooldown, because a cooldown is the
+only one of the three that can keep an operator from hearing about activity they
+have not decided about.
+
+```yaml
+schema_version: 1
+
+defaults:
+  key: [rule, agent]     # a key must always name the rule
+  window: 15m            # how long an open alert absorbs what shares its key
+  cooldown: 0s           # how long a closed one silences what follows it
+
+rules:
+  - id: ssh.failed_password_from_outside
+    key: [rule, agent, "evidence:authentication.source.ip"]
+    window: 1h
+    cooldown: 30m
+
+suppressions:
+  - rule: ssh.failed_password_from_outside
+    when:
+      agent: [scanner-01]
+    reason: our own credentialed scanner   # required
+    until: 2026-12-31T00:00:00Z            # optional, and worth writing
+```
+
+A key is a list of parts: `rule`, `agent`, `class`, `severity`, or
+`evidence:<contract field path>`. The tenant is always in the key and is never
+written. The same vocabulary is the suppression selector. Every window is
+measured in **event time**, so replaying a batch decides what it decided the
+first time. `alertstore_alerts_total` counts what became of every detection —
+`raised`, `folded`, `repeated`, `cooled_down` — and `alertstore_suppressed_total`
+is labelled by rule and by the reason written down. See
+[ADR 17](decisions/0017-noise-is-removed-from-the-alert-and-never-from-the-detection.md).
 
 ### alert-writer, control-api and alert-migrator
 

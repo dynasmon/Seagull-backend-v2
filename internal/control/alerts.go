@@ -14,6 +14,7 @@ const (
 	AlertSearch     = "/v1/alerts/search"
 	AlertPath       = "/v1/alerts/{id}"
 	AlertHistory    = "/v1/alerts/{id}/history"
+	AlertMadeOf     = "/v1/alerts/{id}/occurrences"
 	AlertTransition = "/v1/alerts/{id}/transition"
 	AlertAssignment = "/v1/alerts/{id}/assignment"
 )
@@ -25,6 +26,7 @@ type Alerts interface {
 	Page(ctx context.Context, asked *alertv1.Query, tenants []string) (*alertv1.Page, error)
 	Alert(ctx context.Context, id string, tenants []string) (*alertv1.Alert, error)
 	History(ctx context.Context, id string, tenants []string) (*alertv1.History, error)
+	Occurrences(ctx context.Context, id string, tenants []string) (*alertv1.Occurrences, error)
 	Move(ctx context.Context, id string, tenants []string, asked alert.Move) (*alertv1.Alert, error)
 }
 
@@ -81,6 +83,25 @@ func (s *Server) alertHistory() http.Handler {
 			return
 		}
 		respond(w, http.StatusOK, trail)
+	})
+}
+
+// Folding raises a count and discards nothing, so the count can always be read
+// back to the detections behind it and from there to their evidence.
+func (s *Server) alertOccurrences() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		caller, known := CallerFrom(r.Context())
+		if !known {
+			Refuse(w, http.StatusUnauthorized, CodeNoSession, "the request did not come through the guard")
+			return
+		}
+
+		made, err := s.alerts.Occurrences(r.Context(), r.PathValue("id"), caller.Grant.Tenants())
+		if err != nil {
+			s.refuseAlert(w, err)
+			return
+		}
+		respond(w, http.StatusOK, made)
 	})
 }
 
@@ -187,6 +208,7 @@ func alertRoutes(s *Server) []route {
 		{http.MethodPost, AlertSearch, "alert_search", Permits(authz.Alerts, authz.Read), s.searchAlerts()},
 		{http.MethodGet, AlertPath, "alert_describe", Permits(authz.Alerts, authz.Read), s.describeAlert()},
 		{http.MethodGet, AlertHistory, "alert_history", Permits(authz.Alerts, authz.Read), s.alertHistory()},
+		{http.MethodGet, AlertMadeOf, "alert_occurrences", Permits(authz.Alerts, authz.Read), s.alertOccurrences()},
 		{http.MethodPost, AlertTransition, "alert_transition", Permits(authz.Alerts, authz.Write), s.transitionAlert()},
 		{http.MethodPost, AlertAssignment, "alert_assign", Permits(authz.Alerts, authz.Write), s.assignAlert()},
 	}

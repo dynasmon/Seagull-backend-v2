@@ -21,3 +21,4 @@ rediscovered by reading the code.
 - [15. A ruleset is published to a log, and the pointer is the only mutable thing](0015-a-ruleset-is-published-to-a-log.md)
 - [16. An alert is a detection somebody owns](0016-an-alert-is-a-detection-somebody-owns.md)
 - [17. Noise is removed from the alert plane, never from the detection stream](0017-noise-is-removed-from-the-alert-and-never-from-the-detection.md)
+- [18. Detection state is a bounded window of the backbone, in event time](0018-detection-state-is-a-bounded-window.md)

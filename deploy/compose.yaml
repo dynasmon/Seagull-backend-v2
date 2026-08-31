@@ -249,8 +249,11 @@ services:
     environment:
       <<: [*backbone, *alertstore]
       SEAGULL_ALERT_SEVERITY_FLOOR: ${SEAGULL_ALERT_SEVERITY_FLOOR:-medium}
+      SEAGULL_ALERTING_DOCUMENT: /etc/seagull/alerting.yml
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    volumes:
+      - ./alerting.yml:/etc/seagull/alerting.yml:ro
     <<: *hardening
 
   ingest-gateway:

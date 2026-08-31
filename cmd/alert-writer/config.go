@@ -23,13 +23,14 @@ type configuration struct {
 	retryDelay      time.Duration
 	maxRetryDelay   time.Duration
 
-	floor string
-	store postgres.Config
+	floor  string
+	tuning string
+	store  postgres.Config
 }
 
-// The floor is the one product decision this process makes, so it is a setting
-// rather than a constant: an estate that wants every finding in front of
-// somebody lowers it, and one drowning in noise raises it.
+// The floor and the alerting document are the two product decisions this
+// process makes, so both are settings rather than constants. An estate that
+// declares no document gets the built-in fold and no cooldown at all.
 func load(parser *config.Parser) (configuration, error) {
 	loaded := configuration{
 		service: service.LoadConfig(serviceName, parser),
@@ -43,8 +44,9 @@ func load(parser *config.Parser) (configuration, error) {
 		retryDelay:      parser.Duration("SEAGULL_ALERT_WRITER_RETRY_DELAY", time.Second, 100*time.Millisecond, time.Minute),
 		maxRetryDelay:   parser.Duration("SEAGULL_ALERT_WRITER_RETRY_DELAY_MAX", 30*time.Second, time.Second, 10*time.Minute),
 
-		floor: parser.Enum("SEAGULL_ALERT_SEVERITY_FLOOR", "medium", "low", "medium", "high", "critical"),
-		store: postgres.LoadConfig("SEAGULL_ALERT_STORE", parser),
+		floor:  parser.Enum("SEAGULL_ALERT_SEVERITY_FLOOR", "medium", "low", "medium", "high", "critical"),
+		tuning: parser.String("SEAGULL_ALERTING_DOCUMENT", ""),
+		store:  postgres.LoadConfig("SEAGULL_ALERT_STORE", parser),
 	}
 
 	return loaded, parser.Err()

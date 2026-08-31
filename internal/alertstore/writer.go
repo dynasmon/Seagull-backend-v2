@@ -14,7 +14,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/alert"
-	alertv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/alert/v1"
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 )
 
@@ -37,15 +36,18 @@ type Source interface {
 	Consume(ctx context.Context, deliver Deliver) error
 }
 
-// Raising is idempotent on the alert's name, and answers how many were new: a
-// replayed batch finds what it already raised rather than raising it again.
+// Every candidate is decided the same way and answered for one by one: raised,
+// folded into one already open, refused for a cooldown, or recognised as one
+// already recorded. Idempotent on the detection id, which is what lets a batch
+// be retried until the store takes it.
 type Sink interface {
-	Raise(ctx context.Context, alerts []*alertv1.Alert) (int, error)
+	Record(ctx context.Context, candidates []alert.Candidate) ([]alert.Outcome, error)
 }
 
 type WriterOptions struct {
 	Source        Source
 	Sink          Sink
+	Tuning        *alert.Tuning
 	Floor         detectionv1.Severity
 	Metrics       *Metrics
 	Logger        *slog.Logger
@@ -58,6 +60,7 @@ type WriterOptions struct {
 type Writer struct {
 	source        Source
 	sink          Sink
+	tuning        *alert.Tuning
 	floor         detectionv1.Severity
 	metrics       *Metrics
 	logger        *slog.Logger
@@ -73,6 +76,8 @@ func NewWriter(options WriterOptions) (*Writer, error) {
 		return nil, errors.New("the alert writer needs a source")
 	case options.Sink == nil:
 		return nil, errors.New("the alert writer needs somewhere to raise alerts")
+	case options.Tuning == nil:
+		return nil, errors.New("the alert writer needs a tuning: how alerts fold is declared, never assumed")
 	case options.Floor == detectionv1.Severity_SEVERITY_UNSPECIFIED:
 		return nil, errors.New("the alert writer needs a severity floor: raising everything is the same as raising nothing")
 	case options.Metrics == nil:
@@ -91,6 +96,7 @@ func NewWriter(options WriterOptions) (*Writer, error) {
 	return &Writer{
 		source:        options.Source,
 		sink:          options.Sink,
+		tuning:        options.Tuning,
 		floor:         options.Floor,
 		metrics:       options.Metrics,
 		logger:        options.Logger,
@@ -110,14 +116,14 @@ func (w *Writer) Run(ctx context.Context) error { return w.source.Consume(ctx, w
 // records to its quarantine verbatim, and a second copy from a second consumer
 // would double every poison record without saying anything new about it.
 func (w *Writer) handle(ctx context.Context, records []Record) error {
-	raised := w.raise(records)
+	candidates := w.consider(records)
 	w.metrics.observeBatch(len(records))
 
 	delay := w.retryDelay
 	for attempt := 1; ; attempt++ {
-		added, err := w.persist(ctx, raised)
+		outcomes, err := w.persist(ctx, candidates)
 		if err == nil {
-			w.metrics.batchRaised(len(raised), added)
+			w.metrics.batchRecorded(outcomes)
 			return nil
 		}
 		if ctx.Err() != nil {
@@ -127,7 +133,7 @@ func (w *Writer) handle(ctx context.Context, records []Record) error {
 		w.metrics.batchRetried()
 		w.logger.Error("alert_batch_not_durable",
 			slog.Int("attempt", attempt),
-			slog.Int("alerts", len(raised)),
+			slog.Int("candidates", len(candidates)),
 			slog.Duration("retry_in", delay),
 			slog.String("error", err.Error()),
 		)
@@ -141,9 +147,13 @@ func (w *Writer) handle(ctx context.Context, records []Record) error {
 	}
 }
 
-func (w *Writer) raise(records []Record) []*alertv1.Alert {
+// Suppression is decided here and never in the store: a detection the estate
+// said it does not want is counted by rule and reason and never written, and it
+// stays in the detection store either way, so what was hidden is the work and
+// never the activity.
+func (w *Writer) consider(records []Record) []alert.Candidate {
 	at := w.now().UTC()
-	raised := make([]*alertv1.Alert, 0, len(records))
+	candidates := make([]alert.Candidate, 0, len(records))
 
 	for _, record := range records {
 		var decided detectionv1.Detection
@@ -155,31 +165,35 @@ func (w *Writer) raise(records []Record) []*alertv1.Alert {
 			w.metrics.skipped(SkipBelowFloor)
 			continue
 		}
-		one, err := alert.Raise(&decided, at)
+		if hidden, suppressed := w.tuning.Suppressed(&decided, alert.Happened(&decided, at)); suppressed {
+			w.metrics.suppressed(decided.GetRule().GetId(), hidden.Reason)
+			continue
+		}
+		candidate, err := alert.Consider(&decided, w.tuning, at)
 		if err != nil {
 			w.skip(record, SkipUnraisable, err.Error())
 			continue
 		}
-		raised = append(raised, one)
+		candidates = append(candidates, candidate)
 	}
-	return raised
+	return candidates
 }
 
-func (w *Writer) persist(ctx context.Context, raised []*alertv1.Alert) (int, error) {
-	if len(raised) == 0 {
-		return 0, nil
+func (w *Writer) persist(ctx context.Context, candidates []alert.Candidate) ([]alert.Outcome, error) {
+	if len(candidates) == 0 {
+		return nil, nil
 	}
 
 	writeCtx, cancel := context.WithTimeout(ctx, w.writeTimeout)
 	defer cancel()
 
 	started := time.Now()
-	added, err := w.sink.Raise(writeCtx, raised)
+	outcomes, err := w.sink.Record(writeCtx, candidates)
 	if err != nil {
-		return 0, fmt.Errorf("raise %d alerts: %w", len(raised), err)
+		return nil, fmt.Errorf("record %d detections: %w", len(candidates), err)
 	}
 	w.metrics.wrote(time.Since(started))
-	return added, nil
+	return outcomes, nil
 }
 
 func (w *Writer) skip(record Record, reason, detail string) {

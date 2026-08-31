@@ -5,6 +5,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/alert"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 )
 
@@ -12,6 +13,7 @@ type Metrics struct {
 	alerts  *prometheus.CounterVec
 	batches *prometheus.CounterVec
 	skips   *prometheus.CounterVec
+	hidden  *prometheus.CounterVec
 	batch   prometheus.Histogram
 	write   prometheus.Histogram
 }
@@ -22,7 +24,7 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Namespace: metrics.Namespace,
 			Subsystem: "alertstore",
 			Name:      "alerts_total",
-			Help:      "Alerts by whether the detection raised a new one or found the one it already had.",
+			Help:      "Detections by what became of them: raised, folded, repeated or cooled down.",
 		}, []string{"outcome"}),
 		batches: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
@@ -36,6 +38,12 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "skipped_total",
 			Help:      "Records that did not become an alert, by why.",
 		}, []string{"reason"}),
+		hidden: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "alertstore",
+			Name:      "suppressed_total",
+			Help:      "Detections the estate declared it does not want as work, by rule and by the reason written down.",
+		}, []string{"rule", "reason"}),
 		batch: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: "alertstore",
@@ -55,6 +63,7 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 		instruments.alerts,
 		instruments.batches,
 		instruments.skips,
+		instruments.hidden,
 		instruments.batch,
 		instruments.write,
 	)
@@ -65,13 +74,18 @@ func (m *Metrics) observeBatch(records int) { m.batch.Observe(float64(records)) 
 
 func (m *Metrics) batchRetried() { m.batches.WithLabelValues("retried").Inc() }
 
-// The gap between raised and repeated is what a replay costs, and it is
-// deliberately visible: a replay that raised nothing new is the property the
-// whole idempotency argument rests on.
-func (m *Metrics) batchRaised(alerts, added int) {
+// Every outcome is counted separately, so the noise a fold removed and the
+// activity a cooldown held back are both readable rather than inferred: a
+// suppression nobody can count is a suppression that hides something.
+func (m *Metrics) batchRecorded(outcomes []alert.Outcome) {
 	m.batches.WithLabelValues("stored").Inc()
-	m.alerts.WithLabelValues("raised").Add(float64(added))
-	m.alerts.WithLabelValues("repeated").Add(float64(alerts - added))
+	for _, outcome := range outcomes {
+		m.alerts.WithLabelValues(outcome.String()).Inc()
+	}
+}
+
+func (m *Metrics) suppressed(rule, reason string) {
+	m.hidden.WithLabelValues(rule, reason).Inc()
 }
 
 func (m *Metrics) wrote(elapsed time.Duration) { m.write.Observe(elapsed.Seconds()) }

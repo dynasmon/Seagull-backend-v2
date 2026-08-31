@@ -27,10 +27,11 @@ const columns = `alert_id, schema_version, tenant_id, detection_id,
 	severity, technique_tactic, technique_id, technique_name,
 	event_class, agent_id, event_time, raised_at,
 	state, assignee, changed_by, changed_at, revision,
-	closure_state, closure_reason, closure_by, closure_at`
+	closure_state, closure_reason, closure_by, closure_at,
+	correlation_key, occurrences, first_seen, last_seen`
 
 const insertAlert = `INSERT INTO alerts (` + columns + `)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
 ON CONFLICT (alert_id) DO NOTHING`
 
 const insertTransition = `INSERT INTO alert_transitions
@@ -38,45 +39,27 @@ const insertTransition = `INSERT INTO alert_transitions
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 ON CONFLICT (alert_id, revision) DO NOTHING`
 
-// A detection replayed off the backbone finds the alert it already raised
-// rather than raising a second one, and never rewrites the state somebody put
-// it in: the analytical stream owns the first insert and nothing after it.
+// Superseded by Record once the writer folds; kept while the writer still calls
+// it so that every branch tip compiles.
 func (s *Store) Raise(ctx context.Context, raised []*alertv1.Alert) (int, error) {
-	if len(raised) == 0 {
-		return 0, nil
-	}
-
-	transaction, err := s.pool.Begin(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("begin raising %d alerts: %w", len(raised), err)
-	}
-	defer func() { _ = transaction.Rollback(ctx) }()
-
-	batch := &pgx.Batch{}
+	candidates := make([]alert.Candidate, 0, len(raised))
 	for _, one := range raised {
-		batch.Queue(insertAlert, stored(one)...)
-		batch.Queue(insertTransition, trail(alert.Raised(one))...)
+		candidates = append(candidates, alert.Candidate{
+			Alert:       one,
+			DetectionID: one.GetDetectionId(),
+			Key:         one.GetAlertId(),
+			At:          one.GetFirstSeen().AsTime(),
+		})
 	}
-
-	results := transaction.SendBatch(ctx, batch)
+	outcomes, err := s.Record(ctx, candidates)
+	if err != nil {
+		return 0, err
+	}
 	added := 0
-	for index := range raised {
-		tag, err := results.Exec()
-		if err != nil {
-			_ = results.Close()
-			return 0, fmt.Errorf("raise alert %s: %w", raised[index].GetAlertId(), err)
+	for _, outcome := range outcomes {
+		if outcome == alert.OutcomeRaised {
+			added++
 		}
-		added += int(tag.RowsAffected())
-		if _, err := results.Exec(); err != nil {
-			_ = results.Close()
-			return 0, fmt.Errorf("record how alert %s was raised: %w", raised[index].GetAlertId(), err)
-		}
-	}
-	if err := results.Close(); err != nil {
-		return 0, fmt.Errorf("raise %d alerts: %w", len(raised), err)
-	}
-	if err := transaction.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("commit %d raised alerts: %w", len(raised), err)
 	}
 	return added, nil
 }
@@ -244,6 +227,8 @@ func stored(one *alertv1.Alert) []any {
 		one.GetChangedAt().AsTime(), int64(one.GetRevision()),
 		state(one.GetClosure().GetState()), one.GetClosure().GetReason(),
 		one.GetClosure().GetClosedBy(), optional(one.GetClosure().GetClosedAt()),
+		one.GetCorrelationKey(), int64(one.GetOccurrences()),
+		one.GetFirstSeen().AsTime(), one.GetLastSeen().AsTime(),
 	}
 }
 
@@ -266,6 +251,9 @@ func restore(row pgx.CollectableRow) (*alertv1.Alert, error) {
 		eventTime, closedAt                     *time.Time
 		raisedAt, changedAt                     time.Time
 		closureState, reason, by                string
+		correlationKey                          string
+		occurrences                             int64
+		firstSeen, lastSeen                     time.Time
 	)
 
 	if err := row.Scan(
@@ -275,6 +263,7 @@ func restore(row pgx.CollectableRow) (*alertv1.Alert, error) {
 		&class, &one.AgentId, &eventTime, &raisedAt,
 		&named, &one.Assignee, &one.ChangedBy, &changedAt, &revision,
 		&closureState, &reason, &by, &closedAt,
+		&correlationKey, &occurrences, &firstSeen, &lastSeen,
 	); err != nil {
 		return nil, err
 	}
@@ -291,6 +280,10 @@ func restore(row pgx.CollectableRow) (*alertv1.Alert, error) {
 	one.EventClass = eventv1.EventClass(eventv1.EventClass_value[enum("EVENT_CLASS_", class)])
 	one.EventTime = instant(eventTime)
 	one.RaisedAt = timestamppb.New(raisedAt.UTC())
+	one.CorrelationKey = correlationKey
+	one.Occurrences = uint64(occurrences)
+	one.FirstSeen = timestamppb.New(firstSeen.UTC())
+	one.LastSeen = timestamppb.New(lastSeen.UTC())
 	one.State = alert.State(named).Wire()
 	one.ChangedAt = timestamppb.New(changedAt.UTC())
 	one.Revision = uint64(revision)

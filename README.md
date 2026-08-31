@@ -142,6 +142,15 @@ what was reduced is readable. The detection keeps its full evidence for 730 days
 whatever happens, and an alert names every detection it is made of.
 [ADR 17](docs/decisions/0017-noise-is-removed-from-the-alert-and-never-from-the-detection.md).
 
+What a rule remembers between events is a bounded window of the backbone, keyed
+by tenant, rule, revision and group, and measured in event time. State is a pure
+function of the events inside its window, so a replayed batch counts once and a
+restart rebuilds it by reading the window again rather than by recovering
+anything. Every ceiling is declared, and a store at its limit refuses a new key
+instead of evicting one: a flood of invented group values must not get to choose
+which real counts an estate forgets.
+[ADR 18](docs/decisions/0018-detection-state-is-a-bounded-window.md).
+
 ## Getting started
 
 Requires Docker with the Compose plugin and Go 1.25.

@@ -86,6 +86,14 @@ var huntColumns = map[hunt.Dataset]map[hunt.Field]string{
 		"evidence.negated":         "evidence_negated",
 		"evidence.held":            "evidence_held",
 		"evidence.absent":          "evidence_absent",
+
+		"aggregation.count":            "aggregation_count",
+		"aggregation.threshold":        "aggregation_threshold",
+		"aggregation.first_event_time": "aggregation_first_event_time",
+		"aggregation.saturated":        "aggregation_saturated",
+		"aggregation.group.field":      "aggregation_group_field",
+		"aggregation.group.value":      "aggregation_group_value",
+		"aggregation.group.absent":     "aggregation_group_absent",
 	},
 }
 

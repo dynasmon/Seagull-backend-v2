@@ -151,6 +151,17 @@ instead of evicting one: a flood of invented group values must not get to choose
 which real counts an estate forgets.
 [ADR 18](docs/decisions/0018-detection-state-is-a-bounded-window.md).
 
+A rule may count what it matches: twenty failed passwords from one address
+against one agent inside a minute is a different security statement from one
+failed password, made of the same match. The count is part of the rule rather
+than a second kind of rule, every window is event time, and the detection
+carries what was counted — how many, against which threshold, over what window,
+and what the events shared — so a threshold finding is not mistaken for a single
+event. Nothing resets when a rule fires: past its threshold a rule decides once
+per event and never more, and `deploy/alerting.yml` is where those become one
+piece of work.
+[ADR 19](docs/decisions/0019-a-rule-that-counts-decides-on-a-window.md).
+
 ## Getting started
 
 Requires Docker with the Compose plugin and Go 1.25.
@@ -189,6 +200,7 @@ container without going through the environment. The settings that matter most:
 | `SEAGULL_GATEWAY_TLS_CERT`, `SEAGULL_GATEWAY_TLS_KEY`, `SEAGULL_GATEWAY_AGENT_CA` | The gateway's mutual TLS material; there is no plaintext mode. |
 | `SEAGULL_TENANT_ID` | The tenant the gateway stamps on everything it admits. |
 | `SEAGULL_DETECTION_RULES` | The rule tree the engine starts on and falls back to. |
+| `SEAGULL_DETECTION_STATE_WINDOW`, `SEAGULL_DETECTION_STATE_OBSERVATIONS`, `SEAGULL_DETECTION_STATE_KEYS` | What a counting rule may remember: the longest window, the events one key holds, and how many keys at once. |
 | `SEAGULL_CONTROL_API_POLICY` | The policy document the control plane is pinned to. |
 | `SEAGULL_CONTROL_API_SESSION_KEY` | Key sessions are signed with; drawn at random when unset. |
 | `SEAGULL_EVENT_STORE_ADDRESS`, `SEAGULL_EVENT_STORE_PASSWORD` | The telemetry store and its credentials. |

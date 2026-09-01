@@ -3,6 +3,7 @@ package ruleset_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -152,6 +153,11 @@ func TestEveryFieldOfARuleSurvivesTheCrossing(t *testing.T) {
 	subject.Source = detection.Source{Catalogue: "sigma", Identifier: "abc-123"}
 	subject.Tags = []string{"ssh", "bruteforce"}
 	subject.References = []string{"https://attack.mitre.org/techniques/T1110/001/"}
+	subject.Count = detection.Count{
+		AtLeast: 20,
+		Within:  time.Minute,
+		GroupBy: []detection.Field{"authentication.network.source.ip", "origin.agent_id"},
+	}
 	subject.Match = detection.All{Terms: []detection.Expression{
 		detection.Predicate{Field: "authentication.user.name", Operator: detection.Equals, Values: []detection.Value{detection.TextValue("root")}},
 		detection.Any{Terms: []detection.Expression{
@@ -167,6 +173,34 @@ func TestEveryFieldOfARuleSurvivesTheCrossing(t *testing.T) {
 	}
 	if after.ID() != before.ID() {
 		t.Fatalf("a rule lost something crossing: %s became %s", before.ID(), after.ID())
+	}
+}
+
+// A published rule that lost its count would decide one event at a time under
+// the name of one that decides on twenty, at an unchanged revision, and nothing
+// downstream could tell. The identity above already refuses it; this says what
+// it is that must arrive.
+func TestACountingRuleArrivesStillCounting(t *testing.T) {
+	subject := rule("ssh.repeated_failed_password")
+	subject.Count = detection.Count{
+		AtLeast: 20,
+		Within:  time.Minute,
+		GroupBy: []detection.Field{"authentication.network.source.ip", "origin.agent_id"},
+	}
+
+	after, err := ruleset.DecodeVersion(version(t, nil, compiled(t, subject)).Encode())
+	if err != nil {
+		t.Fatalf("read the version back: %v", err)
+	}
+
+	for program := range after.Snapshot().All() {
+		count := program.Rule().Count
+		if count.AtLeast != subject.Count.AtLeast || count.Within != subject.Count.Within {
+			t.Fatalf("the rule crossed counting %d inside %s", count.AtLeast, count.Within)
+		}
+		if !slices.Equal(count.GroupBy, subject.Count.GroupBy) {
+			t.Fatalf("the rule crossed grouping by %v", count.GroupBy)
+		}
 	}
 }
 

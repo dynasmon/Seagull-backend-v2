@@ -1,8 +1,10 @@
 schema_version: 1
 
 # The ruleset the local stack runs, so that `make up` detects something end to
-# end. It is one rule and not a catalogue: each rule is a security decision, and
-# a rule nobody chose is noise somebody has to turn off.
+# end. It is two rules and not a catalogue: each rule is a security decision, and
+# a rule nobody chose is noise somebody has to turn off. The second counts, and
+# is here because a threshold is the one part of a rule the same event cannot
+# demonstrate on its own.
 rules:
   - id: ssh.failed_password_from_outside
     revision: 1
@@ -106,3 +108,78 @@ rules:
           authentication.outcome: failure
           authentication.service.protocol: ssh
           authentication.network.source.ip: 172.16.4.9
+
+  - id: ssh.repeated_failed_password
+    revision: 1
+    name: Repeated failed SSH passwords from one address
+    description: >-
+      Twenty password authentications over SSH failed for one source address
+      against one agent inside a minute, which is a rate no person types at.
+    class: authentication
+    severity: high
+    status: active
+    technique:
+      tactic: credential_access
+      id: T1110.001
+      name: "Brute Force: Password Guessing"
+    false_positives: >-
+      A misconfigured service account retrying a stale credential in a loop.
+      Check the user before the address: an automation retries as one account
+      and a guessing attempt walks through several.
+    response: >-
+      Block the source address at the edge, then confirm whether any of the
+      attempts succeeded by hunting the same address for a success in the hour
+      around the window.
+    tags: [ssh, credential_access, bruteforce]
+    references:
+      - https://attack.mitre.org/techniques/T1110/001/
+    count:
+      at_least: 20
+      within: 1m
+      group_by: [authentication.network.source.ip, origin.agent_id]
+    match:
+      all:
+        - field: authentication.outcome
+          equals: failure
+        - field: authentication.service.protocol
+          equals: ssh
+    tests:
+      # A case says what the rule reads of one event. How many such events make
+      # a detection is the engine's and is proven once, so what is written here
+      # is which events are counted rather than what the count comes to.
+      - name: a failed password over ssh is one the rule counts
+        expect: match
+        severity: high
+        evidence:
+          - authentication.outcome
+          - authentication.service.protocol
+        event:
+          authentication.outcome: failure
+          authentication.service.protocol: ssh
+          authentication.network.source.ip: 203.0.113.10
+
+      - name: a password that was accepted is not
+        expect: no_match
+        event:
+          authentication.outcome: success
+          authentication.service.protocol: ssh
+          authentication.network.source.ip: 203.0.113.10
+
+      - name: a failure on another service is not
+        expect: no_match
+        event:
+          authentication.outcome: failure
+          authentication.service.protocol: rdp
+          authentication.network.source.ip: 203.0.113.10
+
+      - name: a failure from inside the estate is counted too
+        description: >-
+          Unlike the rule above, this one does not care where the session came
+          from: twenty failures a minute from a host on the estate is a
+          compromised host rather than a person mistyping.
+        expect: match
+        severity: high
+        event:
+          authentication.outcome: failure
+          authentication.service.protocol: ssh
+          authentication.network.source.ip: 10.0.0.5

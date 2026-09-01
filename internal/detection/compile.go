@@ -15,12 +15,15 @@ import (
 // every literal already holds the type its field holds, and a long list is a
 // set. Nothing here is decided again per event.
 type Program struct {
-	rule   Rule
-	root   node
-	fields []Field
+	rule    Rule
+	root    node
+	fields  []Field
+	grouped []grouping
 }
 
 func (p *Program) Rule() Rule { return p.rule }
+
+func (p *Program) Counts() bool { return p.rule.Count.Counts() }
 
 // Every field the program reads, sorted and without repetition.
 func (p *Program) Fields() []Field { return slices.Clone(p.fields) }
@@ -55,7 +58,31 @@ func Compile(rule Rule) (*Program, error) {
 	}
 	slices.Sort(fields)
 
-	return &Program{rule: rule, root: root, fields: fields}, nil
+	grouped, err := rule.group()
+	if err != nil {
+		return nil, err
+	}
+	return &Program{rule: rule, root: root, fields: fields, grouped: grouped}, nil
+}
+
+// One field a count groups by, resolved down to the leaf the way a comparison
+// is, so binding an event to a key walks descriptors rather than looking a name
+// up per event.
+type grouping struct {
+	field Field
+	path  []protoreflect.FieldDescriptor
+}
+
+func (r Rule) group() ([]grouping, error) {
+	grouped := make([]grouping, 0, len(r.Count.GroupBy))
+	for index, field := range r.Count.GroupBy {
+		path, declared := pathOf(field)
+		if !declared {
+			return nil, r.violation(fmt.Sprintf("count.group_by[%d]", index), "is not a field the contract declares")
+		}
+		grouped = append(grouped, grouping{field: field, path: path})
+	}
+	return grouped, nil
 }
 
 // The compiled shapes, closed the way the written ones are: whatever evaluates
@@ -269,17 +296,27 @@ func (c comparison) String() string {
 // name the contract declares, text in quotes, a number as a number.
 func (c comparison) wrote(literal protoreflect.Value) string {
 	leaf := c.path[len(c.path)-1]
+	if leaf.Kind() == protoreflect.StringKind {
+		return strconv.Quote(literal.String())
+	}
+	return plain(leaf, literal)
+}
+
+// The value as the event carries it, which is not how a rule writes one: a
+// group is keyed and reported by what was there, and quoting it would put the
+// quotes in the key.
+func plain(leaf protoreflect.FieldDescriptor, value protoreflect.Value) string {
 	switch leaf.Kind() {
 	case protoreflect.StringKind:
-		return strconv.Quote(literal.String())
+		return value.String()
 	case protoreflect.BoolKind:
-		return strconv.FormatBool(literal.Bool())
+		return strconv.FormatBool(value.Bool())
 	case protoreflect.EnumKind:
-		value := leaf.Enum().Values().ByNumber(literal.Enum())
-		if value == nil {
-			return strconv.FormatInt(int64(literal.Enum()), 10)
+		declared := leaf.Enum().Values().ByNumber(value.Enum())
+		if declared == nil {
+			return strconv.FormatInt(int64(value.Enum()), 10)
 		}
-		return shortName(leaf.Enum(), value)
+		return shortName(leaf.Enum(), declared)
 	}
-	return fmt.Sprintf("%v", literal.Interface())
+	return fmt.Sprintf("%v", value.Interface())
 }

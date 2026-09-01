@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"slices"
 
+	"google.golang.org/protobuf/types/known/durationpb"
+
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 	rulesetv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ruleset/v1"
@@ -69,6 +71,15 @@ func encodeRule(rule detection.Rule, cases []detection.Case) *rulesetv1.Rule {
 			Name:   rule.Technique.Name,
 		}
 	}
+	if rule.Count.Counts() {
+		encoded.Count = &rulesetv1.Count{
+			AtLeast: uint32(rule.Count.AtLeast),
+			Within:  durationpb.New(rule.Count.Within),
+		}
+		for _, field := range rule.Count.GroupBy {
+			encoded.Count.GroupBy = append(encoded.Count.GroupBy, string(field))
+		}
+	}
 	if rule.Source != (detection.Source{}) {
 		encoded.Source = &detectionv1.Source{
 			Catalogue:  rule.Source.Catalogue,
@@ -124,6 +135,7 @@ func decodeRule(encoded *rulesetv1.Rule) (detection.Rule, []detection.Case, erro
 		},
 		Tags:       slices.Clone(encoded.GetTags()),
 		References: slices.Clone(encoded.GetReferences()),
+		Count:      decodeCount(encoded.GetCount()),
 	}
 
 	cases := make([]detection.Case, 0, len(encoded.GetCases()))
@@ -135,6 +147,24 @@ func decodeRule(encoded *rulesetv1.Rule) (detection.Rule, []detection.Case, erro
 		cases = append(cases, read)
 	}
 	return rule, cases, nil
+}
+
+// A rule that counts must arrive counting. Dropping it would publish a rule
+// that decides one event at a time under the name of one that decides on
+// twenty, which is a different rule running under an unchanged revision.
+func decodeCount(encoded *rulesetv1.Count) detection.Count {
+	if encoded == nil {
+		return detection.Count{}
+	}
+
+	count := detection.Count{
+		AtLeast: int(encoded.GetAtLeast()),
+		Within:  encoded.GetWithin().AsDuration(),
+	}
+	for _, field := range encoded.GetGroupBy() {
+		count.GroupBy = append(count.GroupBy, detection.Field(field))
+	}
+	return count
 }
 
 func encodeExpression(expression detection.Expression) *rulesetv1.Expression {

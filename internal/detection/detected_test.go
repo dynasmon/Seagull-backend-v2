@@ -1,6 +1,7 @@
 package detection_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +26,11 @@ func attributed() detection.Rule {
 	subject.Source = detection.Source{Catalogue: "sigma", Identifier: "5013fd8a-56f1-4d5c"}
 	subject.Tags = []string{"ssh", "credential_access"}
 	subject.References = []string{"https://attack.mitre.org/techniques/T1110/001/"}
+	subject.Count = detection.Count{
+		AtLeast: 20,
+		Within:  time.Minute,
+		GroupBy: []detection.Field{"authentication.network.source.ip", "origin.agent_id"},
+	}
 	return subject
 }
 
@@ -48,11 +54,22 @@ func detected(t *testing.T, subject detection.Rule, record *eventv1.Event) *dete
 		t.Fatalf("the fixture time is not a time: %v", err)
 	}
 
-	match, held := running(t, subject.Match).Decide(record)
+	program, err := detection.Compile(subject)
+	if err != nil {
+		t.Fatalf("a rule that should run was refused: %v", err)
+	}
+	match, held := program.Decide(record)
 	if !held {
 		t.Fatal("the rule did not match the event it was written for")
 	}
-	match.Rule = subject
+	if subject.Count.Counts() {
+		match.Counted = detection.Counted{
+			Group:     program.Group(record),
+			Count:     subject.Count.AtLeast + 1,
+			First:     record.GetTime().GetEventTime().AsTime().Add(-subject.Count.Within / 2),
+			Saturated: true,
+		}
+	}
 	return match.Detected(ruleset, record, at)
 }
 
@@ -61,7 +78,7 @@ func detected(t *testing.T, subject detection.Rule, record *eventv1.Event) *dete
 // reason a repeated message is one.
 var copiedWhole = map[string]struct{}{"origin": {}}
 
-const timestampMessage = "google.protobuf.Timestamp"
+const wellKnown = "google.protobuf."
 
 // A field added to the detection contract and never filled is a detection that
 // promises more than it says, and nothing downstream can tell the difference
@@ -92,7 +109,7 @@ func unfilled(message protoreflect.Message, prefix string) []string {
 		_, whole := copiedWhole[path]
 		nested := field.Kind() == protoreflect.MessageKind &&
 			!field.IsList() && !field.IsMap() && !whole &&
-			string(field.Message().FullName()) != timestampMessage
+			!strings.HasPrefix(string(field.Message().FullName()), wellKnown)
 		if nested {
 			paths = append(paths, unfilled(message.Get(field).Message(), path+".")...)
 		}

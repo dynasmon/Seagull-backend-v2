@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ruleset"
@@ -103,6 +104,9 @@ func changesToARule() map[string]func(*detection.Rule) {
 		"Response":       func(r *detection.Rule) { r.Response = "Do something else." },
 		"Tags":           func(r *detection.Rule) { r.Tags = []string{"ssh"} },
 		"References":     func(r *detection.Rule) { r.References = []string{"https://attack.mitre.org/techniques/T1110/001/"} },
+		"Count": func(r *detection.Rule) {
+			r.Count = detection.Count{AtLeast: 20, Within: time.Minute, GroupBy: []detection.Field{"origin.agent_id"}}
+		},
 		"Source": func(r *detection.Rule) {
 			r.Source = detection.Source{Catalogue: "sigma", Identifier: "5013fd8a-56f1-4d5c-9f1d-4c9d0a1f3b77"}
 		},

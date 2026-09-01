@@ -94,9 +94,16 @@ func engine(ctx context.Context) error {
 	}
 	defer published.reader.Close()
 
+	keeper, err := keeping(settings.state, registry.Current())
+	if err != nil {
+		return err
+	}
+	analysis.ObserveState(platform.Metrics(), settings.state, keeper.Keys)
+
 	component, err := analysis.NewEngine(analysis.EngineOptions{
 		Source:         source{consumer: consumer},
 		Rules:          rules{registry: registry},
+		State:          keeper,
 		Detections:     detections,
 		Metrics:        analysis.NewMetrics(platform.Metrics()),
 		Logger:         platform.Logger(),
@@ -121,6 +128,9 @@ func engine(ctx context.Context) error {
 		slog.String("rulesets_topic", settings.topology.Rulesets.Name),
 		slog.String("ruleset", string(registry.Current().ID())),
 		slog.Int("batch_events", settings.batchEvents),
+		slog.Duration("state_window", settings.state.Window),
+		slog.Int("state_observations_per_key", settings.state.ObservationsPerKey),
+		slog.Int("state_keys", settings.state.Keys),
 	)
 
 	return platform.Run(ctx)

@@ -14,6 +14,11 @@ type State struct {
 	// The key is full, so Count is a floor: a threshold above the ceiling can
 	// never be reached, which is why the ceiling is declared.
 	Saturated bool
+
+	// The key already held this event, so nothing moved. A caller decides on an
+	// event the first time it is folded and never again, which is what keeps a
+	// redelivered batch from deciding more than the delivery before it did.
+	Repeated bool
 }
 
 func (s State) Span() time.Duration { return s.Last.Sub(s.First) }

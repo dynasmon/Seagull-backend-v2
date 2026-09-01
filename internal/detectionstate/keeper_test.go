@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	"github.com/dynasmon/Seagull-backend-v2/internal/detectionstate"
 )
 
@@ -40,7 +41,7 @@ func observe(t *testing.T, keeper *detectionstate.Keeper, key detectionstate.Key
 }
 
 func keyed(group string) detectionstate.Key {
-	return detectionstate.KeyFor(tenant, rule, 1, []detectionstate.Bound{bound("authentication.source.ip", group)})
+	return detectionstate.KeyFor(tenant, rule, 1, []detection.Binding{bound("authentication.source.ip", group)})
 }
 
 func TestACountRisesWithWhatOneKeyHasSeenAndTwoKeysCountApart(t *testing.T) {
@@ -98,8 +99,28 @@ func TestAReplayedStreamRebuildsTheSameState(t *testing.T) {
 		second = observe(t, twice, keyed("203.0.113.10"), seen)
 	}
 
+	if !second.Repeated {
+		t.Error("an event the window already held was not reported as one")
+	}
+	second.Repeated = false
 	if first != second {
 		t.Errorf("replaying the stream made %+v where reading it once made %+v", second, first)
+	}
+}
+
+// What a redelivered batch rests on: the second observation moves nothing and
+// says so, so whatever counts on top of this decides once per event however
+// many times the event is delivered.
+func TestAnEventTheWindowAlreadyHoldsIsReportedAsRepeated(t *testing.T) {
+	keeper := kept(t, bounded())
+	key := keyed("203.0.113.10")
+
+	if first := observe(t, keeper, key, saw("e1", 0, "root")); first.Repeated {
+		t.Error("the first observation of an event was reported as one already held")
+	}
+	again := observe(t, keeper, key, saw("e1", 0, "root"))
+	if !again.Repeated || again.Count != 1 {
+		t.Errorf("the same event twice made %+v", again)
 	}
 }
 

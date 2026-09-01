@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	"github.com/dynasmon/Seagull-backend-v2/internal/detectionstate"
 )
 
@@ -40,7 +41,7 @@ func observe(t *testing.T, keeper *detectionstate.Keeper, key detectionstate.Key
 }
 
 func keyed(group string) detectionstate.Key {
-	return detectionstate.KeyFor(tenant, rule, 1, []detectionstate.Bound{bound("authentication.source.ip", group)})
+	return detectionstate.KeyFor(tenant, rule, 1, []detection.Binding{bound("authentication.source.ip", group)})
 }
 
 func TestACountRisesWithWhatOneKeyHasSeenAndTwoKeysCountApart(t *testing.T) {

@@ -22,6 +22,15 @@ rules:
     window: 1h
     cooldown: 30m
 
+  # A counting rule decides again on every event that keeps it above its
+  # threshold, because nothing resets when a rule fires. This is where those
+  # become one piece of work: the detections keep their evidence and the queue
+  # holds one alert per address per hour.
+  - id: ssh.repeated_failed_password
+    key: [rule, agent, "evidence:authentication.network.source.ip"]
+    window: 1h
+    cooldown: 1h
+
 # A suppression hides work and never activity: the detection is still stored,
 # still queryable and still counted. It has to say why, and it should say until
 # when.

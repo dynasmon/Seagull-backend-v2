@@ -16,6 +16,8 @@ import (
 type Match struct {
 	Rule     Rule
 	Evidence []Evidence
+
+	Counted Counted
 }
 
 // One question the rule asked of the event, and what the event answered. What
@@ -72,6 +74,27 @@ func (p *Program) Decide(record *eventv1.Event) (Match, bool) {
 	return Match{Rule: p.rule, Evidence: evidence}, true
 }
 
+// What this event binds the rule's group fields to, in the order the rule
+// names them. Reading it is the same walk deciding is, so a field the event
+// does not carry binds to absent rather than to nothing.
+func (p *Program) Group(record *eventv1.Event) []Binding {
+	if len(p.grouped) == 0 {
+		return nil
+	}
+
+	message := record.ProtoReflect()
+	group := make([]Binding, 0, len(p.grouped))
+	for _, grouped := range p.grouped {
+		value, carried := read(message, grouped.path)
+		if !carried {
+			group = append(group, Binding{Field: grouped.field, Absent: true})
+			continue
+		}
+		group = append(group, Binding{Field: grouped.field, Value: plain(grouped.path[len(grouped.path)-1], value)})
+	}
+	return group
+}
+
 func (c conjunction) holds(record protoreflect.Message, into *[]Evidence, negated bool) bool {
 	for _, term := range c.terms {
 		if !term.holds(record, into, negated) {
@@ -117,7 +140,7 @@ func (n negation) holds(record protoreflect.Message, into *[]Evidence, negated b
 // observation gathered again is the same observation, and writing it down twice
 // would say nothing and read like a fault.
 func (c comparison) holds(record protoreflect.Message, into *[]Evidence, negated bool) bool {
-	value, carried := c.read(record)
+	value, carried := read(record, c.path)
 	if into != nil {
 		if seen := c.saw(value, carried, negated); !slices.Contains(*into, seen) {
 			*into = append(*into, seen)
@@ -144,16 +167,16 @@ func (c comparison) answered(value protoreflect.Value, carried bool) bool {
 // message that is not set stops it: the event does not carry the field, which
 // the contract does not distinguish from carrying the zero value, so the rule
 // language says it once and says it in `present`.
-func (c comparison) read(record protoreflect.Message) (protoreflect.Value, bool) {
+func read(record protoreflect.Message, path []protoreflect.FieldDescriptor) (protoreflect.Value, bool) {
 	message := record
-	for _, step := range c.path[:len(c.path)-1] {
+	for _, step := range path[:len(path)-1] {
 		if !message.Has(step) {
 			return protoreflect.Value{}, false
 		}
 		message = message.Get(step).Message()
 	}
 
-	leaf := c.path[len(c.path)-1]
+	leaf := path[len(path)-1]
 	if !message.Has(leaf) {
 		return protoreflect.Value{}, false
 	}

@@ -57,12 +57,29 @@ type Row struct {
 	EvidenceNegated  []bool
 	EvidenceHeld     []string
 	EvidenceAbsent   []bool
+
+	AggregationCount          uint32
+	AggregationThreshold      uint32
+	AggregationWindowSeconds  uint32
+	AggregationFirstEventTime time.Time
+	AggregationSaturated      bool
+	AggregationGroupField     []string
+	AggregationGroupValue     []string
+	AggregationGroupAbsent    []bool
 }
 
 // Every contract leaf this projection keeps. A field added to the contract fails
 // the coverage test until it is listed here, which is the rule that runs from
 // the contract towards the store and never the other way.
 var carried = []string{
+	"aggregation.count",
+	"aggregation.first_event_time",
+	"aggregation.group.absent",
+	"aggregation.group.field",
+	"aggregation.group.value",
+	"aggregation.saturated",
+	"aggregation.threshold",
+	"aggregation.window",
 	"detected_time",
 	"detection_id",
 	"event_class",
@@ -139,6 +156,23 @@ func Project(made *detectionv1.Detection) Row {
 		row.EvidenceAbsent = append(row.EvidenceAbsent, one.GetAbsent())
 	}
 
+	counted := made.GetAggregation()
+	row.AggregationCount = counted.GetCount()
+	row.AggregationThreshold = counted.GetThreshold()
+	row.AggregationWindowSeconds = uint32(counted.GetWindow().AsDuration() / time.Second)
+	row.AggregationFirstEventTime = instant(counted.GetFirstEventTime())
+	row.AggregationSaturated = counted.GetSaturated()
+
+	grouped := counted.GetGroup()
+	row.AggregationGroupField = make([]string, 0, len(grouped))
+	row.AggregationGroupValue = make([]string, 0, len(grouped))
+	row.AggregationGroupAbsent = make([]bool, 0, len(grouped))
+	for _, one := range grouped {
+		row.AggregationGroupField = append(row.AggregationGroupField, one.GetField())
+		row.AggregationGroupValue = append(row.AggregationGroupValue, one.GetValue())
+		row.AggregationGroupAbsent = append(row.AggregationGroupAbsent, one.GetAbsent())
+	}
+
 	if row.SourceEventIDs == nil {
 		row.SourceEventIDs = []string{}
 	}
@@ -173,18 +207,22 @@ func storable(row Row) error {
 	if err := representable("detected_time", row.DetectedTime); err != nil {
 		return err
 	}
+	if err := representable("aggregation.first_event_time", row.AggregationFirstEventTime); err != nil {
+		return err
+	}
 
-	widths := map[string]int{
-		"evidence.field":    len(row.EvidenceField),
-		"evidence.operator": len(row.EvidenceOperator),
-		"evidence.negated":  len(row.EvidenceNegated),
-		"evidence.held":     len(row.EvidenceHeld),
-		"evidence.absent":   len(row.EvidenceAbsent),
+	widths := map[string][2]int{
+		"evidence.operator":        {len(row.EvidenceOperator), len(row.EvidenceField)},
+		"evidence.negated":         {len(row.EvidenceNegated), len(row.EvidenceField)},
+		"evidence.held":            {len(row.EvidenceHeld), len(row.EvidenceField)},
+		"evidence.absent":          {len(row.EvidenceAbsent), len(row.EvidenceField)},
+		"aggregation.group.value":  {len(row.AggregationGroupValue), len(row.AggregationGroupField)},
+		"aggregation.group.absent": {len(row.AggregationGroupAbsent), len(row.AggregationGroupField)},
 	}
 	for field, width := range widths {
-		if width != len(row.EvidenceField) {
-			return fmt.Errorf("%s carries %d entries and evidence.field carries %d: the arrays are one table read sideways",
-				field, width, len(row.EvidenceField))
+		if width[0] != width[1] {
+			return fmt.Errorf("%s carries %d entries against %d: the arrays are one table read sideways",
+				field, width[0], width[1])
 		}
 	}
 	return nil

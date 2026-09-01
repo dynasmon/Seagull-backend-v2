@@ -22,6 +22,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/analysis"
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
+	"github.com/dynasmon/Seagull-backend-v2/internal/detectionstate"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
@@ -87,6 +88,7 @@ func TestTheEngineConsumesTheBackboneInAGroupOfItsOwn(t *testing.T) {
 	engine, err := analysis.NewEngine(analysis.EngineOptions{
 		Source:         analysedBy(consumer),
 		Rules:          pinnedTo(t, failedAuthentication(t)),
+		State:          remembering(t),
 		Detections:     detections,
 		Metrics:        analysis.NewMetrics(metrics.New("integration")),
 		Logger:         slog.New(slog.NewJSONHandler(&reported, &slog.HandlerOptions{Level: slog.LevelInfo})),
@@ -171,6 +173,141 @@ func assertDetectionsReached(t *testing.T, addresses []string, topic string, eve
 	if len(agents) == 0 {
 		t.Error("no detection said which agent it was about")
 	}
+}
+
+// A threshold decided off a real backbone: twenty failures from one address
+// against one agent reach the engine as twenty records, and exactly one
+// detection leaves the process — carrying what it counted, so an operator reads
+// the finding rather than twenty facts.
+func TestACountingRuleDecidesOnceTheWindowReachesItsThreshold(t *testing.T) {
+	addresses := brokers(t)
+	topic := temporaryTopic(t, addresses)
+	found := temporaryTopic(t, addresses)
+	group := fmt.Sprintf("analysis-engine-%d", time.Now().UnixNano())
+
+	admitEvents(t, addresses, topic, 20)
+
+	consumer, err := broker.NewConsumer(broker.ConsumerConfig{
+		Brokers:      addresses,
+		Topic:        topic,
+		Group:        group,
+		ClientID:     "integration-test",
+		MaxRecords:   500,
+		FetchMaxWait: 200 * time.Millisecond,
+		Metrics:      broker.NewConsumerMetrics(metrics.New("integration")),
+	})
+	if err != nil {
+		t.Fatalf("build the consumer: %v", err)
+	}
+	t.Cleanup(consumer.Close)
+
+	detections, err := broker.NewDetections(broker.Config{
+		Brokers:  addresses,
+		Topic:    found,
+		ClientID: "integration-test",
+	})
+	if err != nil {
+		t.Fatalf("build the detection publisher: %v", err)
+	}
+	t.Cleanup(detections.Close)
+
+	engine, err := analysis.NewEngine(analysis.EngineOptions{
+		Source:         analysedBy(consumer),
+		Rules:          pinnedTo(t, repeatedFailures(t)),
+		State:          remembering(t),
+		Detections:     detections,
+		Metrics:        analysis.NewMetrics(metrics.New("integration")),
+		Logger:         slog.New(slog.NewJSONHandler(&bytes.Buffer{}, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		PublishTimeout: 30 * time.Second,
+		RetryDelay:     100 * time.Millisecond,
+		MaxRetryDelay:  time.Second,
+	})
+	if err != nil {
+		t.Fatalf("build the engine: %v", err)
+	}
+
+	running, stop := context.WithCancel(context.Background())
+	defer stop()
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- engine.Run(running) }()
+
+	awaitCommitted(t, addresses, topic, group, 20)
+
+	stop()
+	if err := <-stopped; err != nil && !isCancellation(err) {
+		t.Fatalf("the engine stopped with %v", err)
+	}
+
+	records := consume(t, addresses, found, 1)
+	if len(records) != 1 {
+		t.Fatalf("twenty failures at a threshold of twenty produced %d detections", len(records))
+	}
+
+	var made detectionv1.Detection
+	if err := proto.Unmarshal(records[0].Value, &made); err != nil {
+		t.Fatalf("a record on the detection topic is not a detection: %v", err)
+	}
+
+	counted := made.GetAggregation()
+	if counted.GetCount() != 20 || counted.GetThreshold() != 20 {
+		t.Errorf("the detection reports %d of %d", counted.GetCount(), counted.GetThreshold())
+	}
+	if counted.GetWindow().AsDuration() != 5*time.Minute {
+		t.Errorf("the detection reports a window of %s", counted.GetWindow().AsDuration())
+	}
+	if len(counted.GetGroup()) != 2 {
+		t.Fatalf("the detection reports %d group fields", len(counted.GetGroup()))
+	}
+	if got := counted.GetGroup()[0].GetValue(); got != "203.0.113.10" {
+		t.Errorf("the detection was counted under source address %q", got)
+	}
+	if len(made.GetSourceEventIds()) != 1 {
+		t.Errorf("the detection names %d events; it is named by the one that crossed",
+			len(made.GetSourceEventIds()))
+	}
+}
+
+func repeatedFailures(t *testing.T) *detection.Program {
+	t.Helper()
+
+	program, err := detection.Compile(detection.Rule{
+		ID:          "authentication.repeated_failures",
+		Revision:    1,
+		Name:        "Repeated authentication failures from one address",
+		Description: "More failures from one address against one agent than an estate should see.",
+		Class:       eventv1.EventClass_EVENT_CLASS_AUTHENTICATION,
+		Match: detection.Predicate{
+			Field:    "authentication.outcome",
+			Operator: detection.Equals,
+			Values:   []detection.Value{detection.TextValue("failure")},
+		},
+		Count: detection.Count{
+			AtLeast: 20,
+			Within:  5 * time.Minute,
+			GroupBy: []detection.Field{"authentication.network.source.ip", "origin.agent_id"},
+		},
+		Severity: detection.High,
+		Status:   detection.Active,
+	})
+	if err != nil {
+		t.Fatalf("compile the rule: %v", err)
+	}
+	return program
+}
+
+func remembering(t *testing.T) *detectionstate.Keeper {
+	t.Helper()
+
+	keeper, err := detectionstate.NewKeeper(detectionstate.Bounds{
+		Window:             time.Hour,
+		ObservationsPerKey: 128,
+		Keys:               4096,
+	})
+	if err != nil {
+		t.Fatalf("bound the detection state: %v", err)
+	}
+	return keeper
 }
 
 // A rule the admitted events answer, so what the engine decided off a real

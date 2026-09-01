@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 )
@@ -24,6 +25,11 @@ const (
 	MaxReferenceLength   = 500
 	MaxValues            = 4096
 	MaxDepth             = 16
+
+	MinCount   = 2
+	MaxCount   = 4096
+	MaxWithin  = 24 * time.Hour
+	MaxGroupBy = 8
 )
 
 var (
@@ -94,7 +100,64 @@ func (r Rule) Validate() error {
 	if err := r.validateClass(); err != nil {
 		return err
 	}
+	if err := r.validateCount(); err != nil {
+		return err
+	}
 	return r.validateExpression("match", r.Match, 0)
+}
+
+// A count is refused here for anything that would make it unanswerable, and the
+// ceiling on it is the one the state a rule remembers is bounded to: a
+// threshold above what a window may hold could never be reached, and a rule
+// that is quiet is worse than one that is wrong.
+func (r Rule) validateCount() error {
+	if !r.Count.Counts() {
+		return nil
+	}
+
+	switch {
+	case r.Count.AtLeast < MinCount:
+		return r.violation("count.at_least",
+			fmt.Sprintf("is %d, and counting to fewer than %d is what a rule without a count already does", r.Count.AtLeast, MinCount))
+	case r.Count.AtLeast > MaxCount:
+		return r.violation("count.at_least",
+			fmt.Sprintf("is %d, above the %d events a window may hold, so it could never be reached", r.Count.AtLeast, MaxCount))
+	case r.Count.Within <= 0:
+		return r.violation("count.within", "is missing: a count is how many events happened inside a window")
+	case r.Count.Within > MaxWithin:
+		return r.violation("count.within",
+			fmt.Sprintf("is %s, and a rule may not remember for longer than %s", r.Count.Within, MaxWithin))
+	case len(r.Count.GroupBy) > MaxGroupBy:
+		return r.violation("count.group_by",
+			fmt.Sprintf("names %d fields, above the ceiling of %d", len(r.Count.GroupBy), MaxGroupBy))
+	}
+	return r.validateGrouping()
+}
+
+func (r Rule) validateGrouping() error {
+	grouped := make(map[Field]struct{}, len(r.Count.GroupBy))
+	for index, field := range r.Count.GroupBy {
+		part := fmt.Sprintf("count.group_by[%d]", index)
+		switch {
+		case field == classField:
+			return r.violation(part, "is the class of the event, which every event the rule reads already shares")
+		case field == tenantField:
+			return r.violation(part, "is the tenant, which is always part of a count and is never grouped by")
+		case field == identityField:
+			return r.violation(part, "is the identifier of the event, so no two events could ever be counted together")
+		}
+		if _, declared := KindOf(field); !declared {
+			return r.violation(part, "is not a field the contract declares")
+		}
+		if !AddressableBy(field, r.Class) {
+			return r.violation(part, fmt.Sprintf("belongs to another class, so a %s rule would never group by it", className(r.Class)))
+		}
+		if _, twice := grouped[field]; twice {
+			return r.violation(part, fmt.Sprintf("is %q, which the count already groups by", field))
+		}
+		grouped[field] = struct{}{}
+	}
+	return nil
 }
 
 func (r Rule) validateClass() error {

@@ -94,11 +94,37 @@ the gateway and the writer verify it before they serve.
 | `SEAGULL_DETECTION_PUBLISH_TIMEOUT` | `30s` | budget for making one batch of detections durable |
 | `SEAGULL_DETECTION_RETRY_DELAY` | `1s` | first wait after the backbone refuses a batch of detections |
 | `SEAGULL_DETECTION_RETRY_DELAY_MAX` | `30s` | ceiling that wait doubles towards |
+| `SEAGULL_DETECTION_STATE_WINDOW` | `1h` | the longest window a counting rule may ask for, and what a restart costs to rebuild |
+| `SEAGULL_DETECTION_STATE_OBSERVATIONS` | `128` | events one key holds; past it the count is a floor and says so |
+| `SEAGULL_DETECTION_STATE_KEYS` | `4096` | keys held at once; at the ceiling a new key is refused rather than an old one evicted |
 
 The rule tree is the bootstrap, not the source of truth. The engine runs it
 until `security.rulesets` names a published ruleset to run, and from then on the
 log wins — which is what lets an engine keep detecting when no control plane is
 reachable. ADR 15.
+
+A rule may count what it matches, which turns the same match into a threshold:
+
+```yaml
+count:
+  at_least: 20                # at least 2, and never more than one key holds
+  within: 1m                  # event time, never the clock
+  group_by:                   # what makes two matching events the same thing
+    - authentication.network.source.ip
+    - origin.agent_id
+```
+
+The tenant is always part of the grouping and is never written; grouping by the
+class, the tenant or the event identifier is refused. A count above what
+`SEAGULL_DETECTION_STATE_OBSERVATIONS` holds, or a window longer than
+`SEAGULL_DETECTION_STATE_WINDOW`, stops the process at startup rather than
+running a rule that could never fire. Past its threshold a rule decides once per
+matching event and never more — nothing resets when a rule fires — so folding
+those into one piece of work is the alerting document's job.
+`detection_state_observations_total` says what became of every event a counting
+rule matched, and `detection_state_keys` against `detection_state_key_ceiling`
+is the headroom. See
+[ADR 19](decisions/0019-a-rule-that-counts-decides-on-a-window.md).
 
 ### event-writer
 

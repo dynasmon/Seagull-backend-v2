@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/clickhouse"
@@ -73,6 +74,17 @@ func madeDetection(owner, id string, at time.Time) *detectionv1.Detection {
 			{Field: "authentication.outcome", Operator: "equals", Held: "failure"},
 			{Field: "authentication.network.source.ip", Operator: "starts_with", Negated: true, Absent: true},
 		},
+		Aggregation: &detectionv1.Aggregation{
+			Count:          23,
+			Threshold:      20,
+			Window:         durationpb.New(time.Minute),
+			FirstEventTime: timestamppb.New(at.Add(-time.Minute)),
+			Saturated:      true,
+			Group: []*detectionv1.Grouping{
+				{Field: "authentication.network.source.ip", Value: "203.0.113.10"},
+				{Field: "origin.agent_id", Value: "web-01"},
+			},
+		},
 	}
 }
 
@@ -101,20 +113,29 @@ func TestTheStoreKeepsEveryFieldADetectionCarries(t *testing.T) {
 		revision, schemaVersion                             uint32
 		sourceEvents, evidenceField, evidenceHeld           []string
 		evidenceNegated, evidenceAbsent                     []bool
-		eventTime, detectedTime                             time.Time
+		eventTime, detectedTime, firstEventTime             time.Time
+		count, threshold, window                            uint32
+		saturated                                           bool
+		groupField, groupValue                              []string
+		groupAbsent                                         []bool
 	)
 	err := inspector(t, address).QueryRow(ctx, `
 		SELECT detection_id, schema_version, rule_id, rule_revision, rule_name,
 		       rule_source_catalogue, ruleset_id, severity, technique_tactic, technique_id,
 		       event_class, agent_id, host_hostname, source_event_ids,
 		       event_time, detected_time,
-		       evidence_field, evidence_negated, evidence_held, evidence_absent
+		       evidence_field, evidence_negated, evidence_held, evidence_absent,
+		       aggregation_count, aggregation_threshold, aggregation_window_seconds,
+		       aggregation_first_event_time, aggregation_saturated,
+		       aggregation_group_field, aggregation_group_value, aggregation_group_absent
 		FROM security_detections FINAL WHERE tenant_id = ?`, owner,
 	).Scan(&detectionID, &schemaVersion, &ruleID, &revision, &ruleName,
 		&catalogue, &rulesetID, &severity, &tactic, &techniqueID,
 		&eventClass, &agentID, &hostname, &sourceEvents,
 		&eventTime, &detectedTime,
-		&evidenceField, &evidenceNegated, &evidenceHeld, &evidenceAbsent)
+		&evidenceField, &evidenceNegated, &evidenceHeld, &evidenceAbsent,
+		&count, &threshold, &window, &firstEventTime, &saturated,
+		&groupField, &groupValue, &groupAbsent)
 	if err != nil {
 		t.Fatalf("read the detection back: %v", err)
 	}
@@ -155,6 +176,22 @@ func TestTheStoreKeepsEveryFieldADetectionCarries(t *testing.T) {
 	}
 	if !evidenceNegated[1] || !evidenceAbsent[1] {
 		t.Error("a negated question about a field the event did not carry lost one of the two")
+	}
+
+	// What a counting rule found is the finding, so a store that kept the
+	// detection and lost the count would be keeping a threshold detection that
+	// reads like a single event.
+	if count != 23 || threshold != 20 || window != 60 || !saturated {
+		t.Errorf("the aggregation came back as %d of %d over %ds, saturated=%v", count, threshold, window, saturated)
+	}
+	if !firstEventTime.Equal(at.Add(-time.Minute)) {
+		t.Errorf("the window came back reaching to %s", firstEventTime)
+	}
+	if len(groupField) != 2 || len(groupValue) != 2 || len(groupAbsent) != 2 {
+		t.Fatalf("the group came back as %v / %v / %v", groupField, groupValue, groupAbsent)
+	}
+	if groupField[0] != "authentication.network.source.ip" || groupValue[0] != "203.0.113.10" {
+		t.Errorf("the first group came back as %q holding %q", groupField[0], groupValue[0])
 	}
 }
 

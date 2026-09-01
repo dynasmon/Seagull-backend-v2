@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
@@ -50,7 +51,35 @@ func Restore(row Row) *detectionv1.Detection {
 	}
 
 	made.Evidence = evidence(row)
+	made.Aggregation = aggregation(row)
 	return made
+}
+
+// A threshold is at least two, so a stored zero is a detection made by a rule
+// that counts nothing rather than one whose count happened to be empty. Reading
+// an aggregation onto it would say a rule counted when it did not.
+func aggregation(row Row) *detectionv1.Aggregation {
+	if row.AggregationThreshold == 0 {
+		return nil
+	}
+
+	counted := &detectionv1.Aggregation{
+		Count:          row.AggregationCount,
+		Threshold:      row.AggregationThreshold,
+		Window:         durationpb.New(time.Duration(row.AggregationWindowSeconds) * time.Second),
+		FirstEventTime: moment(row.AggregationFirstEventTime),
+		Saturated:      row.AggregationSaturated,
+	}
+
+	width := min(len(row.AggregationGroupField), len(row.AggregationGroupValue), len(row.AggregationGroupAbsent))
+	for index := range width {
+		counted.Group = append(counted.Group, &detectionv1.Grouping{
+			Field:  row.AggregationGroupField[index],
+			Value:  row.AggregationGroupValue[index],
+			Absent: row.AggregationGroupAbsent[index],
+		})
+	}
+	return counted
 }
 
 // The five arrays are one table read sideways, and a store that returned them at

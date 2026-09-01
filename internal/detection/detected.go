@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
@@ -49,7 +50,34 @@ func (m Match) Detected(ruleset string, record *eventv1.Event, at time.Time) *de
 		EventTime:      record.GetTime().GetEventTime(),
 		DetectedTime:   timestamppb.New(at.UTC()),
 		Evidence:       gathered(m.Evidence),
+		Aggregation:    aggregated(m.Rule.Count, m.Counted),
 	}
+}
+
+// It is deliberately no part of the identity above. The events named there are
+// what this detection is, and re-deciding them reaches the same count, so
+// carrying it would say the same thing twice and give a replay a second way to
+// disagree with itself.
+func aggregated(counting Count, found Counted) *detectionv1.Aggregation {
+	if !counting.Counts() {
+		return nil
+	}
+
+	aggregation := &detectionv1.Aggregation{
+		Count:          uint32(found.Count),
+		Threshold:      uint32(counting.AtLeast),
+		Window:         durationpb.New(counting.Within),
+		FirstEventTime: timestamppb.New(found.First.UTC()),
+		Saturated:      found.Saturated,
+	}
+	for _, bound := range found.Group {
+		aggregation.Group = append(aggregation.Group, &detectionv1.Grouping{
+			Field:  string(bound.Field),
+			Value:  bound.Value,
+			Absent: bound.Absent,
+		})
+	}
+	return aggregation
 }
 
 // A detection is named by what decided it: the rule, the revision it was

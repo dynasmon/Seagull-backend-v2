@@ -3,17 +3,19 @@ package detectionstore
 import (
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 )
 
-const timestampMessage = "google.protobuf.Timestamp"
+const wellKnown = "google.protobuf."
 
 // The rule runs from the contract towards the store, never the other way, so a
 // detection cannot start carrying something and quietly stop being kept. Unlike
@@ -49,7 +51,7 @@ func leaves(message protoreflect.MessageDescriptor, prefix string) []string {
 		path := prefix + string(field.Name())
 
 		nested := field.Kind() == protoreflect.MessageKind && !field.IsMap() &&
-			string(field.Message().FullName()) != timestampMessage
+			!strings.HasPrefix(string(field.Message().FullName()), wellKnown)
 		if nested {
 			paths = append(paths, leaves(field.Message(), path+".")...)
 			continue
@@ -87,6 +89,17 @@ func populated() *detectionv1.Detection {
 		Evidence: []*detectionv1.Evidence{
 			{Field: "authentication.outcome", Operator: "equals", Held: "failure"},
 			{Field: "authentication.network.source.ip", Operator: "starts_with", Negated: true, Absent: true},
+		},
+		Aggregation: &detectionv1.Aggregation{
+			Count:          23,
+			Threshold:      20,
+			Window:         durationpb.New(time.Minute),
+			FirstEventTime: timestamppb.New(at.Add(-2 * time.Minute)),
+			Saturated:      true,
+			Group: []*detectionv1.Grouping{
+				{Field: "authentication.network.source.ip", Value: "203.0.113.10"},
+				{Field: "origin.agent_id", Value: "dev-agent-01"},
+			},
 		},
 	}
 }

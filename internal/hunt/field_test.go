@@ -47,6 +47,13 @@ var addressable = map[hunt.Dataset][]hunt.Field{
 		"time.observed_time",
 	},
 	hunt.Detections: {
+		"aggregation.count",
+		"aggregation.first_event_time",
+		"aggregation.group.absent",
+		"aggregation.group.field",
+		"aggregation.group.value",
+		"aggregation.saturated",
+		"aggregation.threshold",
 		"detected_time",
 		"detection_id",
 		"event_class",

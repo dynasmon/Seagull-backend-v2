@@ -47,6 +47,15 @@ var detectionColumns = []string{
 	"evidence_negated",
 	"evidence_held",
 	"evidence_absent",
+
+	"aggregation_count",
+	"aggregation_threshold",
+	"aggregation_window_seconds",
+	"aggregation_first_event_time",
+	"aggregation_saturated",
+	"aggregation_group_field",
+	"aggregation_group_value",
+	"aggregation_group_absent",
 }
 
 func detectionValues(row detectionstore.Row) []any {
@@ -83,6 +92,15 @@ func detectionValues(row detectionstore.Row) []any {
 		row.EvidenceNegated,
 		row.EvidenceHeld,
 		row.EvidenceAbsent,
+
+		row.AggregationCount,
+		row.AggregationThreshold,
+		row.AggregationWindowSeconds,
+		row.AggregationFirstEventTime,
+		row.AggregationSaturated,
+		row.AggregationGroupField,
+		row.AggregationGroupValue,
+		row.AggregationGroupAbsent,
 	}
 }
 
@@ -129,6 +147,15 @@ func detectionPointers(row *detectionstore.Row) []any {
 		&row.EvidenceNegated,
 		&row.EvidenceHeld,
 		&row.EvidenceAbsent,
+
+		&row.AggregationCount,
+		&row.AggregationThreshold,
+		&row.AggregationWindowSeconds,
+		&row.AggregationFirstEventTime,
+		&row.AggregationSaturated,
+		&row.AggregationGroupField,
+		&row.AggregationGroupValue,
+		&row.AggregationGroupAbsent,
 	}
 }
 

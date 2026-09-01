@@ -104,7 +104,9 @@ type held struct {
 
 func (h *held) observe(seen Observation, ceiling int) (State, error) {
 	if _, folded := h.ids[seen.Event]; folded {
-		return h.state(ceiling), nil
+		repeated := h.state(ceiling)
+		repeated.Repeated = true
+		return repeated, nil
 	}
 
 	newest := seen.At

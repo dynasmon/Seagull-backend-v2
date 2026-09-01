@@ -22,3 +22,4 @@ rediscovered by reading the code.
 - [16. An alert is a detection somebody owns](0016-an-alert-is-a-detection-somebody-owns.md)
 - [17. Noise is removed from the alert plane, never from the detection stream](0017-noise-is-removed-from-the-alert-and-never-from-the-detection.md)
 - [18. Detection state is a bounded window of the backbone, in event time](0018-detection-state-is-a-bounded-window.md)
+- [19. A rule that counts decides on the window, once per event, and says what it counted](0019-a-rule-that-counts-decides-on-a-window.md)

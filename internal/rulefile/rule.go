@@ -89,7 +89,7 @@ func (r *reader) rule(node *yaml.Node) (detection.Rule, []detection.Case, error)
 	r.id = detection.ID(id)
 
 	rule := detection.Rule{ID: r.id}
-	for _, part := range []string{"id", "revision", "name", "description", "severity", "status", "class", "source", "tags", "references", "tests"} {
+	for _, part := range []string{"id", "revision", "name", "description", "severity", "status", "class", "source", "tags", "references", "count", "tests"} {
 		r.at(part, held.at(part))
 	}
 
@@ -134,6 +134,10 @@ func (r *reader) rule(node *yaml.Node) (detection.Rule, []detection.Case, error)
 		return detection.Rule{}, nil, err
 	}
 	if rule.References, err = r.list(&held, "references", "references"); err != nil {
+		return detection.Rule{}, nil, err
+	}
+
+	if rule.Count, err = r.count(&held); err != nil {
 		return detection.Rule{}, nil, err
 	}
 

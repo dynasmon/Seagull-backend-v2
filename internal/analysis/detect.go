@@ -44,10 +44,10 @@ type Detections interface {
 // Nothing is published here. The batch is what becomes durable, and it becomes
 // durable before the group position advances, so what leaves this function is
 // held until the whole batch has been decided.
-func (e *Engine) detect(record *eventv1.Event, route Route, position Record, at time.Time) []*detectionv1.Detection {
+func (e *Engine) detect(ctx context.Context, record *eventv1.Event, route Route, position Record, at time.Time) ([]*detectionv1.Detection, error) {
 	rules := e.rules.Current()
 	if rules == nil {
-		return nil
+		return nil, nil
 	}
 
 	var made []*detectionv1.Detection
@@ -55,12 +55,25 @@ func (e *Engine) detect(record *eventv1.Event, route Route, position Record, at 
 	evaluated := 0
 	for program := range rules.For(record.GetEventClass()) {
 		evaluated++
-		if match, held := program.Decide(record); held {
-			made = append(made, e.detected(match, rules.ID(), record, route, position, at))
+		match, held := program.Decide(record)
+		if !held {
+			continue
 		}
+
+		if program.Counts() {
+			reached, err := e.reached(ctx, program, &match, record)
+			if err != nil {
+				e.metrics.evaluated(route, evaluated, time.Since(started))
+				return nil, err
+			}
+			if !reached {
+				continue
+			}
+		}
+		made = append(made, e.detected(match, rules.ID(), record, route, position, at))
 	}
 	e.metrics.evaluated(route, evaluated, time.Since(started))
-	return made
+	return made, nil
 }
 
 // A match is reported by what decided it and what it decided about, never by
@@ -76,7 +89,8 @@ func (e *Engine) detected(match detection.Match, ruleset string, record *eventv1
 	made := match.Detected(ruleset, record, at)
 
 	e.metrics.detected(route, match.Rule.Severity)
-	e.logger.Info("detection",
+
+	told := []any{
 		slog.String("detection", made.GetDetectionId()),
 		slog.String("rule", string(match.Rule.ID)),
 		slog.Int("revision", match.Rule.Revision),
@@ -88,7 +102,16 @@ func (e *Engine) detected(match detection.Match, ruleset string, record *eventv1
 		slog.Any("fields", evidenced(match.Evidence)),
 		slog.Int("partition", int(position.Partition)),
 		slog.Int64("offset", position.Offset),
-	)
+	}
+	if match.Rule.Count.Counts() {
+		told = append(told,
+			slog.Int("count", match.Counted.Count),
+			slog.Int("threshold", match.Rule.Count.AtLeast),
+			slog.Duration("window", match.Rule.Count.Within),
+		)
+	}
+
+	e.logger.Info("detection", told...)
 	return made
 }
 

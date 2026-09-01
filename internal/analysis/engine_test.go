@@ -20,6 +20,7 @@ import (
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/analysis"
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
+	"github.com/dynasmon/Seagull-backend-v2/internal/detectionstate"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
@@ -208,6 +209,7 @@ func engineReporting(t *testing.T, source analysis.Source, rules analysis.Rules,
 	engine, err := analysis.NewEngine(analysis.EngineOptions{
 		Source:         source,
 		Rules:          rules,
+		State:          keeping(t),
 		Detections:     sink,
 		Metrics:        analysis.NewMetrics(registry),
 		Logger:         slog.New(slog.NewJSONHandler(&written, &slog.HandlerOptions{Level: level})),
@@ -219,6 +221,20 @@ func engineReporting(t *testing.T, source analysis.Source, rules analysis.Rules,
 		t.Fatalf("build engine: %v", err)
 	}
 	return engine, &written, registry, sink
+}
+
+func keeping(t *testing.T) *detectionstate.Keeper {
+	t.Helper()
+
+	keeper, err := detectionstate.NewKeeper(detectionstate.Bounds{
+		Window:             time.Hour,
+		ObservationsPerKey: 64,
+		Keys:               32,
+	})
+	if err != nil {
+		t.Fatalf("bound the detection state: %v", err)
+	}
+	return keeper
 }
 
 // What the process would answer on its operational listener, which is where an
@@ -403,6 +419,7 @@ func TestTheEngineRefusesToStartWithoutWhatItNeeds(t *testing.T) {
 		options := analysis.EngineOptions{
 			Source:         &oneBatch{},
 			Rules:          nothingToRun(),
+			State:          keeping(t),
 			Detections:     &collected{},
 			Metrics:        analysis.NewMetrics(metrics.New(t.Name())),
 			Logger:         logger,
@@ -417,6 +434,7 @@ func TestTheEngineRefusesToStartWithoutWhatItNeeds(t *testing.T) {
 	missing := map[string]analysis.EngineOptions{
 		"no source":         complete(func(o *analysis.EngineOptions) { o.Source = nil }),
 		"no rules":          complete(func(o *analysis.EngineOptions) { o.Rules = nil }),
+		"nowhere to count":  complete(func(o *analysis.EngineOptions) { o.State = nil }),
 		"no detections":     complete(func(o *analysis.EngineOptions) { o.Detections = nil }),
 		"no metrics":        complete(func(o *analysis.EngineOptions) { o.Metrics = nil }),
 		"no logger":         complete(func(o *analysis.EngineOptions) { o.Logger = nil }),

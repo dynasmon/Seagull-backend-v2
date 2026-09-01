@@ -7,10 +7,12 @@ import (
 
 // What makes an event worth telling somebody about, and what to tell them.
 //
-// A rule decides on one event at a time, from what that event carries and
-// nothing else. Counting, windows, thresholds and cooldowns are not here: they
-// are state, they arrive with aggregation, and a model that mixes them in from
-// the start cannot say which of its rules are deterministic.
+// Matching is decided on one event at a time, from what that event carries and
+// nothing else. A count is the one part of a rule that is not: it says how many
+// matching events, sharing what, inside what window, and it is answered from
+// state rather than from the event. Cooldown is still not here, and is not
+// missing — it belongs to the alert somebody works, not to the rule that finds
+// one.
 type Rule struct {
 	// Stable across every revision of the rule, and never carrying a version:
 	// v1 named a rule `ssh_bruteforce_authlog_v2` and then could not tell the
@@ -27,6 +29,8 @@ type Rule struct {
 	// backbone.
 	Class eventv1.EventClass
 	Match Expression
+
+	Count Count
 
 	Severity  Severity
 	Status    Status

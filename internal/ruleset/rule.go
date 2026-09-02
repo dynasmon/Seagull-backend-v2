@@ -56,6 +56,7 @@ func encodeRule(rule detection.Rule, cases []detection.Case) *rulesetv1.Rule {
 		Description:    rule.Description,
 		EventClass:     rule.Class,
 		Match:          encodeExpression(rule.Match),
+		Sequence:       encodeSequence(rule.Sequence),
 		Severity:       severities[rule.Severity],
 		Status:         statuses[rule.Status],
 		FalsePositives: rule.FalsePositives,
@@ -92,6 +93,43 @@ func encodeRule(rule detection.Rule, cases []detection.Case) *rulesetv1.Rule {
 	return encoded
 }
 
+func encodeSequence(sequence detection.Sequence) *rulesetv1.Sequence {
+	if !sequence.Correlates() {
+		return nil
+	}
+
+	encoded := &rulesetv1.Sequence{Within: durationpb.New(sequence.Within)}
+	for _, stage := range sequence.Stages {
+		encoded.Stages = append(encoded.Stages, &rulesetv1.Stage{
+			Name:  stage.Name,
+			Match: encodeExpression(stage.Match),
+		})
+	}
+	for _, field := range sequence.GroupBy {
+		encoded.GroupBy = append(encoded.GroupBy, string(field))
+	}
+	return encoded
+}
+
+func decodeSequence(encoded *rulesetv1.Sequence) (detection.Sequence, error) {
+	if encoded == nil {
+		return detection.Sequence{}, nil
+	}
+
+	sequence := detection.Sequence{Within: encoded.GetWithin().AsDuration()}
+	for _, stage := range encoded.GetStages() {
+		match, err := decodeExpression(stage.GetMatch())
+		if err != nil {
+			return detection.Sequence{}, fmt.Errorf("stage %q: %w", stage.GetName(), err)
+		}
+		sequence.Stages = append(sequence.Stages, detection.Stage{Name: stage.GetName(), Match: match})
+	}
+	for _, field := range encoded.GetGroupBy() {
+		sequence.GroupBy = append(sequence.GroupBy, detection.Field(field))
+	}
+	return sequence, nil
+}
+
 // An undeclared severity, status or expectation is refused rather than read as
 // the zero one: a rule arriving from a build that knows a value this one does
 // not must not quietly become a draft that nothing runs.
@@ -108,7 +146,15 @@ func decodeRule(encoded *rulesetv1.Rule) (detection.Rule, []detection.Case, erro
 	if !known {
 		return detection.Rule{}, nil, fmt.Errorf("rule %q carries a status this build does not declare", encoded.GetId())
 	}
-	match, err := decodeExpression(encoded.GetMatch())
+	var match detection.Expression
+	if encoded.GetMatch() != nil {
+		read, err := decodeExpression(encoded.GetMatch())
+		if err != nil {
+			return detection.Rule{}, nil, fmt.Errorf("rule %q: %w", encoded.GetId(), err)
+		}
+		match = read
+	}
+	sequence, err := decodeSequence(encoded.GetSequence())
 	if err != nil {
 		return detection.Rule{}, nil, fmt.Errorf("rule %q: %w", encoded.GetId(), err)
 	}
@@ -136,6 +182,7 @@ func decodeRule(encoded *rulesetv1.Rule) (detection.Rule, []detection.Case, erro
 		Tags:       slices.Clone(encoded.GetTags()),
 		References: slices.Clone(encoded.GetReferences()),
 		Count:      decodeCount(encoded.GetCount()),
+		Sequence:   sequence,
 	}
 
 	cases := make([]detection.Case, 0, len(encoded.GetCases()))

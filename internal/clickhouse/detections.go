@@ -56,6 +56,14 @@ var detectionColumns = []string{
 	"aggregation_group_field",
 	"aggregation_group_value",
 	"aggregation_group_absent",
+	"correlation_window_seconds",
+	"correlation_clock_spread_millis",
+	"correlation_stage_name",
+	"correlation_stage_event_id",
+	"correlation_stage_event_time",
+	"correlation_group_field",
+	"correlation_group_value",
+	"correlation_group_absent",
 }
 
 func detectionValues(row detectionstore.Row) []any {
@@ -101,6 +109,15 @@ func detectionValues(row detectionstore.Row) []any {
 		row.AggregationGroupField,
 		row.AggregationGroupValue,
 		row.AggregationGroupAbsent,
+
+		row.CorrelationWindowSeconds,
+		row.CorrelationClockSpreadMillis,
+		row.CorrelationStageName,
+		row.CorrelationStageEventID,
+		row.CorrelationStageEventTime,
+		row.CorrelationGroupField,
+		row.CorrelationGroupValue,
+		row.CorrelationGroupAbsent,
 	}
 }
 
@@ -156,6 +173,15 @@ func detectionPointers(row *detectionstore.Row) []any {
 		&row.AggregationGroupField,
 		&row.AggregationGroupValue,
 		&row.AggregationGroupAbsent,
+
+		&row.CorrelationWindowSeconds,
+		&row.CorrelationClockSpreadMillis,
+		&row.CorrelationStageName,
+		&row.CorrelationStageEventID,
+		&row.CorrelationStageEventTime,
+		&row.CorrelationGroupField,
+		&row.CorrelationGroupValue,
+		&row.CorrelationGroupAbsent,
 	}
 }
 

@@ -137,6 +137,12 @@ func identify(programs []*detection.Program) ID {
 			write(string(field))
 		}
 
+		write(rule.Sequence.Within.String())
+		write(strconv.Itoa(len(rule.Sequence.GroupBy)))
+		for _, field := range rule.Sequence.GroupBy {
+			write(string(field))
+		}
+
 		write(strconv.Itoa(len(rule.Tags)))
 		for _, tag := range slices.Sorted(slices.Values(rule.Tags)) {
 			write(tag)

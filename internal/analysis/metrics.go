@@ -24,6 +24,9 @@ type Metrics struct {
 	deciding    *prometheus.HistogramVec
 	emitted     prometheus.Counter
 	batches     *prometheus.CounterVec
+
+	observations *prometheus.CounterVec
+	floors       prometheus.Counter
 }
 
 // Created once per process and handed to the engine, as the writer does it.
@@ -104,6 +107,18 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "batches_total",
 			Help:      "Batches of detections by whether the backbone took them; a retry is counted apart from the batch it belongs to.",
 		}, []string{"outcome"}),
+		observations: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "detection",
+			Name:      "state_observations_total",
+			Help:      "Events a counting rule matched, by what its window did with them.",
+		}, []string{"outcome"}),
+		floors: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "detection",
+			Name:      "state_saturated_total",
+			Help:      "Observations folded into a key that was already full, whose count is therefore a floor.",
+		}),
 	}
 	registry.MustRegister(
 		instruments.events,
@@ -118,6 +133,8 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 		instruments.deciding,
 		instruments.emitted,
 		instruments.batches,
+		instruments.observations,
+		instruments.floors,
 	)
 	return instruments
 }
@@ -191,3 +208,11 @@ func (m *Metrics) refused(reason string) {
 	m.events.WithLabelValues("refused").Inc()
 	m.refusals.WithLabelValues(reason).Inc()
 }
+
+// What a counting rule's window did with an event it matched. Counted and
+// reached say the rule is working; the three refusals say the store would not
+// take the observation, which is a rule that cannot fire and an operator who
+// would otherwise never know.
+func (m *Metrics) observed(outcome string) { m.observations.WithLabelValues(outcome).Inc() }
+
+func (m *Metrics) saturated() { m.floors.Inc() }

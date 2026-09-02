@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/detectionstate"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
@@ -36,6 +37,7 @@ type Source interface {
 type EngineOptions struct {
 	Source     Source
 	Rules      Rules
+	State      detectionstate.Store
 	Detections Detections
 	Metrics    *Metrics
 	Logger     *slog.Logger
@@ -53,6 +55,7 @@ type EngineOptions struct {
 type Engine struct {
 	source     Source
 	rules      Rules
+	state      detectionstate.Store
 	detections Detections
 	metrics    *Metrics
 	logger     *slog.Logger
@@ -69,6 +72,8 @@ func NewEngine(options EngineOptions) (*Engine, error) {
 		return nil, errors.New("the analysis engine needs a source")
 	case options.Rules == nil:
 		return nil, errors.New("the analysis engine needs rules")
+	case options.State == nil:
+		return nil, errors.New("the analysis engine needs somewhere for a counting rule to remember")
 	case options.Detections == nil:
 		return nil, errors.New("the analysis engine needs somewhere to put what it finds")
 	case options.Metrics == nil:
@@ -84,6 +89,7 @@ func NewEngine(options EngineOptions) (*Engine, error) {
 	return &Engine{
 		source:         options.Source,
 		rules:          options.Rules,
+		state:          options.State,
 		detections:     options.Detections,
 		metrics:        options.Metrics,
 		logger:         options.Logger,
@@ -129,7 +135,12 @@ func (e *Engine) handle(ctx context.Context, records []Record) error {
 		}
 		e.metrics.observeDelay(reached, decoded)
 		e.metrics.routed(stage.Route)
-		made = append(made, e.detect(decoded, stage.Route, record, reached)...)
+
+		found, err := e.detect(ctx, decoded, stage.Route, record, reached)
+		if err != nil {
+			return err
+		}
+		made = append(made, found...)
 		analysed++
 	}
 

@@ -110,6 +110,17 @@ func changesToARule() map[string]func(*detection.Rule) {
 		"Source": func(r *detection.Rule) {
 			r.Source = detection.Source{Catalogue: "sigma", Identifier: "5013fd8a-56f1-4d5c-9f1d-4c9d0a1f3b77"}
 		},
+		"Sequence": func(r *detection.Rule) {
+			r.Match = nil
+			r.Sequence = detection.Sequence{
+				Within:  time.Minute,
+				GroupBy: []detection.Field{"origin.agent_id"},
+				Stages: []detection.Stage{
+					{Name: "a failure", Match: predicate("authentication.outcome")},
+					{Name: "a success", Match: predicate("authentication.user.uid")},
+				},
+			}
+		},
 	}
 }
 

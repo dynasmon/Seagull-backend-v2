@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
+	"github.com/dynasmon/Seagull-backend-v2/internal/detectionstate"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 )
@@ -26,6 +27,8 @@ type configuration struct {
 	publishTimeout time.Duration
 	retryDelay     time.Duration
 	maxRetryDelay  time.Duration
+
+	state detectionstate.Bounds
 }
 
 // The engine reads the same topic as the writer under a group of its own, so
@@ -47,6 +50,15 @@ func load(parser *config.Parser) (configuration, error) {
 		publishTimeout: parser.Duration("SEAGULL_DETECTION_PUBLISH_TIMEOUT", 30*time.Second, time.Second, 5*time.Minute),
 		retryDelay:     parser.Duration("SEAGULL_DETECTION_RETRY_DELAY", time.Second, 100*time.Millisecond, time.Minute),
 		maxRetryDelay:  parser.Duration("SEAGULL_DETECTION_RETRY_DELAY_MAX", 30*time.Second, time.Second, 10*time.Minute),
+
+		// The product of the last two is the whole of what a counting rule may
+		// occupy, and the first is what a restart costs: rebuilding state means
+		// reading that much of the backbone again.
+		state: detectionstate.Bounds{
+			Window:             parser.Duration("SEAGULL_DETECTION_STATE_WINDOW", time.Hour, time.Minute, detectionstate.MaxWindow),
+			ObservationsPerKey: parser.Int("SEAGULL_DETECTION_STATE_OBSERVATIONS", 128, 2, detectionstate.MaxObservationsPerKey),
+			Keys:               parser.Int("SEAGULL_DETECTION_STATE_KEYS", 4096, 1, detectionstate.MaxKeys),
+		},
 	}
 
 	return loaded, parser.Err()

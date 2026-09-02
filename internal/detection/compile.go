@@ -17,20 +17,38 @@ import (
 type Program struct {
 	rule    Rule
 	root    node
+	stages  []staged
 	fields  []Field
 	grouped []grouping
+}
+
+type staged struct {
+	name string
+	root node
 }
 
 func (p *Program) Rule() Rule { return p.rule }
 
 func (p *Program) Counts() bool { return p.rule.Count.Counts() }
 
+func (p *Program) Correlates() bool { return len(p.stages) > 0 }
+
 // Every field the program reads, sorted and without repetition.
 func (p *Program) Fields() []Field { return slices.Clone(p.fields) }
 
 // The compiled form written back out, which is what a refusal quotes and what
 // answers "what did this rule become" without reading the tree.
-func (p *Program) String() string { return p.root.String() }
+func (p *Program) String() string {
+	if p.root != nil {
+		return p.root.String()
+	}
+
+	written := make([]string, 0, len(p.stages))
+	for _, stage := range p.stages {
+		written = append(written, stage.name+": "+stage.root.String())
+	}
+	return "[" + strings.Join(written, " then ") + "]"
+}
 
 // Turn a written rule into what runs on an event.
 //
@@ -44,11 +62,8 @@ func Compile(rule Rule) (*Program, error) {
 	}
 
 	read := make(map[Field]struct{})
-	root, err := rule.compile("match", rule.Match, read)
+	root, stages, err := rule.compileMatching(read)
 	if err != nil {
-		return nil, err
-	}
-	if err := rule.satisfiable("match", root); err != nil {
 		return nil, err
 	}
 
@@ -62,7 +77,31 @@ func Compile(rule Rule) (*Program, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Program{rule: rule, root: root, fields: fields, grouped: grouped}, nil
+	return &Program{rule: rule, root: root, stages: stages, fields: fields, grouped: grouped}, nil
+}
+
+func (r Rule) compileMatching(read map[Field]struct{}) (node, []staged, error) {
+	if !r.Sequence.Correlates() {
+		root, err := r.compile("match", r.Match, read)
+		if err != nil {
+			return nil, nil, err
+		}
+		return root, nil, r.satisfiable("match", root)
+	}
+
+	stages := make([]staged, 0, len(r.Sequence.Stages))
+	for index, stage := range r.Sequence.Stages {
+		where := fmt.Sprintf("sequence.stages[%d].match", index)
+		root, err := r.compile(where, stage.Match, read)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := r.satisfiable(where, root); err != nil {
+			return nil, nil, err
+		}
+		stages = append(stages, staged{name: stage.Name, root: root})
+	}
+	return nil, stages, nil
 }
 
 // One field a count groups by, resolved down to the leaf the way a comparison
@@ -74,11 +113,16 @@ type grouping struct {
 }
 
 func (r Rule) group() ([]grouping, error) {
-	grouped := make([]grouping, 0, len(r.Count.GroupBy))
-	for index, field := range r.Count.GroupBy {
+	where, group := "count.group_by", r.Count.GroupBy
+	if r.Sequence.Correlates() {
+		where, group = "sequence.group_by", r.Sequence.GroupBy
+	}
+
+	grouped := make([]grouping, 0, len(group))
+	for index, field := range group {
 		path, declared := pathOf(field)
 		if !declared {
-			return nil, r.violation(fmt.Sprintf("count.group_by[%d]", index), "is not a field the contract declares")
+			return nil, r.violation(fmt.Sprintf("%s[%d]", where, index), "is not a field the contract declares")
 		}
 		grouped = append(grouped, grouping{field: field, path: path})
 	}

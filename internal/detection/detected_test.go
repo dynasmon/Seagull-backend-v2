@@ -1,6 +1,7 @@
 package detection_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +31,28 @@ func attributed() detection.Rule {
 		AtLeast: 20,
 		Within:  time.Minute,
 		GroupBy: []detection.Field{"authentication.network.source.ip", "origin.agent_id"},
+	}
+	return subject
+}
+
+// The same, for the half of the contract only an ordered rule fills. A rule
+// carries a count or a sequence and never both, so covering the contract takes
+// one of each.
+func correlating() detection.Rule {
+	subject := attributed()
+	subject.Count = detection.Count{}
+	subject.Match = nil
+	subject.Sequence = detection.Sequence{
+		Within:  time.Minute,
+		GroupBy: []detection.Field{"authentication.network.source.ip"},
+		Stages: []detection.Stage{
+			{Name: "a failed password", Match: detection.Predicate{
+				Field: "authentication.outcome", Operator: detection.Equals, Values: []detection.Value{detection.TextValue("failure")},
+			}},
+			{Name: "one that was accepted", Match: detection.Predicate{
+				Field: "authentication.outcome", Operator: detection.Equals, Values: []detection.Value{detection.TextValue("success")},
+			}},
+		},
 	}
 	return subject
 }
@@ -73,6 +96,35 @@ func detected(t *testing.T, subject detection.Rule, record *eventv1.Event) *dete
 	return match.Detected(ruleset, record, at)
 }
 
+func correlated(t *testing.T, subject detection.Rule, record *eventv1.Event) *detectionv1.Detection {
+	t.Helper()
+
+	at, err := time.Parse(time.RFC3339, decidedAt)
+	if err != nil {
+		t.Fatalf("the fixture time is not a time: %v", err)
+	}
+
+	program, err := detection.Compile(subject)
+	if err != nil {
+		t.Fatalf("a rule that should run was refused: %v", err)
+	}
+	reached, evidence := program.Satisfied(record)
+	if !reached.Any() {
+		t.Fatal("the event satisfied no stage of the rule written for it")
+	}
+
+	happened := record.GetTime().GetEventTime().AsTime()
+	match := detection.Match{Rule: subject, Evidence: evidence, Correlated: detection.Correlated{
+		Group:       program.Group(record),
+		ClockSpread: 3 * time.Second,
+		Stages: []detection.Satisfied{
+			{Name: subject.Sequence.Stages[0].Name, Event: record.GetEventId(), At: happened.Add(-30 * time.Second)},
+			{Name: subject.Sequence.Stages[1].Name, Event: "3f7c1d5e9b2a4c6d8e0f1a2b3c4d5e6f", At: happened},
+		},
+	}}
+	return match.Detected(ruleset, record, at)
+}
+
 // The origin is copied from the event whole, so what it carries is the event
 // contract's business rather than this boundary's. A leaf here for the same
 // reason a repeated message is one.
@@ -86,10 +138,13 @@ const wellKnown = "google.protobuf."
 // This is the same rule the store is held to, run from the contract towards the
 // thing that fills it.
 func TestEveryFieldOfADetectionIsDecidedAbout(t *testing.T) {
-	made := detected(t, attributed(), observed(t))
+	record := observed(t)
+	filled := unfilled(correlated(t, correlating(), record).ProtoReflect(), "")
 
-	for _, path := range unfilled(made.ProtoReflect(), "") {
-		t.Errorf("the detection contract carries %s and nothing decided what goes in it", path)
+	for _, path := range unfilled(detected(t, attributed(), record).ProtoReflect(), "") {
+		if slices.Contains(filled, path) {
+			t.Errorf("the detection contract carries %s and nothing decided what goes in it", path)
+		}
 	}
 }
 

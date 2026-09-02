@@ -66,6 +66,15 @@ type Row struct {
 	AggregationGroupField     []string
 	AggregationGroupValue     []string
 	AggregationGroupAbsent    []bool
+
+	CorrelationWindowSeconds     uint32
+	CorrelationClockSpreadMillis int64
+	CorrelationStageName         []string
+	CorrelationStageEventID      []string
+	CorrelationStageEventTime    []time.Time
+	CorrelationGroupField        []string
+	CorrelationGroupValue        []string
+	CorrelationGroupAbsent       []bool
 }
 
 // Every contract leaf this projection keeps. A field added to the contract fails
@@ -80,6 +89,14 @@ var carried = []string{
 	"aggregation.saturated",
 	"aggregation.threshold",
 	"aggregation.window",
+	"correlation.clock_spread",
+	"correlation.group.absent",
+	"correlation.group.field",
+	"correlation.group.value",
+	"correlation.stages.event_id",
+	"correlation.stages.event_time",
+	"correlation.stages.name",
+	"correlation.window",
 	"detected_time",
 	"detection_id",
 	"event_class",
@@ -173,6 +190,30 @@ func Project(made *detectionv1.Detection) Row {
 		row.AggregationGroupAbsent = append(row.AggregationGroupAbsent, one.GetAbsent())
 	}
 
+	told := made.GetCorrelation()
+	row.CorrelationWindowSeconds = uint32(told.GetWindow().AsDuration() / time.Second)
+	row.CorrelationClockSpreadMillis = int64(told.GetClockSpread().AsDuration() / time.Millisecond)
+
+	stages := told.GetStages()
+	row.CorrelationStageName = make([]string, 0, len(stages))
+	row.CorrelationStageEventID = make([]string, 0, len(stages))
+	row.CorrelationStageEventTime = make([]time.Time, 0, len(stages))
+	for _, one := range stages {
+		row.CorrelationStageName = append(row.CorrelationStageName, one.GetName())
+		row.CorrelationStageEventID = append(row.CorrelationStageEventID, one.GetEventId())
+		row.CorrelationStageEventTime = append(row.CorrelationStageEventTime, instant(one.GetEventTime()))
+	}
+
+	ordered := told.GetGroup()
+	row.CorrelationGroupField = make([]string, 0, len(ordered))
+	row.CorrelationGroupValue = make([]string, 0, len(ordered))
+	row.CorrelationGroupAbsent = make([]bool, 0, len(ordered))
+	for _, one := range ordered {
+		row.CorrelationGroupField = append(row.CorrelationGroupField, one.GetField())
+		row.CorrelationGroupValue = append(row.CorrelationGroupValue, one.GetValue())
+		row.CorrelationGroupAbsent = append(row.CorrelationGroupAbsent, one.GetAbsent())
+	}
+
 	if row.SourceEventIDs == nil {
 		row.SourceEventIDs = []string{}
 	}
@@ -210,14 +251,23 @@ func storable(row Row) error {
 	if err := representable("aggregation.first_event_time", row.AggregationFirstEventTime); err != nil {
 		return err
 	}
+	for _, at := range row.CorrelationStageEventTime {
+		if err := representable("correlation.stages.event_time", at); err != nil {
+			return err
+		}
+	}
 
 	widths := map[string][2]int{
-		"evidence.operator":        {len(row.EvidenceOperator), len(row.EvidenceField)},
-		"evidence.negated":         {len(row.EvidenceNegated), len(row.EvidenceField)},
-		"evidence.held":            {len(row.EvidenceHeld), len(row.EvidenceField)},
-		"evidence.absent":          {len(row.EvidenceAbsent), len(row.EvidenceField)},
-		"aggregation.group.value":  {len(row.AggregationGroupValue), len(row.AggregationGroupField)},
-		"aggregation.group.absent": {len(row.AggregationGroupAbsent), len(row.AggregationGroupField)},
+		"evidence.operator":             {len(row.EvidenceOperator), len(row.EvidenceField)},
+		"evidence.negated":              {len(row.EvidenceNegated), len(row.EvidenceField)},
+		"evidence.held":                 {len(row.EvidenceHeld), len(row.EvidenceField)},
+		"evidence.absent":               {len(row.EvidenceAbsent), len(row.EvidenceField)},
+		"aggregation.group.value":       {len(row.AggregationGroupValue), len(row.AggregationGroupField)},
+		"aggregation.group.absent":      {len(row.AggregationGroupAbsent), len(row.AggregationGroupField)},
+		"correlation.stages.event_id":   {len(row.CorrelationStageEventID), len(row.CorrelationStageName)},
+		"correlation.stages.event_time": {len(row.CorrelationStageEventTime), len(row.CorrelationStageName)},
+		"correlation.group.value":       {len(row.CorrelationGroupValue), len(row.CorrelationGroupField)},
+		"correlation.group.absent":      {len(row.CorrelationGroupAbsent), len(row.CorrelationGroupField)},
 	}
 	for field, width := range widths {
 		if width[0] != width[1] {

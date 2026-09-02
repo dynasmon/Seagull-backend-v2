@@ -195,6 +195,75 @@ func TestTheStoreKeepsEveryFieldADetectionCarries(t *testing.T) {
 	}
 }
 
+// What an ordering rule found is the finding, and a store that kept the
+// detection and lost which event satisfied which stage would keep a story
+// nobody could trace to the events it was made of.
+func TestTheStoreKeepsWhatASequenceFound(t *testing.T) {
+	address := storeAddress(t)
+	store := migratedDetectionStore(t, address)
+	owner := tenant(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	at := time.Date(2026, time.September, 1, 10, 30, 0, 0, time.UTC)
+	made := madeDetection(owner, "5e9b2a4c6d8e0f1a2b3c4d5e6f708192", at)
+	made.Aggregation = nil
+	made.SourceEventIds = []string{"aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa", "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb"}
+	made.Correlation = &detectionv1.Correlation{
+		Window:      durationpb.New(5 * time.Minute),
+		ClockSpread: durationpb.New(1500 * time.Millisecond),
+		Stages: []*detectionv1.Stage{
+			{Name: "a failed password", EventId: made.SourceEventIds[0], EventTime: timestamppb.New(at.Add(-time.Minute))},
+			{Name: "one that was accepted", EventId: made.SourceEventIds[1], EventTime: timestamppb.New(at)},
+		},
+		Group: []*detectionv1.Grouping{
+			{Field: "authentication.network.source.ip", Value: "203.0.113.10"},
+			{Field: "origin.agent_id", Value: "web-01"},
+		},
+	}
+
+	if err := store.Store(ctx, []detectionstore.Row{detectionstore.Project(made)}); err != nil {
+		t.Fatalf("write the detection: %v", err)
+	}
+
+	var (
+		window      uint32
+		spread      int64
+		stageName   []string
+		stageEvent  []string
+		stageAt     []time.Time
+		groupField  []string
+		groupValue  []string
+		groupAbsent []bool
+	)
+	err := inspector(t, address).QueryRow(ctx, `
+		SELECT correlation_window_seconds, correlation_clock_spread_millis,
+		       correlation_stage_name, correlation_stage_event_id, correlation_stage_event_time,
+		       correlation_group_field, correlation_group_value, correlation_group_absent
+		FROM security_detections FINAL WHERE tenant_id = ?`, owner,
+	).Scan(&window, &spread, &stageName, &stageEvent, &stageAt, &groupField, &groupValue, &groupAbsent)
+	if err != nil {
+		t.Fatalf("read the detection back: %v", err)
+	}
+
+	if window != 300 || spread != 1500 {
+		t.Errorf("the story came back over %ds with a spread of %dms", window, spread)
+	}
+	if len(stageName) != 2 || len(stageEvent) != 2 || len(stageAt) != 2 {
+		t.Fatalf("the stages came back as %v / %v / %v", stageName, stageEvent, stageAt)
+	}
+	if stageName[0] != "a failed password" || stageEvent[1] != made.SourceEventIds[1] {
+		t.Errorf("the stages came back as %v satisfied by %v", stageName, stageEvent)
+	}
+	if !stageAt[0].Equal(at.Add(-time.Minute)) || !stageAt[1].Equal(at) {
+		t.Errorf("the stages came back at %s and %s", stageAt[0], stageAt[1])
+	}
+	if len(groupField) != 2 || groupValue[0] != "203.0.113.10" || groupAbsent[0] {
+		t.Errorf("the group came back as %v / %v / %v", groupField, groupValue, groupAbsent)
+	}
+}
+
 // The property the whole output path rests on, proved against the engine that
 // merges rather than against the code that writes: the same detection written
 // twice is one row, because it is named by what decided it.

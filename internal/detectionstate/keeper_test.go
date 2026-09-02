@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -310,5 +312,82 @@ func TestConcurrentObserversAgreeOnWhatAKeyHasSeen(t *testing.T) {
 	}
 	if reached := keeper.Watermark(); reached != at(7) {
 		t.Errorf("the watermark reached %s rather than the newest event", reached)
+	}
+}
+
+// The ordered window read back, which is what a sequence reads and what folding
+// and reading in one operation exists for: a window read after a separate fold
+// is a window another event may have moved in between.
+func TestTheWindowIsReadBackInEventTime(t *testing.T) {
+	keeper, err := detectionstate.NewKeeper(detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 8, Keys: 4})
+	if err != nil {
+		t.Fatalf("bound the keeper: %v", err)
+	}
+
+	at := time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
+	key := detectionstate.Key("a-key")
+	for _, seen := range []detectionstate.Observation{
+		{Event: "third", At: at.Add(2 * time.Minute), Value: "c", Skew: 3 * time.Second},
+		{Event: "first", At: at, Value: "a", Skew: time.Second},
+		{Event: "second", At: at.Add(time.Minute), Value: "b", Skew: 2 * time.Second},
+	} {
+		if _, _, err := keeper.Ordered(context.Background(), key, seen, time.Hour); err != nil {
+			t.Fatalf("fold %s: %v", seen.Event, err)
+		}
+	}
+
+	_, window, err := keeper.Ordered(context.Background(), key, detectionstate.Observation{
+		Event: "fourth", At: at.Add(30 * time.Second), Value: "d", Skew: 4 * time.Second,
+	}, time.Hour)
+	if err != nil {
+		t.Fatalf("fold a late observation: %v", err)
+	}
+
+	order := make([]string, 0, len(window))
+	for _, seen := range window {
+		order = append(order, seen.Event)
+	}
+	if want := []string{"first", "fourth", "second", "third"}; !slices.Equal(order, want) {
+		t.Errorf("the window reads back as %v and happened as %v", order, want)
+	}
+	if window[1].Skew != 4*time.Second {
+		t.Errorf("an observation carries a skew of %s", window[1].Skew)
+	}
+
+	window[0].Event = "rewritten"
+	_, again, err := keeper.Ordered(context.Background(), key, detectionstate.Observation{
+		Event: "fifth", At: at.Add(3 * time.Minute), Value: "e",
+	}, time.Hour)
+	if err != nil {
+		t.Fatalf("fold after writing to the window: %v", err)
+	}
+	if again[0].Event != "first" {
+		t.Error("a caller writing to the window it was handed changed the one the keeper keeps")
+	}
+}
+
+// A store bounded below what a rule asks is a rule that would run and never
+// fire, which is the quietest way a detection surface can be wrong.
+func TestBoundsRefuseASequenceTheyCouldNeverOrder(t *testing.T) {
+	bounds := detectionstate.Bounds{Window: time.Minute, ObservationsPerKey: 2, Keys: 4}
+	ordered := func(stages int, within time.Duration) detection.Sequence {
+		sequence := detection.Sequence{Within: within}
+		for index := range stages {
+			sequence.Stages = append(sequence.Stages, detection.Stage{Name: strconv.Itoa(index)})
+		}
+		return sequence
+	}
+
+	if err := bounds.Orders(detection.Sequence{}); err != nil {
+		t.Errorf("a rule that orders nothing was refused: %v", err)
+	}
+	if err := bounds.Orders(ordered(2, time.Minute)); err != nil {
+		t.Errorf("a rule the bounds can order was refused: %v", err)
+	}
+	if err := bounds.Orders(ordered(3, time.Minute)); !errors.Is(err, detectionstate.ErrUnorderable) {
+		t.Errorf("a story longer than a key holds was answered with %v", err)
+	}
+	if err := bounds.Orders(ordered(2, time.Hour)); !errors.Is(err, detectionstate.ErrWindowTooLong) {
+		t.Errorf("a window wider than the store was answered with %v", err)
 	}
 }

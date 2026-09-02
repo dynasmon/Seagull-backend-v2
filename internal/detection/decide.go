@@ -17,7 +17,8 @@ type Match struct {
 	Rule     Rule
 	Evidence []Evidence
 
-	Counted Counted
+	Counted    Counted
+	Correlated Correlated
 }
 
 // One question the rule asked of the event, and what the event answered. What
@@ -61,6 +62,10 @@ func (p *Program) Decide(record *eventv1.Event) (Match, bool) {
 	if record == nil || record.GetEventClass() != p.rule.Class {
 		return Match{}, false
 	}
+	if len(p.stages) > 0 {
+		reached, evidence := p.Satisfied(record)
+		return Match{Rule: p.rule, Evidence: evidence}, reached.Any()
+	}
 
 	// The tree is walked once to decide and again only when it held, which is
 	// what keeps the common answer — no — free of allocation.
@@ -72,6 +77,47 @@ func (p *Program) Decide(record *eventv1.Event) (Match, bool) {
 	evidence := make([]Evidence, 0, len(p.fields))
 	p.root.holds(message, &evidence, false)
 	return Match{Rule: p.rule, Evidence: evidence}, true
+}
+
+// Which stages of the sequence this event satisfies, and what in it satisfied
+// them.
+//
+// As pure as deciding a match is, and for the same reason: a stage asks of one
+// event exactly what a rule without a sequence asks of one event. Which stage
+// comes after which is not asked here — that is the order, and the order is the
+// one part answered from state.
+
+func (p *Program) Satisfied(record *eventv1.Event) (Stages, []Evidence) {
+	if record == nil || record.GetEventClass() != p.rule.Class {
+		return 0, nil
+	}
+
+	message := record.ProtoReflect()
+	var reached Stages
+	for index, stage := range p.stages {
+		if stage.root.holds(message, nil, false) {
+			reached = reached.Add(index)
+		}
+	}
+	if !reached.Any() {
+		return 0, nil
+	}
+
+	evidence := make([]Evidence, 0, len(p.fields))
+	for index, stage := range p.stages {
+		if reached.Has(index) {
+			stage.root.holds(message, &evidence, false)
+		}
+	}
+	return reached, evidence
+}
+
+func (p *Program) Stages() []string {
+	names := make([]string, 0, len(p.stages))
+	for _, stage := range p.stages {
+		names = append(names, stage.name)
+	}
+	return names
 }
 
 // What this event binds the rule's group fields to, in the order the rule

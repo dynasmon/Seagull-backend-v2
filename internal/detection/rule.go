@@ -32,6 +32,10 @@ type Rule struct {
 
 	Count Count
 
+	// A rule carries this or a Match. The stages are the match, ordered in
+	// event time, and the order is what state answers.
+	Sequence Sequence
+
 	Severity  Severity
 	Status    Status
 	Technique Technique

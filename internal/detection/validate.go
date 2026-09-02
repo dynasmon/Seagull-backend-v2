@@ -30,6 +30,10 @@ const (
 	MaxCount   = 4096
 	MaxWithin  = 24 * time.Hour
 	MaxGroupBy = 8
+
+	MinStages      = 2
+	MaxStages      = 8
+	MaxStageLength = 80
 )
 
 var (
@@ -103,7 +107,65 @@ func (r Rule) Validate() error {
 	if err := r.validateCount(); err != nil {
 		return err
 	}
+	if err := r.validateSequence(); err != nil {
+		return err
+	}
+	if r.Sequence.Correlates() {
+		return nil
+	}
 	return r.validateExpression("match", r.Match, 0)
+}
+
+func (r Rule) validateSequence() error {
+	if !r.Sequence.Correlates() {
+		return nil
+	}
+
+	switch {
+	case r.Match != nil:
+		return r.violation("sequence", "is written beside a match, and the stages of a sequence are what it matches with")
+	case r.Count.Counts():
+		return r.violation("sequence", "is written beside a count, and a rule answers from state in one way or the other")
+	case len(r.Sequence.Stages) < MinStages:
+		return r.violation("sequence.stages",
+			fmt.Sprintf("names %d, and a story of fewer than %d stages is what a rule without a sequence already detects", len(r.Sequence.Stages), MinStages))
+	case len(r.Sequence.Stages) > MaxStages:
+		return r.violation("sequence.stages",
+			fmt.Sprintf("names %d stages, above the ceiling of %d", len(r.Sequence.Stages), MaxStages))
+	case r.Sequence.Within <= 0:
+		return r.violation("sequence.within", "is missing: a sequence is stages that happened inside a window")
+	case r.Sequence.Within > MaxWithin:
+		return r.violation("sequence.within",
+			fmt.Sprintf("is %s, and a rule may not remember for longer than %s", r.Sequence.Within, MaxWithin))
+	case len(r.Sequence.GroupBy) > MaxGroupBy:
+		return r.violation("sequence.group_by",
+			fmt.Sprintf("names %d fields, above the ceiling of %d", len(r.Sequence.GroupBy), MaxGroupBy))
+	}
+
+	if err := r.validateStages(); err != nil {
+		return err
+	}
+	return r.validateGrouped("sequence.group_by", r.Sequence.GroupBy)
+}
+
+func (r Rule) validateStages() error {
+	named := make(map[string]struct{}, len(r.Sequence.Stages))
+	for index, stage := range r.Sequence.Stages {
+		part := fmt.Sprintf("sequence.stages[%d]", index)
+		if err := r.text(part+".name", stage.Name, MaxStageLength, true); err != nil {
+			return err
+		}
+		if _, twice := named[stage.Name]; twice {
+			return r.violation(part+".name",
+				fmt.Sprintf("is %q, which another stage already carries, so a detection could not say which was satisfied", stage.Name))
+		}
+		named[stage.Name] = struct{}{}
+
+		if err := r.validateExpression(part+".match", stage.Match, 0); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // A count is refused here for anything that would make it unanswerable, and the
@@ -131,20 +193,20 @@ func (r Rule) validateCount() error {
 		return r.violation("count.group_by",
 			fmt.Sprintf("names %d fields, above the ceiling of %d", len(r.Count.GroupBy), MaxGroupBy))
 	}
-	return r.validateGrouping()
+	return r.validateGrouped("count.group_by", r.Count.GroupBy)
 }
 
-func (r Rule) validateGrouping() error {
-	grouped := make(map[Field]struct{}, len(r.Count.GroupBy))
-	for index, field := range r.Count.GroupBy {
-		part := fmt.Sprintf("count.group_by[%d]", index)
+func (r Rule) validateGrouped(where string, group []Field) error {
+	grouped := make(map[Field]struct{}, len(group))
+	for index, field := range group {
+		part := fmt.Sprintf("%s[%d]", where, index)
 		switch {
 		case field == classField:
 			return r.violation(part, "is the class of the event, which every event the rule reads already shares")
 		case field == tenantField:
 			return r.violation(part, "is the tenant, which is always part of a count and is never grouped by")
 		case field == identityField:
-			return r.violation(part, "is the identifier of the event, so no two events could ever be counted together")
+			return r.violation(part, "is the identifier of the event, so no two events could ever be grouped together")
 		}
 		if _, declared := KindOf(field); !declared {
 			return r.violation(part, "is not a field the contract declares")
@@ -153,7 +215,7 @@ func (r Rule) validateGrouping() error {
 			return r.violation(part, fmt.Sprintf("belongs to another class, so a %s rule would never group by it", className(r.Class)))
 		}
 		if _, twice := grouped[field]; twice {
-			return r.violation(part, fmt.Sprintf("is %q, which the count already groups by", field))
+			return r.violation(part, fmt.Sprintf("is %q, which the rule already groups by", field))
 		}
 		grouped[field] = struct{}{}
 	}

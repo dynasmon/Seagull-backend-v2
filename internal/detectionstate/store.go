@@ -21,4 +21,9 @@ var (
 // relational table are three implementations, chosen where adapters are chosen.
 type Store interface {
 	Observe(ctx context.Context, key Key, seen Observation, window time.Duration) (State, error)
+
+	// The same fold, handing back what the key holds in event time. Folding and
+	// reading are one operation because they have to be: a window read after a
+	// separate fold is a window another event may have moved in between.
+	Ordered(ctx context.Context, key Key, seen Observation, window time.Duration) (State, []Observation, error)
 }

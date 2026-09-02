@@ -30,7 +30,11 @@ const SchemaVersion = 1
 // found, and merging the two would mean a replay could overwrite somebody's
 // triage.
 func (m Match) Detected(ruleset string, record *eventv1.Event, at time.Time) *detectionv1.Detection {
-	from := []string{record.GetEventId()}
+	from, happened := []string{record.GetEventId()}, record.GetTime().GetEventTime()
+	if m.Rule.Sequence.Correlates() {
+		from = m.Correlated.Events()
+		happened = timestamppb.New(m.Correlated.Stages[len(m.Correlated.Stages)-1].At.UTC())
+	}
 
 	// The origin is copied rather than pointed at: a detection is read after
 	// the event that produced it has been let go, so it may not share memory
@@ -47,11 +51,44 @@ func (m Match) Detected(ruleset string, record *eventv1.Event, at time.Time) *de
 		EventClass:     record.GetEventClass(),
 		Origin:         origin,
 		SourceEventIds: from,
-		EventTime:      record.GetTime().GetEventTime(),
+		EventTime:      happened,
 		DetectedTime:   timestamppb.New(at.UTC()),
 		Evidence:       gathered(m.Evidence),
 		Aggregation:    aggregated(m.Rule.Count, m.Counted),
+		Correlation:    correlated(m.Rule.Sequence, m.Correlated),
 	}
+}
+
+func correlated(sequence Sequence, found Correlated) *detectionv1.Correlation {
+	if !sequence.Correlates() {
+		return nil
+	}
+
+	correlation := &detectionv1.Correlation{
+		Window:      durationpb.New(sequence.Within),
+		ClockSpread: durationpb.New(found.ClockSpread),
+	}
+	for _, stage := range found.Stages {
+		correlation.Stages = append(correlation.Stages, &detectionv1.Stage{
+			Name:      stage.Name,
+			EventId:   stage.Event,
+			EventTime: timestamppb.New(stage.At.UTC()),
+		})
+	}
+	correlation.Group = bindings(found.Group)
+	return correlation
+}
+
+func bindings(group []Binding) []*detectionv1.Grouping {
+	if len(group) == 0 {
+		return nil
+	}
+
+	bound := make([]*detectionv1.Grouping, 0, len(group))
+	for _, one := range group {
+		bound = append(bound, &detectionv1.Grouping{Field: string(one.Field), Value: one.Value, Absent: one.Absent})
+	}
+	return bound
 }
 
 // It is deliberately no part of the identity above. The events named there are
@@ -70,13 +107,7 @@ func aggregated(counting Count, found Counted) *detectionv1.Aggregation {
 		FirstEventTime: timestamppb.New(found.First.UTC()),
 		Saturated:      found.Saturated,
 	}
-	for _, bound := range found.Group {
-		aggregation.Group = append(aggregation.Group, &detectionv1.Grouping{
-			Field:  string(bound.Field),
-			Value:  bound.Value,
-			Absent: bound.Absent,
-		})
-	}
+	aggregation.Group = bindings(found.Group)
 	return aggregation
 }
 

@@ -162,6 +162,21 @@ per event and never more, and `deploy/alerting.yml` is where those become one
 piece of work.
 [ADR 19](docs/decisions/0019-a-rule-that-counts-decides-on-a-window.md).
 
+A rule may instead order what it matches: a failed SSH password from an address,
+then one from the same address that was accepted, inside five minutes, is a guess
+that worked — where either event alone is unremarkable. The stages are what such
+a rule matches with, so it carries a sequence or a match and never both, and the
+match of each stage stays a pure function of one event while the order is read
+out of the same bounded window a count is. Ordering is event time, which means
+the story does not depend on the backbone delivering it in order: an event that
+arrives after a later stage lands where it happened and is what completes the
+story. The detection names the event that satisfied each stage, so an incident
+can be traced back to the events it was made of, and it carries how far apart the
+clocks that timed them stood — because ordering rests on the producer's clock,
+and a story whose clocks disagree by more than it lasted is one the data does not
+order.
+[ADR 20](docs/decisions/0020-a-sequence-is-decided-by-the-window-that-holds-it.md).
+
 ## Getting started
 
 Requires Docker with the Compose plugin and Go 1.25.
@@ -200,7 +215,7 @@ container without going through the environment. The settings that matter most:
 | `SEAGULL_GATEWAY_TLS_CERT`, `SEAGULL_GATEWAY_TLS_KEY`, `SEAGULL_GATEWAY_AGENT_CA` | The gateway's mutual TLS material; there is no plaintext mode. |
 | `SEAGULL_TENANT_ID` | The tenant the gateway stamps on everything it admits. |
 | `SEAGULL_DETECTION_RULES` | The rule tree the engine starts on and falls back to. |
-| `SEAGULL_DETECTION_STATE_WINDOW`, `SEAGULL_DETECTION_STATE_OBSERVATIONS`, `SEAGULL_DETECTION_STATE_KEYS` | What a counting rule may remember: the longest window, the events one key holds, and how many keys at once. |
+| `SEAGULL_DETECTION_STATE_WINDOW`, `SEAGULL_DETECTION_STATE_OBSERVATIONS`, `SEAGULL_DETECTION_STATE_KEYS` | What a counting or ordering rule may remember: the longest window, the events one key holds, and how many keys at once. |
 | `SEAGULL_CONTROL_API_POLICY` | The policy document the control plane is pinned to. |
 | `SEAGULL_CONTROL_API_SESSION_KEY` | Key sessions are signed with; drawn at random when unset. |
 | `SEAGULL_EVENT_STORE_ADDRESS`, `SEAGULL_EVENT_STORE_PASSWORD` | The telemetry store and its credentials. |

@@ -52,7 +52,37 @@ func Restore(row Row) *detectionv1.Detection {
 
 	made.Evidence = evidence(row)
 	made.Aggregation = aggregation(row)
+	made.Correlation = correlation(row)
 	return made
+}
+
+func correlation(row Row) *detectionv1.Correlation {
+	width := min(len(row.CorrelationStageName), len(row.CorrelationStageEventID), len(row.CorrelationStageEventTime))
+	if width == 0 {
+		return nil
+	}
+
+	told := &detectionv1.Correlation{
+		Window:      durationpb.New(time.Duration(row.CorrelationWindowSeconds) * time.Second),
+		ClockSpread: durationpb.New(time.Duration(row.CorrelationClockSpreadMillis) * time.Millisecond),
+	}
+	for index := range width {
+		told.Stages = append(told.Stages, &detectionv1.Stage{
+			Name:      row.CorrelationStageName[index],
+			EventId:   row.CorrelationStageEventID[index],
+			EventTime: moment(row.CorrelationStageEventTime[index]),
+		})
+	}
+
+	grouped := min(len(row.CorrelationGroupField), len(row.CorrelationGroupValue), len(row.CorrelationGroupAbsent))
+	for index := range grouped {
+		told.Group = append(told.Group, &detectionv1.Grouping{
+			Field:  row.CorrelationGroupField[index],
+			Value:  row.CorrelationGroupValue[index],
+			Absent: row.CorrelationGroupAbsent[index],
+		})
+	}
+	return told
 }
 
 // A threshold is at least two, so a stored zero is a detection made by a rule

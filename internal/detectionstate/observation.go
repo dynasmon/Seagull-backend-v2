@@ -24,6 +24,11 @@ type Observation struct {
 	Event string
 	At    time.Time
 	Value string
+
+	// What the platform saw of the clock this event was timed by. Ordering is
+	// decided in event time, which is the producer's, so a window read back for
+	// a sequence carries how far that clock stood from the platform's own.
+	Skew time.Duration
 }
 
 func (o Observation) Validate() error {

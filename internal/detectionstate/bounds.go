@@ -25,6 +25,7 @@ var (
 	ErrNoKeys         = fmt.Errorf("a store holds between 1 and %d keys", MaxKeys)
 	ErrWindowTooLong  = errors.New("a rule may not remember for longer than the store was bounded to")
 	ErrUnreachable    = errors.New("a rule may not count to more than one key of this store holds")
+	ErrUnorderable    = errors.New("a rule may not order more stages than one key of this store holds")
 )
 
 // All three are finite and declared, so the memory a store can occupy is known
@@ -61,6 +62,21 @@ func (b Bounds) Admits(count detection.Count) error {
 		return ErrWindowTooLong
 	case count.AtLeast > b.ObservationsPerKey:
 		return ErrUnreachable
+	}
+	return nil
+}
+
+// The same question for a rule that orders rather than counts. A key holding
+// fewer observations than the sequence has stages could never hold the whole of
+// one, so the story would be assembled and never completed.
+func (b Bounds) Orders(sequence detection.Sequence) error {
+	switch {
+	case !sequence.Correlates():
+		return nil
+	case sequence.Within > b.Window:
+		return ErrWindowTooLong
+	case len(sequence.Stages) > b.ObservationsPerKey:
+		return ErrUnorderable
 	}
 	return nil
 }

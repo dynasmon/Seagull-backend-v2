@@ -32,17 +32,26 @@ func NewKeeper(bounds Bounds) (*Keeper, error) {
 // is event time, so the state is a pure function of the events inside it: the
 // same stream replayed rebuilds it, which is the whole restart strategy.
 func (k *Keeper) Observe(ctx context.Context, key Key, seen Observation, window time.Duration) (State, error) {
+	state, _, err := k.fold(ctx, key, seen, window, false)
+	return state, err
+}
+
+func (k *Keeper) Ordered(ctx context.Context, key Key, seen Observation, window time.Duration) (State, []Observation, error) {
+	return k.fold(ctx, key, seen, window, true)
+}
+
+func (k *Keeper) fold(ctx context.Context, key Key, seen Observation, window time.Duration, read bool) (State, []Observation, error) {
 	if err := ctx.Err(); err != nil {
-		return State{}, err
+		return State{}, nil, err
 	}
 	if err := seen.Validate(); err != nil {
-		return State{}, err
+		return State{}, nil, err
 	}
 	switch {
 	case window <= 0:
-		return State{}, ErrNoWindow
+		return State{}, nil, ErrNoWindow
 	case window > k.bounds.Window:
-		return State{}, ErrWindowTooLong
+		return State{}, nil, ErrWindowTooLong
 	}
 
 	k.mu.Lock()
@@ -58,14 +67,18 @@ func (k *Keeper) Observe(ctx context.Context, key Key, seen Observation, window 
 			k.reclaim()
 		}
 		if len(k.keys) >= k.bounds.Keys {
-			return State{}, ErrAtCapacity
+			return State{}, nil, ErrAtCapacity
 		}
 		entry = &held{ids: make(map[string]struct{})}
 		k.keys[key] = entry
 	}
 	entry.window = window
 
-	return entry.observe(seen, k.bounds.ObservationsPerKey)
+	state, err := entry.observe(seen, k.bounds.ObservationsPerKey)
+	if err != nil || !read {
+		return state, nil, err
+	}
+	return state, slices.Clone(entry.seen), nil
 }
 
 func (k *Keeper) Keys() int {

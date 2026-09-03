@@ -1,7 +1,8 @@
 // Package alertstore is what puts a detection in front of a person: it consumes
-// what the analysis engine decided, raises an alert for anything at or above the
-// severity a person's time is worth, and keeps it somewhere a lifecycle can act
-// on. It evaluates no rule and serves no transport.
+// what the analysis engine decided and, for anything at or above the severity a
+// person's time is worth, opens the work it becomes — an alert for a finding
+// about one event, an incident for a story several of them tell together. It
+// evaluates no rule and serves no transport.
 package alertstore
 
 import (
@@ -14,7 +15,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/alert"
+	"github.com/dynasmon/Seagull-backend-v2/internal/incident"
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
+	incidentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/incident/v1"
 )
 
 const (
@@ -36,17 +39,29 @@ type Source interface {
 	Consume(ctx context.Context, deliver Deliver) error
 }
 
-// Every candidate is decided the same way and answered for one by one: raised,
-// folded into one already open, refused for a cooldown, or recognised as one
-// already recorded. Idempotent on the detection id, which is what lets a batch
-// be retried until the store takes it.
+// Where the work goes, in two ports because the two kinds are not the same: an
+// alert is raised, folded into one already open, refused for a cooldown or
+// recognised as one already recorded, and a story is opened or already open and
+// is decided by no tuning. Both are idempotent on the detection that produced
+// them, which is what lets a batch be retried whole until the store has all of
+// it.
 type Sink interface {
 	Record(ctx context.Context, candidates []alert.Candidate) ([]alert.Outcome, error)
+}
+
+type Stories interface {
+	Open(ctx context.Context, stories []*incidentv1.Incident) ([]incident.Outcome, error)
+}
+
+type work struct {
+	alerts    []alert.Candidate
+	incidents []*incidentv1.Incident
 }
 
 type WriterOptions struct {
 	Source        Source
 	Sink          Sink
+	Stories       Stories
 	Tuning        *alert.Tuning
 	Floor         detectionv1.Severity
 	Metrics       *Metrics
@@ -60,6 +75,7 @@ type WriterOptions struct {
 type Writer struct {
 	source        Source
 	sink          Sink
+	stories       Stories
 	tuning        *alert.Tuning
 	floor         detectionv1.Severity
 	metrics       *Metrics
@@ -76,6 +92,8 @@ func NewWriter(options WriterOptions) (*Writer, error) {
 		return nil, errors.New("the alert writer needs a source")
 	case options.Sink == nil:
 		return nil, errors.New("the alert writer needs somewhere to raise alerts")
+	case options.Stories == nil:
+		return nil, errors.New("the alert writer needs somewhere to open incidents: a story nothing records is a story nobody is told")
 	case options.Tuning == nil:
 		return nil, errors.New("the alert writer needs a tuning: how alerts fold is declared, never assumed")
 	case options.Floor == detectionv1.Severity_SEVERITY_UNSPECIFIED:
@@ -96,6 +114,7 @@ func NewWriter(options WriterOptions) (*Writer, error) {
 	return &Writer{
 		source:        options.Source,
 		sink:          options.Sink,
+		stories:       options.Stories,
 		tuning:        options.Tuning,
 		floor:         options.Floor,
 		metrics:       options.Metrics,
@@ -116,14 +135,13 @@ func (w *Writer) Run(ctx context.Context) error { return w.source.Consume(ctx, w
 // records to its quarantine verbatim, and a second copy from a second consumer
 // would double every poison record without saying anything new about it.
 func (w *Writer) handle(ctx context.Context, records []Record) error {
-	candidates := w.consider(records)
+	found := w.consider(records)
 	w.metrics.observeBatch(len(records))
 
 	delay := w.retryDelay
 	for attempt := 1; ; attempt++ {
-		outcomes, err := w.persist(ctx, candidates)
+		err := w.persist(ctx, found)
 		if err == nil {
-			w.metrics.batchRecorded(outcomes)
 			return nil
 		}
 		if ctx.Err() != nil {
@@ -133,7 +151,8 @@ func (w *Writer) handle(ctx context.Context, records []Record) error {
 		w.metrics.batchRetried()
 		w.logger.Error("alert_batch_not_durable",
 			slog.Int("attempt", attempt),
-			slog.Int("candidates", len(candidates)),
+			slog.Int("candidates", len(found.alerts)),
+			slog.Int("stories", len(found.incidents)),
 			slog.Duration("retry_in", delay),
 			slog.String("error", err.Error()),
 		)
@@ -151,9 +170,9 @@ func (w *Writer) handle(ctx context.Context, records []Record) error {
 // said it does not want is counted by rule and reason and never written, and it
 // stays in the detection store either way, so what was hidden is the work and
 // never the activity.
-func (w *Writer) consider(records []Record) []alert.Candidate {
+func (w *Writer) consider(records []Record) work {
 	at := w.now().UTC()
-	candidates := make([]alert.Candidate, 0, len(records))
+	found := work{alerts: make([]alert.Candidate, 0, len(records))}
 
 	for _, record := range records {
 		var decided detectionv1.Detection
@@ -169,31 +188,54 @@ func (w *Writer) consider(records []Record) []alert.Candidate {
 			w.metrics.suppressed(decided.GetRule().GetId(), hidden.Reason)
 			continue
 		}
+
+		if incident.Correlates(&decided) {
+			story, err := incident.Raise(&decided, at)
+			if err != nil {
+				w.skip(record, SkipUnraisable, err.Error())
+				continue
+			}
+			found.incidents = append(found.incidents, story)
+			continue
+		}
+
 		candidate, err := alert.Consider(&decided, w.tuning, at)
 		if err != nil {
 			w.skip(record, SkipUnraisable, err.Error())
 			continue
 		}
-		candidates = append(candidates, candidate)
+		found.alerts = append(found.alerts, candidate)
 	}
-	return candidates
+	return found
 }
 
-func (w *Writer) persist(ctx context.Context, candidates []alert.Candidate) ([]alert.Outcome, error) {
-	if len(candidates) == 0 {
-		return nil, nil
+func (w *Writer) persist(ctx context.Context, found work) error {
+	if len(found.alerts) == 0 && len(found.incidents) == 0 {
+		return nil
 	}
 
 	writeCtx, cancel := context.WithTimeout(ctx, w.writeTimeout)
 	defer cancel()
-
 	started := time.Now()
-	outcomes, err := w.sink.Record(writeCtx, candidates)
-	if err != nil {
-		return nil, fmt.Errorf("record %d detections: %w", len(candidates), err)
+
+	if len(found.alerts) > 0 {
+		outcomes, err := w.sink.Record(writeCtx, found.alerts)
+		if err != nil {
+			return fmt.Errorf("record %d detections: %w", len(found.alerts), err)
+		}
+		w.metrics.alertsRecorded(outcomes)
 	}
+	if len(found.incidents) > 0 {
+		opened, err := w.stories.Open(writeCtx, found.incidents)
+		if err != nil {
+			return fmt.Errorf("open %d incidents: %w", len(found.incidents), err)
+		}
+		w.metrics.storiesOpened(opened)
+	}
+
+	w.metrics.batchStored()
 	w.metrics.wrote(time.Since(started))
-	return outcomes, nil
+	return nil
 }
 
 func (w *Writer) skip(record Record, reason, detail string) {

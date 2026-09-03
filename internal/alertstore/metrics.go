@@ -6,16 +6,18 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/alert"
+	"github.com/dynasmon/Seagull-backend-v2/internal/incident"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 )
 
 type Metrics struct {
-	alerts  *prometheus.CounterVec
-	batches *prometheus.CounterVec
-	skips   *prometheus.CounterVec
-	hidden  *prometheus.CounterVec
-	batch   prometheus.Histogram
-	write   prometheus.Histogram
+	alerts    *prometheus.CounterVec
+	incidents *prometheus.CounterVec
+	batches   *prometheus.CounterVec
+	skips     *prometheus.CounterVec
+	hidden    *prometheus.CounterVec
+	batch     prometheus.Histogram
+	write     prometheus.Histogram
 }
 
 func NewMetrics(registry *metrics.Registry) *Metrics {
@@ -25,6 +27,12 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Subsystem: "alertstore",
 			Name:      "alerts_total",
 			Help:      "Detections by what became of them: raised, folded, repeated or cooled down.",
+		}, []string{"outcome"}),
+		incidents: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "alertstore",
+			Name:      "incidents_total",
+			Help:      "Correlations by what became of them: opened, or recognised as one already open.",
 		}, []string{"outcome"}),
 		batches: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
@@ -61,6 +69,7 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 	}
 	registry.MustRegister(
 		instruments.alerts,
+		instruments.incidents,
 		instruments.batches,
 		instruments.skips,
 		instruments.hidden,
@@ -74,13 +83,20 @@ func (m *Metrics) observeBatch(records int) { m.batch.Observe(float64(records)) 
 
 func (m *Metrics) batchRetried() { m.batches.WithLabelValues("retried").Inc() }
 
+func (m *Metrics) batchStored() { m.batches.WithLabelValues("stored").Inc() }
+
 // Every outcome is counted separately, so the noise a fold removed and the
 // activity a cooldown held back are both readable rather than inferred: a
 // suppression nobody can count is a suppression that hides something.
-func (m *Metrics) batchRecorded(outcomes []alert.Outcome) {
-	m.batches.WithLabelValues("stored").Inc()
+func (m *Metrics) alertsRecorded(outcomes []alert.Outcome) {
 	for _, outcome := range outcomes {
 		m.alerts.WithLabelValues(outcome.String()).Inc()
+	}
+}
+
+func (m *Metrics) storiesOpened(outcomes []incident.Outcome) {
+	for _, outcome := range outcomes {
+		m.incidents.WithLabelValues(outcome.String()).Inc()
 	}
 }
 

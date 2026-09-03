@@ -476,6 +476,7 @@ func TestTheWriterTurnsRealDetectionsIntoWorkAndReplayingThemAddsNothing(t *test
 		writer, err := alertstore.NewWriter(alertstore.WriterOptions{
 			Source:        oneBatch{records: records},
 			Sink:          store,
+			Stories:       store.Incidents(),
 			Tuning:        folding(t, 15*time.Minute, 0),
 			Floor:         detectionv1.Severity_SEVERITY_MEDIUM,
 			Metrics:       alertstore.NewMetrics(metrics.New("integration-alerts")),

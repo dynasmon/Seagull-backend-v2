@@ -5,14 +5,20 @@ package integration_test
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/alertstore"
 	"github.com/dynasmon/Seagull-backend-v2/internal/incident"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 	"github.com/dynasmon/Seagull-backend-v2/internal/postgres"
+	alertv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/alert/v1"
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	incidentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/incident/v1"
@@ -346,5 +352,77 @@ func TestAListingOfStoriesAnswersTheQuestionAnOperatorActuallyAsks(t *testing.T)
 		if len(page.GetIncidents()) != 1 || page.GetIncidents()[0].GetIncidentId() != one.wanted {
 			t.Errorf("%s answered %d stories", one.what, len(page.GetIncidents()))
 		}
+	}
+}
+
+func TestTheWriterTurnsARealCorrelationIntoAStoryAndNeverIntoAnAlert(t *testing.T) {
+	store := migratedAlertStore(t, alertStoreAddress(t))
+	tenant := isolated(t)
+	at := time.Date(2026, 9, 3, 11, 0, 0, 0, time.UTC)
+
+	records := make([]alertstore.Record, 0, 2)
+	for _, made := range []*detectionv1.Detection{
+		detectedIn(tenant, tenant+"-finding", detectionv1.Severity_SEVERITY_HIGH, at),
+		correlatedIn(tenant, tenant+"-story", at, 0),
+	} {
+		encoded, err := proto.Marshal(made)
+		if err != nil {
+			t.Fatalf("marshal a detection: %v", err)
+		}
+		records = append(records, alertstore.Record{Key: []byte("dev-agent-01"), Value: encoded})
+	}
+
+	build := func() *alertstore.Writer {
+		writer, err := alertstore.NewWriter(alertstore.WriterOptions{
+			Source:        oneBatch{records: records},
+			Sink:          store,
+			Stories:       store.Incidents(),
+			Tuning:        folding(t, 15*time.Minute, 0),
+			Floor:         detectionv1.Severity_SEVERITY_MEDIUM,
+			Metrics:       alertstore.NewMetrics(metrics.New("integration-incidents")),
+			Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+			WriteTimeout:  30 * time.Second,
+			RetryDelay:    100 * time.Millisecond,
+			MaxRetryDelay: time.Second,
+		})
+		if err != nil {
+			t.Fatalf("build the writer: %v", err)
+		}
+		return writer
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if err := build().Run(ctx); err != nil {
+		t.Fatalf("run the writer: %v", err)
+	}
+	if err := build().Run(ctx); err != nil {
+		t.Fatalf("replay the batch: %v", err)
+	}
+
+	stories, err := store.Incidents().Page(ctx, &incidentv1.Query{}, []string{tenant})
+	if err != nil {
+		t.Fatalf("list the stories: %v", err)
+	}
+	if len(stories.GetIncidents()) != 1 {
+		t.Fatalf("one correlation, replayed, left %d incidents", len(stories.GetIncidents()))
+	}
+	told := stories.GetIncidents()[0]
+	if told.GetIncidentId() != tenant+"-story" {
+		t.Errorf("the incident is named %q", told.GetIncidentId())
+	}
+	if len(told.GetStages()) != 2 || told.GetStages()[0].GetEventId() != tenant+"-story-event-1" {
+		t.Error("the incident does not trace back to the events the story is made of")
+	}
+
+	raised, err := store.Page(ctx, &alertv1.Query{}, []string{tenant})
+	if err != nil {
+		t.Fatalf("list the alerts: %v", err)
+	}
+	if len(raised.GetAlerts()) != 1 {
+		t.Fatalf("the batch raised %d alerts", len(raised.GetAlerts()))
+	}
+	if raised.GetAlerts()[0].GetAlertId() != tenant+"-finding" {
+		t.Errorf("the alert raised was %q: a story became somebody's alert", raised.GetAlerts()[0].GetAlertId())
 	}
 }

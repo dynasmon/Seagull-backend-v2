@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -24,6 +25,7 @@ type ServerOptions struct {
 	Registry        *Registry
 	Rulesets        Rulesets
 	Alerts          Alerts
+	Incidents       Incidents
 	Metrics         *Metrics
 	Instrumentation *httpx.Instrumentation
 	Logger          *slog.Logger
@@ -35,12 +37,13 @@ type ServerOptions struct {
 }
 
 type Server struct {
-	sessions *Sessions
-	registry *Registry
-	rulesets Rulesets
-	alerts   Alerts
-	metrics  *Metrics
-	now      func() time.Time
+	sessions  *Sessions
+	registry  *Registry
+	rulesets  Rulesets
+	alerts    Alerts
+	incidents Incidents
+	metrics   *Metrics
+	now       func() time.Time
 }
 
 type route struct {
@@ -87,6 +90,8 @@ func NewHandler(options ServerOptions) (http.Handler, error) {
 		return nil, errors.New("the control listener administers rulesets and needs somewhere to keep them")
 	case options.Alerts == nil:
 		return nil, errors.New("the control listener works alerts and needs somewhere to read and move them")
+	case options.Incidents == nil:
+		return nil, errors.New("the control listener works incidents and needs somewhere to read and move them")
 	case options.Metrics == nil:
 		return nil, errors.New("the control listener needs metrics")
 	case options.Instrumentation == nil:
@@ -97,12 +102,13 @@ func NewHandler(options ServerOptions) (http.Handler, error) {
 	}
 
 	server := &Server{
-		sessions: options.Sessions,
-		registry: options.Registry,
-		rulesets: options.Rulesets,
-		alerts:   options.Alerts,
-		metrics:  options.Metrics,
-		now:      options.Now,
+		sessions:  options.Sessions,
+		registry:  options.Registry,
+		rulesets:  options.Rulesets,
+		alerts:    options.Alerts,
+		incidents: options.Incidents,
+		metrics:   options.Metrics,
+		now:       options.Now,
 	}
 
 	mux := http.NewServeMux()
@@ -125,7 +131,7 @@ func (s *Server) routes() []route {
 		{http.MethodGet, SessionPath, "session_describe", Session(), s.describeSession()},
 		{http.MethodDelete, SessionPath, "session_revoke", Session(), s.revokeSession()},
 		{http.MethodGet, SessionsPath, "session_list", Session(), s.listSessions()},
-	}, append(rulesetRoutes(s), alertRoutes(s)...)...)
+	}, slices.Concat(rulesetRoutes(s), alertRoutes(s), incidentRoutes(s))...)
 }
 
 func (s *Server) descriptor() http.Handler {

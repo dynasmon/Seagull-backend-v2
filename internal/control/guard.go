@@ -39,6 +39,11 @@ const (
 	CodeHeldByAnother     = "alert_held_by_another"
 	CodeBadCursor         = "invalid_cursor"
 	CodeAlertsUnavailable = "alerts_unavailable"
+
+	CodeUnknownIncident      = "unknown_incident"
+	CodeIncidentMoved        = "incident_moved"
+	CodeStoryHeldByAnother   = "incident_held_by_another"
+	CodeIncidentsUnavailable = "incidents_unavailable"
 )
 
 // No value of this type means "anybody": the zero value refuses, so a route

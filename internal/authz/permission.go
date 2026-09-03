@@ -15,12 +15,13 @@ const (
 	Detections Resource = "detections"
 	Rulesets   Resource = "rulesets"
 	Alerts     Resource = "alerts"
+	Incidents  Resource = "incidents"
 	Agents     Resource = "agents"
 	Policies   Resource = "policies"
 	Sessions   Resource = "sessions"
 )
 
-var resources = []Resource{Events, Detections, Rulesets, Alerts, Agents, Policies, Sessions}
+var resources = []Resource{Events, Detections, Rulesets, Alerts, Incidents, Agents, Policies, Sessions}
 
 func (r Resource) Valid() bool { return slices.Contains(resources, r) }
 

@@ -29,6 +29,7 @@ func policy(t *testing.T) *authz.Policy {
 		{Resource: authz.Events, Action: authz.Read},
 		{Resource: authz.Detections, Action: authz.Read},
 		{Resource: authz.Alerts, Action: authz.Read},
+		{Resource: authz.Incidents, Action: authz.Read},
 	})
 	if err != nil {
 		t.Fatalf("build a role: %v", err)
@@ -37,6 +38,8 @@ func policy(t *testing.T) *authz.Policy {
 		{Resource: authz.Detections, Action: authz.Read},
 		{Resource: authz.Alerts, Action: authz.Read},
 		{Resource: authz.Alerts, Action: authz.Write},
+		{Resource: authz.Incidents, Action: authz.Read},
+		{Resource: authz.Incidents, Action: authz.Write},
 	})
 	if err != nil {
 		t.Fatalf("build a role: %v", err)
@@ -55,6 +58,9 @@ func policy(t *testing.T) *authz.Policy {
 		{Resource: authz.Alerts, Action: authz.Read},
 		{Resource: authz.Alerts, Action: authz.Write},
 		{Resource: authz.Alerts, Action: authz.Delete},
+		{Resource: authz.Incidents, Action: authz.Read},
+		{Resource: authz.Incidents, Action: authz.Write},
+		{Resource: authz.Incidents, Action: authz.Delete},
 		{Resource: authz.Sessions, Action: authz.Read},
 		{Resource: authz.Sessions, Action: authz.Delete},
 	})

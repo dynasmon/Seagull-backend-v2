@@ -93,6 +93,7 @@ func writer(ctx context.Context) error {
 	component, err := alertstore.NewWriter(alertstore.WriterOptions{
 		Source:        source{consumer: consumer},
 		Sink:          store,
+		Stories:       store.Incidents(),
 		Tuning:        tuning,
 		Floor:         floor,
 		Metrics:       alertstore.NewMetrics(platform.Metrics()),

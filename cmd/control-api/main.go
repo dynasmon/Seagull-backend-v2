@@ -114,6 +114,7 @@ func controlAPI(ctx context.Context) error {
 		Registry:        registry,
 		Rulesets:        rulesets{catalogue: published.catalogue, publisher: published.publisher},
 		Alerts:          raised,
+		Incidents:       raised.Incidents(),
 		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),

@@ -42,6 +42,17 @@ written, with the line and the part that is wrong. Rules carry severity, ATT&CK
 technique, false-positive guidance and provenance, and each one travels with the
 cases it was written for, which the same evaluator checks.
 
+### Incidents and correlation output
+
+Event, detection, alert and incident are four records with four owners, not four
+names for one row. A detection states that a rule matched; an alert is one
+detection somebody owns; an incident is what a correlation becomes when a person
+has to answer for it, named by the detection that told the story and carrying one
+event per stage, so it can be traced back to what it was made of. It has a
+lifecycle of its own and nothing an operator does to it writes to the events or
+the detection behind it. How far the platform vouches for the order a story rests
+on is measured from the clocks that timed it rather than declared by the rule.
+
 ### Ruleset management
 
 Rulesets are administered through the control plane and published to a compacted
@@ -92,11 +103,11 @@ Seagull Agent
              ▼                 ┌─────────┴─────────┐
  security.events.quarantine    ▼                   ▼
                         detection-writer      alert-writer
-                               │            above a severity floor, folded
-                               ▼            on a declared key, suppressed
+                               │            above a severity floor: a finding
+                               ▼            becomes an alert, a story an incident
                   ClickHouse security_detections   │
                                                    ▼
-                                     PostgreSQL alerts · trail · occurrences
+                     PostgreSQL alerts · incidents · trails · occurrences
                                                     ▲
  control-api ───────────────────────────────────────┘
    │   open · acknowledged · in investigation · resolved / false positive
@@ -116,8 +127,8 @@ Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 | `analysis-engine` | Reads the event stream under its own group, routes and normalises, and decides events against the ruleset it is pinned to. |
 | `event-writer` | Makes admitted telemetry queryable, quarantining what it cannot store. |
 | `detection-writer` | Makes a detection queryable, on the same terms and as a consumer of its own. |
-| `alert-writer` | Opens a piece of work from a detection at or above a severity floor, folding what shares a key and suppressing what the estate declared it does not want. It inserts and never updates. |
-| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, and the alert lifecycle. |
+| `alert-writer` | Opens the work a detection at or above a severity floor becomes: an alert for a finding about one event, folded on a declared key, or an incident for a story several events told. It inserts and never updates. |
+| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, and the alert and incident lifecycles. |
 | `query-api` | The read plane, and the only reader of the analytical store. |
 | `backbone-migrator`, `store-migrator`, `alert-migrator` | Apply the topic topology, the analytical schema and the relational schema, then exit. Nothing migrates on the way to serving traffic. |
 
@@ -176,6 +187,18 @@ clocks that timed them stood — because ordering rests on the producer's clock,
 and a story whose clocks disagree by more than it lasted is one the data does not
 order.
 [ADR 20](docs/decisions/0020-a-sequence-is-decided-by-the-window-that-holds-it.md).
+
+A story that several events tell is a different piece of work from a finding
+about one of them, so a detection carrying a correlation opens an incident and
+never an alert. It is named by that detection the way an alert is named by the
+one that raised it, so a replay finds the story it already opened; it carries one
+event per stage and the group that made them one story, so the trace to its
+component events and detection is on the record rather than in a join; and it has
+a lifecycle of its own, granted separately, whose moves never touch what the
+analysis engine wrote. How far the order can be trusted is a measurement rather
+than a number somebody tuned: the spread of the clocks that timed the story,
+against its own span and against the window the rule looked through.
+[ADR 21](docs/decisions/0021-an-incident-is-a-correlation-somebody-owns.md).
 
 ## Getting started
 
@@ -251,9 +274,10 @@ drops a batch it had already answered for.
 | [Configuration reference](docs/configuration.md) | Every setting, the acknowledgement contract, the topology, the store. |
 | [Seagull-contracts](https://github.com/dynasmon/Seagull-contracts) | The messages agents, the platform and the portal exchange. |
 
-Correlation, alerts and incidents are not implemented. Detection is stateless:
-every rule is decided from one event, which is what keeps it replayable while
-the state model is still being designed.
+Agent enrollment and registry, inventory, vulnerability matching, response
+actions and Sigma import are not implemented. Detection is stateless unless a
+rule asks otherwise: a rule that counts or orders its events reads a bounded
+window of the backbone in event time, which is what keeps both replayable.
 
 ## License
 

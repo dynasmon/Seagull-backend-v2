@@ -268,6 +268,176 @@ func TestACountingRuleDecidesOnceTheWindowReachesItsThreshold(t *testing.T) {
 	}
 }
 
+// The story crosses the real backbone in the order it did not happen in: the
+// success is admitted first and the failure it followed arrives after it, so
+// what is proven here is that ordering is event time rather than delivery.
+func TestASequenceIsDecidedOffTheBackboneWhateverOrderItArrivesIn(t *testing.T) {
+	addresses := brokers(t)
+	topic := temporaryTopic(t, addresses)
+	found := temporaryTopic(t, addresses)
+	group := fmt.Sprintf("analysis-engine-%d", time.Now().UnixNano())
+
+	admitStory(t, addresses, topic)
+
+	consumer, err := broker.NewConsumer(broker.ConsumerConfig{
+		Brokers:      addresses,
+		Topic:        topic,
+		Group:        group,
+		ClientID:     "integration-test",
+		MaxRecords:   500,
+		FetchMaxWait: 200 * time.Millisecond,
+		Metrics:      broker.NewConsumerMetrics(metrics.New("integration")),
+	})
+	if err != nil {
+		t.Fatalf("build the consumer: %v", err)
+	}
+	t.Cleanup(consumer.Close)
+
+	detections, err := broker.NewDetections(broker.Config{
+		Brokers:  addresses,
+		Topic:    found,
+		ClientID: "integration-test",
+	})
+	if err != nil {
+		t.Fatalf("build the detection publisher: %v", err)
+	}
+	t.Cleanup(detections.Close)
+
+	engine, err := analysis.NewEngine(analysis.EngineOptions{
+		Source:         analysedBy(consumer),
+		Rules:          pinnedTo(t, guessingThatSucceeded(t)),
+		State:          remembering(t),
+		Detections:     detections,
+		Metrics:        analysis.NewMetrics(metrics.New("integration")),
+		Logger:         slog.New(slog.NewJSONHandler(&bytes.Buffer{}, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		PublishTimeout: 30 * time.Second,
+		RetryDelay:     100 * time.Millisecond,
+		MaxRetryDelay:  time.Second,
+	})
+	if err != nil {
+		t.Fatalf("build the engine: %v", err)
+	}
+
+	running, stop := context.WithCancel(context.Background())
+	defer stop()
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- engine.Run(running) }()
+
+	awaitCommitted(t, addresses, topic, group, 2)
+
+	stop()
+	if err := <-stopped; err != nil && !isCancellation(err) {
+		t.Fatalf("the engine stopped with %v", err)
+	}
+
+	records := consume(t, addresses, found, 1)
+	if len(records) != 1 {
+		t.Fatalf("a failure and a success produced %d detections", len(records))
+	}
+
+	var made detectionv1.Detection
+	if err := proto.Unmarshal(records[0].Value, &made); err != nil {
+		t.Fatalf("a record on the detection topic is not a detection: %v", err)
+	}
+
+	told := made.GetCorrelation()
+	if len(told.GetStages()) != 2 {
+		t.Fatalf("the detection reports %d stages", len(told.GetStages()))
+	}
+	if name := told.GetStages()[0].GetName(); name != "a failed password" {
+		t.Errorf("the first stage reads %q", name)
+	}
+	if first, second := told.GetStages()[0].GetEventTime().AsTime(), told.GetStages()[1].GetEventTime().AsTime(); !first.Before(second) {
+		t.Errorf("the story runs from %s to %s", first, second)
+	}
+	if events := made.GetSourceEventIds(); len(events) != 2 {
+		t.Errorf("the detection names %d events; a story of two stages is made of two", len(events))
+	}
+	if told.GetWindow().AsDuration() != 5*time.Minute {
+		t.Errorf("the detection reports a window of %s", told.GetWindow().AsDuration())
+	}
+	if len(told.GetGroup()) != 2 || told.GetGroup()[0].GetValue() != "203.0.113.10" {
+		t.Errorf("the story is grouped by %v", told.GetGroup())
+	}
+}
+
+func admitStory(t *testing.T, addresses []string, topic string) {
+	t.Helper()
+
+	publisher, err := broker.NewPublisher(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	if err != nil {
+		t.Fatalf("build the publisher: %v", err)
+	}
+	t.Cleanup(publisher.Close)
+
+	admitter, err := ingest.NewAdmitter(publisher, ingest.Policy{
+		Gateway:           "gateway-integration",
+		TenantID:          tenant(t),
+		MaxEventsPerBatch: 100,
+		Event:             event.Policy{MaxClockSkew: 5 * time.Minute, MaxAge: 168 * time.Hour},
+	}, ingest.NewMetrics(metrics.New("integration")))
+	if err != nil {
+		t.Fatalf("build the admitter: %v", err)
+	}
+
+	at := time.Now().UTC()
+	batch := fixtures.Batch("batch-sequence")
+	batch.Events = append(batch.Events,
+		fixtures.SSHAuthentication{
+			EventID:  "sequence-accepted",
+			At:       at,
+			Outcome:  eventv1.Outcome_OUTCOME_SUCCESS,
+			Sequence: 1,
+		}.Event(),
+		fixtures.SSHAuthentication{
+			EventID:  "sequence-failed",
+			At:       at.Add(-time.Minute),
+			Outcome:  eventv1.Outcome_OUTCOME_FAILURE,
+			Sequence: 2,
+		}.Event(),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := admitter.Admit(ctx, agentidentity.Identity{AgentID: "web-01"}, batch); err != nil {
+		t.Fatalf("admit the batch: %v", err)
+	}
+}
+
+func guessingThatSucceeded(t *testing.T) *detection.Program {
+	t.Helper()
+
+	outcome := func(held string) detection.Expression {
+		return detection.Predicate{
+			Field:    "authentication.outcome",
+			Operator: detection.Equals,
+			Values:   []detection.Value{detection.TextValue(held)},
+		}
+	}
+	program, err := detection.Compile(detection.Rule{
+		ID:          "authentication.guessing_that_succeeded",
+		Revision:    1,
+		Name:        "Authentication guessing that succeeded",
+		Description: "A failure from an address against an agent, then one from the same address that was accepted.",
+		Class:       eventv1.EventClass_EVENT_CLASS_AUTHENTICATION,
+		Sequence: detection.Sequence{
+			Within:  5 * time.Minute,
+			GroupBy: []detection.Field{"authentication.network.source.ip", "origin.agent_id"},
+			Stages: []detection.Stage{
+				{Name: "a failed password", Match: outcome("failure")},
+				{Name: "one that was accepted", Match: outcome("success")},
+			},
+		},
+		Severity: detection.Critical,
+		Status:   detection.Active,
+	})
+	if err != nil {
+		t.Fatalf("compile the rule: %v", err)
+	}
+	return program
+}
+
 func repeatedFailures(t *testing.T) *detection.Program {
 	t.Helper()
 

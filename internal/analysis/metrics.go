@@ -27,6 +27,7 @@ type Metrics struct {
 
 	observations *prometheus.CounterVec
 	floors       prometheus.Counter
+	skewed       prometheus.Counter
 }
 
 // Created once per process and handed to the engine, as the writer does it.
@@ -119,6 +120,12 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "state_saturated_total",
 			Help:      "Observations folded into a key that was already full, whose count is therefore a floor.",
 		}),
+		skewed: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "detection",
+			Name:      "sequences_unordered_total",
+			Help:      "Sequences whose events were timed by clocks disagreeing by more than the sequence itself lasted, so the order is reported and not vouched for.",
+		}),
 	}
 	registry.MustRegister(
 		instruments.events,
@@ -135,6 +142,7 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 		instruments.batches,
 		instruments.observations,
 		instruments.floors,
+		instruments.skewed,
 	)
 	return instruments
 }
@@ -216,3 +224,5 @@ func (m *Metrics) refused(reason string) {
 func (m *Metrics) observed(outcome string) { m.observations.WithLabelValues(outcome).Inc() }
 
 func (m *Metrics) saturated() { m.floors.Inc() }
+
+func (m *Metrics) unordered() { m.skewed.Inc() }

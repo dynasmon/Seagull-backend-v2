@@ -28,6 +28,10 @@ func keeping(bounds detectionstate.Bounds, running *ruleset.Snapshot) (*detectio
 		if err := bounds.Admits(rule.Count); err != nil {
 			return nil, fmt.Errorf("rule %q counts %d inside %s: %w", rule.ID, rule.Count.AtLeast, rule.Count.Within, err)
 		}
+		if err := bounds.Orders(rule.Sequence); err != nil {
+			return nil, fmt.Errorf("rule %q orders %d stages inside %s: %w",
+				rule.ID, len(rule.Sequence.Stages), rule.Sequence.Within, err)
+		}
 	}
 	return keeper, nil
 }

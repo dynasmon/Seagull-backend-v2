@@ -55,6 +55,20 @@ func (e *Engine) detect(ctx context.Context, record *eventv1.Event, route Route,
 	evaluated := 0
 	for program := range rules.For(record.GetEventClass()) {
 		evaluated++
+
+		if program.Correlates() {
+			match := detection.Match{Rule: program.Rule()}
+			complete, err := e.completed(ctx, program, &match, record)
+			if err != nil {
+				e.metrics.evaluated(route, evaluated, time.Since(started))
+				return nil, err
+			}
+			if complete {
+				made = append(made, e.detected(match, rules.ID(), record, route, position, at))
+			}
+			continue
+		}
+
 		match, held := program.Decide(record)
 		if !held {
 			continue
@@ -108,6 +122,15 @@ func (e *Engine) detected(match detection.Match, ruleset string, record *eventv1
 			slog.Int("count", match.Counted.Count),
 			slog.Int("threshold", match.Rule.Count.AtLeast),
 			slog.Duration("window", match.Rule.Count.Within),
+		)
+	}
+	if match.Rule.Sequence.Correlates() {
+		told = append(told,
+			slog.String("stages", match.Rule.Sequence.Named()),
+			slog.Duration("span", match.Correlated.Span()),
+			slog.Duration("clock_spread", match.Correlated.ClockSpread),
+			slog.Bool("ordered", match.Correlated.Ordered()),
+			slog.Duration("window", match.Rule.Sequence.Within),
 		)
 	}
 

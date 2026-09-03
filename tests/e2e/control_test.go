@@ -34,13 +34,16 @@ roles:
       - events:read
       - detections:read
       - alerts:read
+      - incidents:read
 
   - name: responder
-    description: works alerts through their lifecycle
+    description: works alerts and incidents through their lifecycle
     permissions:
       - detections:read
       - alerts:read
       - alerts:write
+      - incidents:read
+      - incidents:write
 
   - name: engineer
     description: writes and publishes the rules the engine runs
@@ -57,6 +60,9 @@ roles:
       - alerts:read
       - alerts:write
       - alerts:delete
+      - incidents:read
+      - incidents:write
+      - incidents:delete
       - sessions:read
       - sessions:delete
 
@@ -177,6 +183,7 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 		Registry:        registry,
 		Rulesets:        &recordingRulesets{},
 		Alerts:          newRaisedAlerts(),
+		Incidents:       newOpenedIncidents(),
 		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),

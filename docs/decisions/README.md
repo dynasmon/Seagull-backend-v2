@@ -24,3 +24,4 @@ rediscovered by reading the code.
 - [18. Detection state is a bounded window of the backbone, in event time](0018-detection-state-is-a-bounded-window.md)
 - [19. A rule that counts decides on the window, once per event, and says what it counted](0019-a-rule-that-counts-decides-on-a-window.md)
 - [20. A sequence is a rule whose stages are ordered in event time, decided once per window that holds it](0020-a-sequence-is-decided-by-the-window-that-holds-it.md)
+- [21. An incident is a correlation somebody owns, and how far its order can be trusted is measured](0021-an-incident-is-a-correlation-somebody-owns.md)

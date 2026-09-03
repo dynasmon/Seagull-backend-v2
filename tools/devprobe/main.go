@@ -18,12 +18,14 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/control"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	"github.com/dynasmon/Seagull-backend-v2/internal/hunt"
+	"github.com/dynasmon/Seagull-backend-v2/internal/incident"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
 	"github.com/dynasmon/Seagull-backend-v2/internal/protocol"
 	alertv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/alert/v1"
 	controlv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/control/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	huntv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/hunt/v1"
+	incidentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/incident/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
 )
 
@@ -31,6 +33,7 @@ func main() {
 	endpoint := flag.String("endpoint", "https://127.0.0.1:8443", "gateway base URL")
 	huntEndpoint := flag.String("hunt", "", "query plane base URL; asks what was stored instead of sending a batch")
 	alertEndpoint := flag.String("alerts", "", "control plane base URL; works an alert through its lifecycle instead of sending a batch")
+	incidentEndpoint := flag.String("incidents", "", "control plane base URL; reads a correlated story back to its events and works it")
 	window := flag.Duration("window", time.Hour, "how far back a hunt looks")
 	pki := flag.String("pki", ".local/pki", "directory holding the development material")
 	batchID := flag.String("batch-id", "probe-0001", "batch identifier")
@@ -44,6 +47,9 @@ func main() {
 	}
 	if *alertEndpoint != "" {
 		run = func() error { return triage(*alertEndpoint, *pki) }
+	}
+	if *incidentEndpoint != "" {
+		run = func() error { return investigate(*incidentEndpoint, *pki) }
 	}
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "devprobe: %v\n", err)
@@ -117,25 +123,12 @@ func report(path string, body []byte) error {
 // every request against the policy, so this speaks as the administrator
 // `make dev-pki` mints and carries the token it is given.
 func triage(endpoint, pki string) error {
-	client, err := speaker(pki, "admin")
+	client, token, err := authenticate(endpoint, pki)
 	if err != nil {
 		return err
 	}
 
-	status, body, err := post(client, endpoint+control.SessionPath, control.ContentType, &controlv1.SessionRequest{})
-	if err != nil {
-		return err
-	}
-	if status != http.StatusCreated {
-		return refused("session", status, body)
-	}
-	var opened controlv1.SessionResponse
-	if err := proto.Unmarshal(body, &opened); err != nil {
-		return err
-	}
-	fmt.Printf("session %s for %s\n", opened.GetSession().GetId(), opened.GetSession().GetGrant().GetSubject())
-
-	status, body, err = send(client, http.MethodPost, endpoint+control.AlertSearch, opened.GetToken(),
+	status, body, err := send(client, http.MethodPost, endpoint+control.AlertSearch, token,
 		&alertv1.Query{States: []alertv1.State{alertv1.State_STATE_OPEN}, Limit: 5})
 	if err != nil {
 		return err
@@ -156,7 +149,107 @@ func triage(endpoint, pki string) error {
 	if len(page.GetAlerts()) == 0 {
 		return nil
 	}
-	return walk(client, endpoint, opened.GetToken(), page.GetAlerts()[0].GetAlertId())
+	return walk(client, endpoint, token, page.GetAlerts()[0].GetAlertId())
+}
+
+func authenticate(endpoint, pki string) (*http.Client, string, error) {
+	client, err := speaker(pki, "admin")
+	if err != nil {
+		return nil, "", err
+	}
+
+	status, body, err := post(client, endpoint+control.SessionPath, control.ContentType, &controlv1.SessionRequest{})
+	if err != nil {
+		return nil, "", err
+	}
+	if status != http.StatusCreated {
+		return nil, "", refused("session", status, body)
+	}
+	var opened controlv1.SessionResponse
+	if err := proto.Unmarshal(body, &opened); err != nil {
+		return nil, "", err
+	}
+	fmt.Printf("session %s for %s\n", opened.GetSession().GetId(), opened.GetSession().GetGrant().GetSubject())
+	return client, opened.GetToken(), nil
+}
+
+// A story needs a rule that orders events and two events to order, so this
+// answers after `-outcome failure` and then `-outcome success` have both
+// reached the gateway from the same address inside the rule's window.
+func investigate(endpoint, pki string) error {
+	client, token, err := authenticate(endpoint, pki)
+	if err != nil {
+		return err
+	}
+
+	status, body, err := send(client, http.MethodPost, endpoint+control.IncidentSearch, token,
+		&incidentv1.Query{States: []incidentv1.State{incidentv1.State_STATE_OPEN}, Limit: 5})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return refused("search", status, body)
+	}
+	var page incidentv1.Page
+	if err := proto.Unmarshal(body, &page); err != nil {
+		return err
+	}
+
+	fmt.Printf("open incidents %d\n", len(page.GetIncidents()))
+	for _, one := range page.GetIncidents() {
+		fmt.Printf("  %s %s %s %s confidence=%s\n", one.GetRaisedAt().AsTime().Format(time.RFC3339),
+			one.GetIncidentId(), one.GetRule().GetId(), one.GetSeverity(), incident.Level(one.GetConfidence()))
+		for _, stage := range one.GetStages() {
+			fmt.Printf("    %s %s %s\n", stage.GetEventTime().AsTime().Format(time.RFC3339),
+				stage.GetName(), stage.GetEventId())
+		}
+		for _, about := range one.GetGroup() {
+			fmt.Printf("    about %s=%s\n", about.GetField(), about.GetValue())
+		}
+	}
+	if len(page.GetIncidents()) == 0 {
+		return nil
+	}
+	return follow(client, endpoint, token, page.GetIncidents()[0].GetIncidentId())
+}
+
+func follow(client *http.Client, endpoint, token, id string) error {
+	for _, step := range []*incidentv1.TransitionRequest{
+		{To: incidentv1.State_STATE_ACKNOWLEDGED},
+		{To: incidentv1.State_STATE_IN_INVESTIGATION, Note: "checking what the session did after it was accepted"},
+		{To: incidentv1.State_STATE_RESOLVED, Note: "the account was rotated"},
+	} {
+		status, body, err := send(client, http.MethodPost, endpoint+"/v1/incidents/"+id+"/transition", token, step)
+		if err != nil {
+			return err
+		}
+		if status != http.StatusOK {
+			return refused("transition", status, body)
+		}
+		var moved incidentv1.Incident
+		if err := proto.Unmarshal(body, &moved); err != nil {
+			return err
+		}
+		fmt.Printf("  -> %s at revision %d by %s\n", moved.GetState(), moved.GetRevision(), moved.GetChangedBy())
+	}
+
+	status, body, err := send(client, http.MethodGet, endpoint+"/v1/incidents/"+id+"/history", token, nil)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return refused("history", status, body)
+	}
+	var trail incidentv1.History
+	if err := proto.Unmarshal(body, &trail); err != nil {
+		return err
+	}
+
+	fmt.Printf("trail %d\n", len(trail.GetTransitions()))
+	for _, line := range trail.GetTransitions() {
+		fmt.Printf("  %d %s -> %s by %s %q\n", line.GetRevision(), line.GetFrom(), line.GetTo(), line.GetActor(), line.GetNote())
+	}
+	return nil
 }
 
 func walk(client *http.Client, endpoint, token, id string) error {

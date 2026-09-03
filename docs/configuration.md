@@ -126,6 +126,39 @@ rule matched, and `detection_state_keys` against `detection_state_key_ceiling`
 is the headroom. See
 [ADR 19](decisions/0019-a-rule-that-counts-decides-on-a-window.md).
 
+A rule may instead order what it matches, which turns a set of matches into a
+story. A rule carries a `sequence` or a `match` and never both, because the
+stages are what it matches with:
+
+```yaml
+sequence:
+  within: 5m                  # event time, never the clock
+  group_by:                   # what makes two events part of the same story
+    - authentication.network.source.ip
+    - origin.agent_id
+  stages:                     # between 2 and 8, satisfied in this order
+    - name: a failed password
+      match:
+        field: authentication.outcome
+        equals: failure
+    - name: one that was accepted
+      match:
+        field: authentication.outcome
+        equals: success
+```
+
+The window is bounded by `SEAGULL_DETECTION_STATE_WINDOW` and a story of more
+stages than `SEAGULL_DETECTION_STATE_OBSERVATIONS` holds stops the process at
+startup, exactly as an unreachable threshold does. Ordering is event time, so an
+event that arrives after a later stage still lands where it happened and still
+completes the story, and one older than the window is refused rather than folded
+into a window reaching further back than the rule asked for. A story is decided
+once per window that holds it rather than once per event that keeps it true.
+`detection_sequences_unordered_total` counts the stories whose events were timed
+by clocks disagreeing by more than the story itself lasted; the detection carries
+that spread, so an analyst can see the order was not established by the data. See
+[ADR 20](decisions/0020-a-sequence-is-decided-by-the-window-that-holds-it.md).
+
 ### event-writer
 
 | Variable | Default | Meaning |

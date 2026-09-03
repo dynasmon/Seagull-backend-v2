@@ -35,9 +35,10 @@ func main() {
 	pki := flag.String("pki", ".local/pki", "directory holding the development material")
 	batchID := flag.String("batch-id", "probe-0001", "batch identifier")
 	eventID := flag.String("event-id", "99999999-8888-4777-8666-555555555555", "event identifier")
+	outcome := flag.String("outcome", "failure", "authentication outcome the sample event carries: failure or success")
 	flag.Parse()
 
-	run := func() error { return probe(*endpoint, *pki, *batchID, *eventID) }
+	run := func() error { return probe(*endpoint, *pki, *batchID, *eventID, *outcome) }
 	if *huntEndpoint != "" {
 		run = func() error { return ask(*huntEndpoint, *pki, *window) }
 	}
@@ -277,13 +278,13 @@ func speaker(pki, name string) (*http.Client, error) {
 	}, nil
 }
 
-func probe(endpoint, pki, batchID, eventID string) error {
+func probe(endpoint, pki, batchID, eventID, outcome string) error {
 	client, err := speaker(pki, "agent")
 	if err != nil {
 		return err
 	}
 
-	encoded, err := proto.Marshal(sample(batchID, eventID))
+	encoded, err := proto.Marshal(sample(batchID, eventID, outcome))
 	if err != nil {
 		return err
 	}
@@ -322,8 +323,12 @@ func probe(endpoint, pki, batchID, eventID string) error {
 	return nil
 }
 
-func sample(batchID, eventID string) *ingestv1.EventBatch {
+func sample(batchID, eventID, outcome string) *ingestv1.EventBatch {
 	now := timestamppb.New(time.Now().UTC())
+	held, reason := eventv1.Outcome_OUTCOME_FAILURE, "failed_password"
+	if outcome == "success" {
+		held, reason = eventv1.Outcome_OUTCOME_SUCCESS, "accepted_password"
+	}
 	return &ingestv1.EventBatch{
 		BatchId:         batchID,
 		ProtocolVersion: protocol.Version,
@@ -339,8 +344,8 @@ func sample(batchID, eventID string) *ingestv1.EventBatch {
 			Collection: &eventv1.Collection{Collector: "ssh.authlog", Source: "/var/log/auth.log", Sequence: 1},
 			Body: &eventv1.Event_Authentication{Authentication: &eventv1.Authentication{
 				Activity:      eventv1.Authentication_ACTIVITY_LOGON,
-				Outcome:       eventv1.Outcome_OUTCOME_FAILURE,
-				OutcomeReason: "failed_password",
+				Outcome:       held,
+				OutcomeReason: reason,
 				Method:        "password",
 				User:          &eventv1.User{Name: "root"},
 				Service:       &eventv1.Service{Name: "sshd", Protocol: "ssh"},
@@ -349,7 +354,7 @@ func sample(batchID, eventID string) *ingestv1.EventBatch {
 					Destination: &eventv1.Endpoint{Ip: "198.51.100.5", Port: 22},
 					Transport:   eventv1.Transport_TRANSPORT_TCP,
 				},
-				RawRecord: "Failed password for root from 203.0.113.10 port 54321 ssh2",
+				RawRecord: fmt.Sprintf("%s password for root from 203.0.113.10 port 54321 ssh2", outcome),
 			}},
 		}},
 	}

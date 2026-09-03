@@ -1,10 +1,10 @@
 schema_version: 1
 
 # The ruleset the local stack runs, so that `make up` detects something end to
-# end. It is two rules and not a catalogue: each rule is a security decision, and
-# a rule nobody chose is noise somebody has to turn off. The second counts, and
-# is here because a threshold is the one part of a rule the same event cannot
-# demonstrate on its own.
+# end. It is three rules and not a catalogue: each rule is a security decision,
+# and a rule nobody chose is noise somebody has to turn off. The second counts
+# and the third orders, because a threshold and a story are the two parts of a
+# rule that one event cannot demonstrate on its own.
 rules:
   - id: ssh.failed_password_from_outside
     revision: 1
@@ -183,3 +183,81 @@ rules:
           authentication.outcome: failure
           authentication.service.protocol: ssh
           authentication.network.source.ip: 10.0.0.5
+
+  - id: ssh.password_guessing_that_succeeded
+    revision: 1
+    name: SSH password guessing that succeeded
+    description: >-
+      A password authentication over SSH failed for an address against an agent,
+      and then one from the same address against the same agent was accepted
+      inside five minutes. The failure alone is noise and the success alone is
+      somebody logging in; in that order they are a guess that worked.
+    class: authentication
+    severity: critical
+    status: active
+    technique:
+      tactic: credential_access
+      id: T1110.001
+      name: "Brute Force: Password Guessing"
+    false_positives: >-
+      A person who mistyped once and then got it right, which is the common case
+      and is why the rule wants both events against the same agent from the same
+      address rather than either on its own. Read the count of failures before
+      the success: one is a typo and forty is not.
+    response: >-
+      Treat the account as compromised until proven otherwise. The detection
+      names both events, so hunt the source address for what the session did
+      after it was accepted rather than for how it got in.
+    tags: [ssh, credential_access, bruteforce]
+    references:
+      - https://attack.mitre.org/techniques/T1110/001/
+    sequence:
+      within: 5m
+      group_by: [authentication.network.source.ip, origin.agent_id]
+      stages:
+        - name: a failed password
+          match:
+            all:
+              - field: authentication.outcome
+                equals: failure
+              - field: authentication.service.protocol
+                equals: ssh
+        - name: one that was accepted
+          match:
+            all:
+              - field: authentication.outcome
+                equals: success
+              - field: authentication.service.protocol
+                equals: ssh
+    tests:
+      # A case says what the rule reads of one event. Which events make a story
+      # and in what order is the engine's and is proven once, so what is written
+      # here is which events are part of one at all.
+      - name: a failed password over ssh opens the story
+        expect: match
+        severity: critical
+        evidence:
+          - authentication.outcome
+          - authentication.service.protocol
+        event:
+          authentication.outcome: failure
+          authentication.service.protocol: ssh
+          authentication.network.source.ip: 203.0.113.10
+
+      - name: a password that was accepted over ssh closes it
+        expect: match
+        severity: critical
+        evidence:
+          - authentication.outcome
+          - authentication.service.protocol
+        event:
+          authentication.outcome: success
+          authentication.service.protocol: ssh
+          authentication.network.source.ip: 203.0.113.10
+
+      - name: neither outcome on another service is part of it
+        expect: no_match
+        event:
+          authentication.outcome: failure
+          authentication.service.protocol: rdp
+          authentication.network.source.ip: 203.0.113.10

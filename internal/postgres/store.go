@@ -18,8 +18,10 @@ import (
 )
 
 const (
-	alertsTable      = "alerts"
-	transitionsTable = "alert_transitions"
+	alertsTable              = "alerts"
+	transitionsTable         = "alert_transitions"
+	incidentsTable           = "incidents"
+	incidentTransitionsTable = "incident_transitions"
 )
 
 type Config struct {
@@ -121,7 +123,7 @@ func (s *Store) Close() error {
 // Migrations are applied by alert-migrator and never here: a process on its way
 // to serving traffic refuses to run against a schema behind the one it ships.
 func (s *Store) VerifySchema(ctx context.Context) error {
-	for _, table := range []string{alertsTable, transitionsTable} {
+	for _, table := range []string{alertsTable, transitionsTable, incidentsTable, incidentTransitionsTable} {
 		var present bool
 		err := s.pool.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", table).Scan(&present)
 		if err != nil {

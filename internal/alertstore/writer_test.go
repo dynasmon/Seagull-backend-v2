@@ -9,14 +9,50 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/alert"
 	"github.com/dynasmon/Seagull-backend-v2/internal/alertstore"
+	"github.com/dynasmon/Seagull-backend-v2/internal/incident"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
+	incidentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/incident/v1"
 )
+
+// The incident half of the store as far as the writer is concerned: a story is
+// opened once and recognised every time after, which is how a replayed batch
+// leaves one incident.
+type stories struct {
+	opened   map[string]*incidentv1.Incident
+	batches  [][]*incidentv1.Incident
+	refusals int
+}
+
+func (s *stories) Open(_ context.Context, told []*incidentv1.Incident) ([]incident.Outcome, error) {
+	if s.refusals > 0 {
+		s.refusals--
+		return nil, errors.New("the store is not answering")
+	}
+	if s.opened == nil {
+		s.opened = map[string]*incidentv1.Incident{}
+	}
+
+	outcomes := make([]incident.Outcome, len(told))
+	for index, one := range told {
+		if _, already := s.opened[one.GetIncidentId()]; already {
+			outcomes[index] = incident.OutcomeRepeated
+			continue
+		}
+		s.opened[one.GetIncidentId()] = one
+		outcomes[index] = incident.OutcomeRaised
+	}
+	s.batches = append(s.batches, told)
+	return outcomes, nil
+}
+
+func (s *stories) count() int { return len(s.opened) }
 
 // The store as far as the writer is concerned: it folds on the key inside the
 // window and refuses inside a cooldown, exactly as the relational one does, so
@@ -110,9 +146,15 @@ func tuning(t *testing.T, suppressions ...alert.Suppression) *alert.Tuning {
 
 func writer(t *testing.T, from *source, into *sink, suppressions ...alert.Suppression) *alertstore.Writer {
 	t.Helper()
+	return writerTelling(t, from, into, &stories{}, suppressions...)
+}
+
+func writerTelling(t *testing.T, from *source, into *sink, told *stories, suppressions ...alert.Suppression) *alertstore.Writer {
+	t.Helper()
 	made, err := alertstore.NewWriter(alertstore.WriterOptions{
 		Source:        from,
 		Sink:          into,
+		Stories:       told,
 		Tuning:        tuning(t, suppressions...),
 		Floor:         detectionv1.Severity_SEVERITY_MEDIUM,
 		Metrics:       alertstore.NewMetrics(metrics.New(t.Name())),
@@ -214,6 +256,7 @@ func TestAWriterWithoutAFloorRefusesToStart(t *testing.T) {
 	_, err := alertstore.NewWriter(alertstore.WriterOptions{
 		Source:        &source{},
 		Sink:          &sink{},
+		Stories:       &stories{},
 		Tuning:        tuning(t),
 		Metrics:       alertstore.NewMetrics(metrics.New(t.Name())),
 		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -268,5 +311,123 @@ func TestDetectionsSharingAKeyBecomeOnePieceOfWork(t *testing.T) {
 	}
 	if len(keys) != 1 {
 		t.Fatalf("they carried %d correlation keys", len(keys))
+	}
+}
+
+func story(id string, severity detectionv1.Severity) *detectionv1.Detection {
+	told := detection(id, severity)
+	told.Rule = &detectionv1.Rule{Id: "ssh.password_guessing_that_succeeded", Revision: 1}
+	told.Correlation = &detectionv1.Correlation{
+		Stages: []*detectionv1.Stage{
+			{
+				Name: "a failed password", EventId: "event-1",
+				EventTime: timestamppb.New(time.Date(2026, 8, 30, 11, 0, 0, 0, time.UTC)),
+			},
+			{
+				Name: "one that was accepted", EventId: "event-2",
+				EventTime: timestamppb.New(time.Date(2026, 8, 30, 11, 0, 40, 0, time.UTC)),
+			},
+		},
+		Window:      durationpb.New(5 * time.Minute),
+		ClockSpread: durationpb.New(0),
+	}
+	return told
+}
+
+func TestAStoryBecomesAnIncidentAndNeverAnAlert(t *testing.T) {
+	from := &source{batches: [][]alertstore.Record{{
+		record(t, detection("a-single-finding", detectionv1.Severity_SEVERITY_HIGH)),
+		record(t, story("a-story", detectionv1.Severity_SEVERITY_CRITICAL)),
+	}}}
+	into, told := &sink{}, &stories{}
+
+	if err := writerTelling(t, from, into, told).Run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if into.alerts() != 1 {
+		t.Fatalf("the batch raised %d alerts", into.alerts())
+	}
+	if into.batches[0][0].Alert.GetAlertId() != "a-single-finding" {
+		t.Errorf("the alert raised was %q", into.batches[0][0].Alert.GetAlertId())
+	}
+	if told.count() != 1 {
+		t.Fatalf("the batch opened %d incidents", told.count())
+	}
+	one, opened := told.opened["a-story"]
+	if !opened {
+		t.Fatal("the story opened no incident under the detection that told it")
+	}
+	if len(one.GetStages()) != 2 || one.GetStages()[1].GetEventId() != "event-2" {
+		t.Error("the incident does not name the events the story is made of")
+	}
+	if one.GetConfidence() != incidentv1.Confidence_CONFIDENCE_HIGH {
+		t.Errorf("clocks that agreed left the story at %s", incident.Level(one.GetConfidence()))
+	}
+}
+
+func TestAReplayedStoryOpensNothingNew(t *testing.T) {
+	batch := []alertstore.Record{record(t, story("bc84b318", detectionv1.Severity_SEVERITY_CRITICAL))}
+	into, told := &sink{}, &stories{}
+
+	if err := writerTelling(t, &source{batches: [][]alertstore.Record{batch, batch}}, into, told).
+		Run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(told.batches) != 2 {
+		t.Fatalf("the store was written to %d times", len(told.batches))
+	}
+	if told.count() != 1 {
+		t.Fatalf("replaying one story left %d incidents", told.count())
+	}
+	if into.alerts() != 0 {
+		t.Fatalf("a replayed story raised %d alerts", into.alerts())
+	}
+}
+
+func TestAStoreThatWillNotTakeAStoryHoldsTheConsumerRatherThanLosingIt(t *testing.T) {
+	from := &source{batches: [][]alertstore.Record{{record(t, story("held", detectionv1.Severity_SEVERITY_CRITICAL))}}}
+	into, told := &sink{}, &stories{refusals: 3}
+
+	if err := writerTelling(t, from, into, told).Run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if told.count() != 1 {
+		t.Fatalf("the retried batch left %d incidents", told.count())
+	}
+}
+
+func TestAWriterWithNowhereToOpenAStoryRefusesToStart(t *testing.T) {
+	_, err := alertstore.NewWriter(alertstore.WriterOptions{
+		Source:        &source{},
+		Sink:          &sink{},
+		Tuning:        tuning(t),
+		Floor:         detectionv1.Severity_SEVERITY_MEDIUM,
+		Metrics:       alertstore.NewMetrics(metrics.New(t.Name())),
+		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		WriteTimeout:  time.Second,
+		RetryDelay:    time.Millisecond,
+		MaxRetryDelay: time.Second,
+	})
+	if err == nil {
+		t.Fatal("a writer with nowhere to open an incident started")
+	}
+}
+
+func TestAStoryTheEstateSuppressedNeverBecomesWorkEither(t *testing.T) {
+	from := &source{batches: [][]alertstore.Record{{
+		record(t, story("from-the-scanner", detectionv1.Severity_SEVERITY_CRITICAL)),
+	}}}
+	into, told := &sink{}, &stories{}
+
+	made := writerTelling(t, from, into, told, alert.Suppression{
+		When:   alert.Selector{alert.PartAgent: {"dev-agent-01"}},
+		Reason: "our own credentialed scanner",
+	})
+	if err := made.Run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if told.count() != 0 || len(told.batches) != 0 {
+		t.Fatalf("a suppressed story left %d incidents", told.count())
 	}
 }

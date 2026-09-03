@@ -45,6 +45,7 @@ var layers = map[string]layer{
 	"internal/event":          domain,
 	"internal/eventstore":     capability,
 	"internal/hunt":           capability,
+	"internal/incident":       domain,
 	"internal/ingest":         capability,
 	"internal/platform":       platform,
 	"internal/policyfile":     adapter,
@@ -121,6 +122,14 @@ var within = map[string]restriction{
 			modulePath + "/internal/platform/tlsx",
 		},
 		because: "what analysing an event means has no transport of its own: this half is reached from the backbone",
+	},
+	"internal/alert": {
+		prefixes: []string{modulePath + "/internal/incident"},
+		because:  "an alert is one detection somebody owns and an incident is a story several events tell; they share a plane and a store, and neither is defined in terms of the other",
+	},
+	"internal/incident": {
+		prefixes: []string{modulePath + "/internal/alert"},
+		because:  "an incident is a story several events tell and an alert is one detection somebody owns; they share a plane and a store, and neither is defined in terms of the other",
 	},
 	"internal/alertstore": {
 		prefixes: []string{

@@ -31,10 +31,10 @@ func (r *reader) count(held *mapping) (detection.Count, error) {
 	if count.AtLeast, err = r.whole(&counted, "count.at_least", "at_least"); err != nil {
 		return count, err
 	}
-	if count.Within, err = r.within(&counted); err != nil {
+	if count.Within, err = r.window(&counted, "count.within", "within"); err != nil {
 		return count, err
 	}
-	if count.GroupBy, err = r.fields(&counted); err != nil {
+	if count.GroupBy, err = r.grouping(&counted, "count.group_by", "group_by"); err != nil {
 		return count, err
 	}
 
@@ -44,36 +44,36 @@ func (r *reader) count(held *mapping) (detection.Count, error) {
 	return count, nil
 }
 
-func (r *reader) within(counted *mapping) (time.Duration, error) {
-	node, given := counted.take("within")
+func (r *reader) window(held *mapping, part, name string) (time.Duration, error) {
+	node, given := held.take(name)
 	if !given {
 		return 0, nil
 	}
 	if node.Kind != yaml.ScalarNode {
-		return 0, r.fault(node, "count.within", "is not a window")
+		return 0, r.fault(node, part, "is not a window")
 	}
 
 	parsed, err := time.ParseDuration(node.Value)
 	if err != nil {
-		return 0, r.fault(node, "count.within", fmt.Sprintf("is %q, and a window reads like 60s, 5m or 2h", node.Value))
+		return 0, r.fault(node, part, fmt.Sprintf("is %q, and a window reads like 60s, 5m or 2h", node.Value))
 	}
 	return parsed, nil
 }
 
 // Each field is remembered where it was written, so a domain refusal naming
 // `count.group_by[1]` points at the second field rather than at the list.
-func (r *reader) fields(counted *mapping) ([]detection.Field, error) {
-	node, given := counted.take("group_by")
+func (r *reader) grouping(held *mapping, part, name string) ([]detection.Field, error) {
+	node, given := held.take(name)
 	if !given {
 		return nil, nil
 	}
 	if node.Kind != yaml.SequenceNode {
-		return nil, r.fault(node, "count.group_by", "is not a list of fields")
+		return nil, r.fault(node, part, "is not a list of fields")
 	}
 
 	grouped := make([]detection.Field, 0, len(node.Content))
 	for index, item := range node.Content {
-		where := fmt.Sprintf("count.group_by[%d]", index)
+		where := fmt.Sprintf("%s[%d]", part, index)
 		value := resolve(item)
 		if value == nil || value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
 			return nil, r.fault(item, where, "is not the name of a field")

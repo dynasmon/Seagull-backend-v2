@@ -24,6 +24,7 @@ type Metrics struct {
 	published   *prometheus.CounterVec
 	activated   *prometheus.CounterVec
 	moved       *prometheus.CounterVec
+	correlated  *prometheus.CounterVec
 }
 
 func NewMetrics(registry *metrics.Registry) *Metrics {
@@ -112,13 +113,19 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "alerts_moved_total",
 			Help:      "Attempts to move an alert, by the state it reached or by refusal.",
 		}, []string{"outcome"}),
+		correlated: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "incidents_moved_total",
+			Help:      "Attempts to move an incident, by the state it reached or by refusal.",
+		}, []string{"outcome"}),
 	}
 
 	registry.MustRegister(
 		instruments.policy, instruments.roles, instruments.bindings, instruments.pinnedAt,
 		instruments.reloads, instruments.authn, instruments.authz,
 		instruments.sessions, instruments.opened, instruments.revoked, instruments.ratelimited,
-		instruments.published, instruments.activated, instruments.moved,
+		instruments.published, instruments.activated, instruments.moved, instruments.correlated,
 	)
 	return instruments
 }
@@ -197,5 +204,11 @@ func (m *Metrics) rulesetActivated(outcome string) {
 func (m *Metrics) alertMoved(outcome string) {
 	if m != nil {
 		m.moved.WithLabelValues(outcome).Inc()
+	}
+}
+
+func (m *Metrics) incidentMoved(outcome string) {
+	if m != nil {
+		m.correlated.WithLabelValues(outcome).Inc()
 	}
 }

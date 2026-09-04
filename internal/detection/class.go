@@ -32,6 +32,10 @@ var classes = sync.OnceValue(func() map[string]eventv1.EventClass {
 	return named
 })
 
+// The name a class is written under, which is empty for a class the contract
+// does not declare.
+func ClassName(class eventv1.EventClass) string { return className(class) }
+
 // The class a written name stands for. Unspecified is not one of them: a rule
 // that names no class reads nothing, and the contract's zero value is how an
 // event says it did not say.

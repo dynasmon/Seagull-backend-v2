@@ -53,6 +53,7 @@ var layers = map[string]layer{
 	"internal/protocol":       domain,
 	"internal/rulefile":       adapter,
 	"internal/ruleset":        capability,
+	"internal/sigma":          adapter,
 	"tests":                   suite,
 	"tools":                   tool,
 }
@@ -176,6 +177,10 @@ var within = map[string]restriction{
 			modulePath + "/internal/platform/tlsx",
 		},
 		because: "a registry holds compiled rules and reads none: where a ruleset comes from is a source's business",
+	},
+	"internal/sigma": {
+		prefixes: []string{"net/http", "os", "database/sql"},
+		because:  "a Sigma rule is a document, and where a catalogue is read from is chosen by a tool",
 	},
 }
 

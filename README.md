@@ -42,6 +42,24 @@ written, with the line and the part that is wrong. Rules carry severity, ATT&CK
 technique, false-positive guidance and provenance, and each one travels with the
 cases it was written for, which the same evaluator checks.
 
+### Sigma import
+
+A supported Sigma rule is translated into a Seagull rule and goes through the
+same validator and compiler as a rule somebody wrote here; the domain does not
+know Sigma exists. What can be translated is decided by the canonical form: a
+field it folds can carry Sigma's case-insensitive comparison, and a field whose
+case it keeps on purpose cannot, so the comparison is refused and the remedy is
+named. Everything the rule language cannot state — a pattern, a network range,
+a keyword search, a distinct count, a threshold counting down — is refused with
+the line it was written on rather than imported as something that runs and finds
+less. A translated rule arrives as a draft carrying no cases, so two independent
+gates keep it out of an estate until a person has written down what it should
+find.
+
+```bash
+go run ./tools/sigmaimport -input path/to/sigma -output deploy/rules/imported.yml -strict
+```
+
 ### Incidents and correlation output
 
 Event, detection, alert and incident are four records with four owners, not four
@@ -200,6 +218,19 @@ than a number somebody tuned: the spread of the clocks that timed the story,
 against its own span and against the window the rule looked through.
 [ADR 21](docs/decisions/0021-an-incident-is-a-correlation-somebody-owns.md).
 
+Sigma is a language this platform reads and never becomes. A Sigma document is
+translated into a `detection.Rule` by an adapter and compiled by the same door
+every rule file goes through, so an imported rule cannot be a second way into the
+engine. What survives translation is bounded by the canonical form rather than by
+a table of aliases: Sigma compares without case and the rule language compares
+with it, so a comparison translates only where normalisation already removed the
+difference, and where it deliberately did not — an account name, because case is
+meaning on a Unix host — the comparison is refused and Sigma's own `|cased`
+modifier is the way to ask for what the platform can actually answer. v1 answered
+the same question by rewriting what it could not read into an inert placeholder,
+so an unsupported rule imported cleanly, compiled and quietly found nothing.
+[ADR 22](docs/decisions/0022-sigma-is-translated-and-never-adopted.md).
+
 ## Getting started
 
 Requires Docker with the Compose plugin and Go 1.25.
@@ -274,10 +305,11 @@ drops a batch it had already answered for.
 | [Configuration reference](docs/configuration.md) | Every setting, the acknowledgement contract, the topology, the store. |
 | [Seagull-contracts](https://github.com/dynasmon/Seagull-contracts) | The messages agents, the platform and the portal exchange. |
 
-Agent enrollment and registry, inventory, vulnerability matching, response
-actions and Sigma import are not implemented. Detection is stateless unless a
-rule asks otherwise: a rule that counts or orders its events reads a bounded
-window of the backbone in event time, which is what keeps both replayable.
+Agent enrollment and registry, inventory, vulnerability matching and response
+actions are not implemented, and Sigma import covers one class of event.
+Detection is stateless unless a rule asks otherwise: a rule that counts or
+orders its events reads a bounded window of the backbone in event time, which is
+what keeps both replayable.
 
 ## License
 

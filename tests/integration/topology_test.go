@@ -45,13 +45,14 @@ func declaredTopic(t *testing.T, addresses []string, partitions int32, retention
 		Retention:   retention,
 		Cleanup:     "delete",
 		Compression: "zstd",
+		MinInSync:   1,
 	}
 }
 
 func provisioner(t *testing.T, addresses []string) *broker.Provisioner {
 	t.Helper()
 
-	provisioner, err := broker.NewProvisioner(addresses, "integration-test")
+	provisioner, err := broker.NewProvisioner(addresses, "integration-test", broker.Security{})
 	if err != nil {
 		t.Fatalf("build provisioner: %v", err)
 	}

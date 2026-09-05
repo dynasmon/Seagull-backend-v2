@@ -105,8 +105,12 @@ func (r *Registry) Reload() (*Snapshot, error) {
 	return snapshot, nil
 }
 
+// Never labelled by identity: whoever publishes a ruleset chooses the id.
+func (r *Registry) Refuse() { r.metrics.activated(Refused) }
+
 func (r *Registry) replace(snapshot *Snapshot) *Snapshot {
 	since := time.Now().UTC()
+	r.metrics.activated(Applied)
 	previous := r.current.Swap(snapshot)
 	r.metrics.pinned(snapshot, since)
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/analysis"
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
@@ -39,6 +40,23 @@ func written(directory string) ruleset.SourceFunc {
 	return func() ([]*detection.Program, error) { return rulefile.Read(os.DirFS(directory)) }
 }
 
+func recovering(engine runtime, partitions int32, registry *ruleset.Registry, logger *slog.Logger) broker.Recovery {
+	return func(held int32) (time.Duration, error) {
+		current := registry.Current()
+		if err := engine.owns(current, held, partitions); err != nil {
+			return 0, err
+		}
+		window := engine.recovering(current)
+		logger.Info("partitions_assigned",
+			slog.Int("held", int(held)),
+			slog.Int("partitions", int(partitions)),
+			slog.String("ruleset", running(current)),
+			slog.Duration("rebuilding", window),
+		)
+		return window, nil
+	}
+}
+
 // The published rulesets this engine has read, and the pin it keeps on the one
 // the control plane says to run. The engine itself never learns any of this: it
 // asks the registry what to decide against, exactly as before.
@@ -47,7 +65,7 @@ type rulesetLog struct {
 	reader    *broker.RulesetLog
 }
 
-func publishedRulesets(ctx context.Context, settings configuration, platform *service.Service, registry *ruleset.Registry) (rulesetLog, error) {
+func publishedRulesets(ctx context.Context, settings configuration, platform *service.Service, registry *ruleset.Registry, engine runtime) (rulesetLog, error) {
 	reader, err := broker.NewRulesetLog(broker.Config{
 		Brokers:  settings.brokers,
 		Topic:    settings.topology.Rulesets.Name,
@@ -69,14 +87,14 @@ func publishedRulesets(ctx context.Context, settings configuration, platform *se
 	for _, entry := range drift {
 		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
 	}
-	if err := reader.Replay(startCtx, held.applying(platform.Logger(), registry)); err != nil {
+	if err := reader.Replay(startCtx, held.applying(platform.Logger(), registry, engine)); err != nil {
 		reader.Close()
 		return rulesetLog{}, err
 	}
 	return held, nil
 }
 
-func (l rulesetLog) applying(logger *slog.Logger, registry *ruleset.Registry) broker.Deliver {
+func (l rulesetLog) applying(logger *slog.Logger, registry *ruleset.Registry, engine runtime) broker.Deliver {
 	return func(_ context.Context, records []broker.Record) error {
 		for _, record := range records {
 			if err := l.catalogue.Read(record.Value); err != nil {
@@ -87,28 +105,47 @@ func (l rulesetLog) applying(logger *slog.Logger, registry *ruleset.Registry) br
 				)
 			}
 		}
-		l.pin(registry)
+		l.pin(registry, engine, logger)
 		return nil
 	}
 }
 
-// Swapped only when the active pointer names something else, and only for a
-// ruleset that is already composed: the registry holds the same snapshot for
-// the whole of an event's evaluation, so a rollout never moves a rule out from
-// under an event halfway through being decided.
-func (l rulesetLog) pin(registry *ruleset.Registry) {
+// Swapped only when the active pointer names something else, so a rollout
+// never moves a rule out from under an event halfway through being decided.
+// Compiling is not enough to run: a ruleset this deployment could only answer
+// partially is refused whole, and the last one it could answer keeps running.
+func (l rulesetLog) pin(registry *ruleset.Registry, engine runtime, logger *slog.Logger) {
 	version, published := l.catalogue.Active()
 	if !published {
 		return
 	}
-	if current := registry.Current(); current != nil && current.ID() == version.ID() {
+	current := registry.Current()
+	if current != nil && current.ID() == version.ID() {
 		return
 	}
-	registry.Replace(version.Snapshot())
+
+	snapshot := version.Snapshot()
+	if err := engine.admits(snapshot); err != nil {
+		registry.Refuse()
+		logger.Error("ruleset_not_executable",
+			slog.String("ruleset", string(version.ID())),
+			slog.String("running", running(current)),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	registry.Replace(snapshot)
 }
 
-func (l rulesetLog) follower(logger *slog.Logger, registry *ruleset.Registry) follower {
-	return follower{reader: l.reader, deliver: l.applying(logger, registry)}
+func running(current *ruleset.Snapshot) string {
+	if current == nil {
+		return ""
+	}
+	return string(current.ID())
+}
+
+func (l rulesetLog) follower(logger *slog.Logger, registry *ruleset.Registry, engine runtime) follower {
+	return follower{reader: l.reader, deliver: l.applying(logger, registry, engine)}
 }
 
 type follower struct {

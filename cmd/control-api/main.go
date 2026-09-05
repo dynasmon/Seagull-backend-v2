@@ -215,6 +215,7 @@ func publishedRulesets(ctx context.Context, settings configuration, platform *se
 		Brokers:  settings.brokers,
 		Topic:    settings.topology.Rulesets.Name,
 		ClientID: serviceName,
+		Security: settings.security,
 	})
 	if err != nil {
 		return rulesetLog{}, err
@@ -224,6 +225,7 @@ func publishedRulesets(ctx context.Context, settings configuration, platform *se
 		Brokers:  settings.brokers,
 		Topic:    settings.topology.Rulesets.Name,
 		ClientID: serviceName,
+		Security: settings.security,
 	}, settings.logRecords)
 	if err != nil {
 		publisher.Close()

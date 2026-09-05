@@ -24,8 +24,10 @@ type configuration struct {
 	writeTimeout time.Duration
 	idleTimeout  time.Duration
 
-	maxBodyBytes   int64
-	publishTimeout time.Duration
+	maxBodyBytes        int64
+	maxInflightBytes    int64
+	maxInflightRequests int
+	publishTimeout      time.Duration
 
 	ratePerSecond  float64
 	rateBurst      int
@@ -49,8 +51,13 @@ func load(parser *config.Parser) (configuration, error) {
 		writeTimeout: parser.Duration("SEAGULL_GATEWAY_WRITE_TIMEOUT", 30*time.Second, time.Second, 5*time.Minute),
 		idleTimeout:  parser.Duration("SEAGULL_GATEWAY_IDLE_TIMEOUT", 90*time.Second, time.Second, 30*time.Minute),
 
-		maxBodyBytes:   parser.Bytes("SEAGULL_GATEWAY_MAX_BODY", 8<<20, 64<<10, 64<<20),
-		publishTimeout: parser.Duration("SEAGULL_GATEWAY_PUBLISH_TIMEOUT", 10*time.Second, time.Second, time.Minute),
+		maxBodyBytes: parser.Bytes("SEAGULL_GATEWAY_MAX_BODY", 8<<20, 64<<10, 64<<20),
+
+		// The body ceiling is per request and multiplies by however many
+		// connections arrive at once.
+		maxInflightBytes:    parser.Bytes("SEAGULL_GATEWAY_MAX_INFLIGHT_BYTES", 128<<20, 1<<20, 8<<30),
+		maxInflightRequests: parser.Int("SEAGULL_GATEWAY_MAX_INFLIGHT_REQUESTS", 512, 1, 100_000),
+		publishTimeout:      parser.Duration("SEAGULL_GATEWAY_PUBLISH_TIMEOUT", 10*time.Second, time.Second, time.Minute),
 
 		rateBurst:     parser.Int("SEAGULL_GATEWAY_RATE_BURST", 400, 1, 1_000_000),
 		trackedAgents: parser.Int("SEAGULL_GATEWAY_RATE_TRACKED_AGENTS", 10_000, 1, 1_000_000),

@@ -16,6 +16,7 @@ type configuration struct {
 
 	brokers  []string
 	topology broker.Topology
+	security broker.Security
 	group    string
 
 	batchEvents   int
@@ -32,6 +33,7 @@ func load(parser *config.Parser) (configuration, error) {
 
 		brokers:  parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
 		topology: broker.LoadTopology(parser),
+		security: broker.LoadSecurity(parser),
 		group:    parser.String("SEAGULL_WRITER_CONSUMER_GROUP", serviceName),
 
 		batchEvents:   parser.Int("SEAGULL_WRITER_BATCH_EVENTS", 5_000, 1, 100_000),
@@ -48,11 +50,5 @@ func load(parser *config.Parser) (configuration, error) {
 // The first real secret in this repository, and so the first user of
 // `config.Secret` and the `_FILE` convention.
 func storeConfig(parser *config.Parser) clickhouse.Config {
-	return clickhouse.Config{
-		Address:  parser.RequiredString("SEAGULL_EVENT_STORE_ADDRESS"),
-		Database: parser.String("SEAGULL_EVENT_STORE_DATABASE", "seagull"),
-		User:     parser.String("SEAGULL_EVENT_STORE_USER", "seagull"),
-		Password: parser.Secret("SEAGULL_EVENT_STORE_PASSWORD"),
-		Timeout:  parser.Duration("SEAGULL_EVENT_STORE_TIMEOUT", 30*time.Second, time.Second, 5*time.Minute),
-	}
+	return clickhouse.LoadConfig("SEAGULL_EVENT_STORE", parser)
 }

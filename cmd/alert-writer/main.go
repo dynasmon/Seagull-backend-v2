@@ -74,6 +74,7 @@ func writer(ctx context.Context) error {
 		MaxRecords:   settings.batchDetections,
 		FetchMaxWait: settings.fetchMaxWait,
 		Metrics:      broker.NewConsumerMetrics(platform.Metrics()),
+		Security:     settings.security,
 	})
 	if err != nil {
 		return err

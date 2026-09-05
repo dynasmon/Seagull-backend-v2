@@ -166,3 +166,29 @@ func TestFilePathMustExist(t *testing.T) {
 		t.Fatalf("expected a path failure, got %v", err)
 	}
 }
+
+func TestATruthValueIsReadOrRefused(t *testing.T) {
+	for value, expected := range map[string]bool{"true": true, "1": true, "false": false, "0": false} {
+		t.Setenv("SEAGULL_BACKBONE_TLS", value)
+		parser := config.FromEnvironment()
+		if got := parser.Bool("SEAGULL_BACKBONE_TLS", false); got != expected {
+			t.Errorf("%q read as %v", value, got)
+		}
+		if err := parser.Err(); err != nil {
+			t.Errorf("%q was refused: %v", value, err)
+		}
+	}
+
+	t.Setenv("SEAGULL_BACKBONE_TLS", "yes please")
+	parser := config.FromEnvironment()
+	parser.Bool("SEAGULL_BACKBONE_TLS", false)
+	if parser.Err() == nil {
+		t.Error("a value that is neither true nor false was accepted")
+	}
+
+	t.Setenv("SEAGULL_BACKBONE_TLS", "")
+	unset := config.FromEnvironment()
+	if !unset.Bool("SEAGULL_BACKBONE_TLS", true) || unset.Err() != nil {
+		t.Error("an unset value did not fall back")
+	}
+}

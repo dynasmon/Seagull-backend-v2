@@ -92,11 +92,5 @@ func (c configuration) coherent() error {
 // The account it connects with should be able to read and nothing else: this
 // process answers questions and never changes the evidence it answers from.
 func storeConfig(parser *config.Parser) clickhouse.Config {
-	return clickhouse.Config{
-		Address:  parser.RequiredString("SEAGULL_QUERY_STORE_ADDRESS"),
-		Database: parser.String("SEAGULL_QUERY_STORE_DATABASE", "seagull"),
-		User:     parser.String("SEAGULL_QUERY_STORE_USER", "seagull"),
-		Password: parser.Secret("SEAGULL_QUERY_STORE_PASSWORD"),
-		Timeout:  parser.Duration("SEAGULL_QUERY_STORE_TIMEOUT", 30*time.Second, time.Second, 5*time.Minute),
-	}
+	return clickhouse.LoadConfig("SEAGULL_QUERY_STORE", parser)
 }

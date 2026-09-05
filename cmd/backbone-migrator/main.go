@@ -39,7 +39,7 @@ func provision(ctx context.Context) error {
 		return err
 	}
 
-	provisioner, err := broker.NewProvisioner(settings.brokers, serviceName)
+	provisioner, err := broker.NewProvisioner(settings.brokers, serviceName, settings.security)
 	if err != nil {
 		return err
 	}

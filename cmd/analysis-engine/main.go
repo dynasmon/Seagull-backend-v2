@@ -43,6 +43,7 @@ func engine(ctx context.Context) error {
 		Brokers:  settings.brokers,
 		Topic:    settings.topology.Detections.Name,
 		ClientID: serviceName,
+		Security: settings.security,
 	})
 	if err != nil {
 		return err
@@ -90,6 +91,7 @@ func engine(ctx context.Context) error {
 		FetchMaxWait: settings.fetchMaxWait,
 		Metrics:      broker.NewConsumerMetrics(platform.Metrics()),
 		Recovery:     recovering(engineRuntime, settings.topology.Events.Partitions, registry, platform.Logger()),
+		Security:     settings.security,
 	})
 	if err != nil {
 		return err

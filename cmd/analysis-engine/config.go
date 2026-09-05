@@ -29,6 +29,8 @@ type configuration struct {
 	maxRetryDelay  time.Duration
 
 	state detectionstate.Bounds
+	sole  bool
+	skew  time.Duration
 }
 
 // The engine reads the same topic as the writer under a group of its own, so
@@ -59,6 +61,10 @@ func load(parser *config.Parser) (configuration, error) {
 			ObservationsPerKey: parser.Int("SEAGULL_DETECTION_STATE_OBSERVATIONS", 128, 2, detectionstate.MaxObservationsPerKey),
 			Keys:               parser.Int("SEAGULL_DETECTION_STATE_KEYS", 4096, 1, detectionstate.MaxKeys),
 		},
+
+		// Checked against the assignment rather than trusted.
+		sole: parser.Bool("SEAGULL_DETECTION_STATE_SOLE_READER", false),
+		skew: parser.Duration("SEAGULL_EVENT_MAX_CLOCK_SKEW", 5*time.Minute, time.Second, time.Hour),
 	}
 
 	return loaded, parser.Err()

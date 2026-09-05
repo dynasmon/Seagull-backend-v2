@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime"
@@ -22,11 +23,15 @@ const (
 	EventsRoute = "POST " + EventsPath
 
 	ContentType = "application/x-protobuf"
+
+	CodeAtCapacity = "gateway_at_capacity"
 )
 
 type HandlerOptions struct {
 	Admitter       *Admitter
 	Limiter        *ratelimit.Limiter
+	Capacity       *Capacity
+	Metrics        *Metrics
 	MaxBodyBytes   int64
 	PublishTimeout time.Duration
 }
@@ -34,6 +39,8 @@ type HandlerOptions struct {
 type Handler struct {
 	admitter       *Admitter
 	limiter        *ratelimit.Limiter
+	capacity       *Capacity
+	metrics        *Metrics
 	maxBodyBytes   int64
 	publishTimeout time.Duration
 }
@@ -48,9 +55,21 @@ func NewHandler(options HandlerOptions) (*Handler, error) {
 	if options.PublishTimeout <= 0 {
 		return nil, errors.New("the ingest handler needs a positive publish budget")
 	}
+	if options.Capacity == nil {
+		return nil, errors.New("the ingest handler needs a ceiling on what the process holds at once")
+	}
+	if held, _ := options.Capacity.Bounds(); held < options.MaxBodyBytes {
+		return nil, fmt.Errorf("the gateway holds %d bytes at once and admits a body of %d, so no batch could ever be taken",
+			held, options.MaxBodyBytes)
+	}
+	if options.Metrics == nil {
+		return nil, errors.New("the ingest handler needs metrics")
+	}
 	return &Handler{
 		admitter:       options.Admitter,
 		limiter:        options.Limiter,
+		capacity:       options.Capacity,
+		metrics:        options.Metrics,
 		maxBodyBytes:   options.MaxBodyBytes,
 		publishTimeout: options.PublishTimeout,
 	}, nil
@@ -75,6 +94,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "batches are sent as "+ContentType, "", -1)
 		return
 	}
+
+	release, admitted := h.capacity.Hold(h.reserving(r))
+	if !admitted {
+		h.metrics.batchRejected(CodeAtCapacity)
+		w.Header().Set("Retry-After", "1")
+		refuse(w, http.StatusServiceUnavailable, CodeAtCapacity,
+			"the gateway is holding as much work as it was bounded to", "", -1)
+		return
+	}
+	defer release()
 
 	payload, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.maxBodyBytes))
 	if err != nil {
@@ -135,6 +164,15 @@ func (h *Handler) refuseAdmission(ctx context.Context, w http.ResponseWriter, ba
 	)
 	w.Header().Set("Retry-After", "5")
 	refuse(w, http.StatusServiceUnavailable, "backbone_unavailable", "the batch was not made durable", "", -1)
+}
+
+// A body that lies about its length is stopped by the reader, so the
+// reservation is never smaller than the allocation it stands for.
+func (h *Handler) reserving(r *http.Request) int64 {
+	if r.ContentLength <= 0 || r.ContentLength > h.maxBodyBytes {
+		return h.maxBodyBytes
+	}
+	return r.ContentLength
 }
 
 func protobufRequest(r *http.Request) bool {

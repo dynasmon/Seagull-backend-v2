@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kadm"
@@ -13,10 +14,12 @@ import (
 const (
 	lagRefreshInterval = 5 * time.Second
 	lagRefreshTimeout  = 2 * time.Second
+	commitOnStopBudget = 5 * time.Second
 )
 
 type endOffsetReader interface {
 	ListEndOffsets(ctx context.Context, topics ...string) (kadm.ListedOffsets, error)
+	ListOffsetsAfterMilli(ctx context.Context, millisecond int64, topics ...string) (kadm.ListedOffsets, error)
 }
 
 type Record struct {
@@ -36,6 +39,8 @@ type ConsumerConfig struct {
 	MaxRecords   int
 	FetchMaxWait time.Duration
 	Metrics      *ConsumerMetrics
+
+	Recovery Recovery
 }
 
 type Consumer struct {
@@ -45,6 +50,11 @@ type Consumer struct {
 	maxRecords int
 	metrics    *ConsumerMetrics
 	endOffsets endOffsetReader
+	recovery   Recovery
+
+	mu       sync.Mutex
+	assigned map[int32]struct{}
+	refusal  error
 }
 
 // New groups start at the earliest durable telemetry.
@@ -70,6 +80,8 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 		group:      config.Group,
 		maxRecords: config.MaxRecords,
 		metrics:    config.Metrics,
+		recovery:   config.Recovery,
+		assigned:   make(map[int32]struct{}),
 	}
 
 	client, err := kgo.NewClient(
@@ -81,7 +93,12 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 		kgo.DisableAutoCommit(),
 		kgo.BlockRebalanceOnPoll(),
 		kgo.FetchMaxWait(config.FetchMaxWait),
+		kgo.AdjustFetchOffsetsFn(consumer.rebuild),
+		kgo.OnPartitionsAssigned(func(_ context.Context, _ *kgo.Client, assigned map[string][]int32) {
+			consumer.took(assigned)
+		}),
 		kgo.OnPartitionsRevoked(func(_ context.Context, _ *kgo.Client, revoked map[string][]int32) {
+			consumer.gave(revoked)
 			consumer.metrics.forget(revoked)
 		}),
 	)
@@ -111,6 +128,9 @@ func (c *Consumer) Consume(ctx context.Context, deliver Deliver) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if err := c.refused(); err != nil {
+			return err
+		}
 
 		fetches := c.client.PollRecords(ctx, c.maxRecords)
 		if fetches.IsClientClosed() {
@@ -129,7 +149,7 @@ func (c *Consumer) Consume(ctx context.Context, deliver Deliver) error {
 				c.client.AllowRebalance()
 				return err
 			}
-			if err := c.client.CommitUncommittedOffsets(ctx); err != nil {
+			if err := c.commit(ctx); err != nil {
 				c.metrics.commitFailed()
 				c.client.AllowRebalance()
 				return fmt.Errorf("commit the group position on %s: %w", c.topic, err)
@@ -138,6 +158,19 @@ func (c *Consumer) Consume(ctx context.Context, deliver Deliver) error {
 		}
 		c.client.AllowRebalance()
 	}
+}
+
+// The batch is durable before this runs, so a stopping process still advances
+// past what it finished. Cancelling the commit with the rest of the process
+// would replay work that was already decided on every deployment.
+func (c *Consumer) commit(ctx context.Context) error {
+	err := c.client.CommitUncommittedOffsets(ctx)
+	if err == nil || ctx.Err() == nil {
+		return err
+	}
+	stopping, cancel := context.WithTimeout(context.WithoutCancel(ctx), commitOnStopBudget)
+	defer cancel()
+	return c.client.CommitUncommittedOffsets(stopping)
 }
 
 func collect(fetches kgo.Fetches) []Record {

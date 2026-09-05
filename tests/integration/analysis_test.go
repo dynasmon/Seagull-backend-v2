@@ -70,6 +70,7 @@ func TestTheEngineConsumesTheBackboneInAGroupOfItsOwn(t *testing.T) {
 		Retention:   time.Hour,
 		Cleanup:     "delete",
 		Compression: "zstd",
+		MinInSync:   1,
 	}); err != nil {
 		t.Fatalf("the engine refused a topic it should accept: %v", err)
 	}

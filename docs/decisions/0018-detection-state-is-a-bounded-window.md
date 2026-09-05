@@ -1,5 +1,12 @@
 # 18. Detection state is a bounded window of the backbone, in event time
 
+> Amended by [ADR 23](0023-state-is-owned-by-the-partition-and-rebuilt-by-reading-it-back.md).
+> The model below is unchanged; two claims it made about the model are. Replay
+> was described here as how state is built and was not built, and ownership was
+> described as coming from the consumer group, which gives ownership of a
+> partition and not of a key. ADR 23 makes the first happen and states the
+> second as something a rule is checked against.
+
 ## Context
 
 [ADR 9](0009-an-absent-field-answers-no-question.md) made deciding a pure
@@ -116,7 +123,10 @@ as the backbone source and the ruleset the engine is pinned to.
   same port, or repartitioning the stream by the group key onto a topic of its
   own. Both are named here and neither is built, because one replica is what runs
   and inventing the coordination first is how ADR 12 says a platform acquires
-  four datastores nobody re-derived.
+  four datastores nobody re-derived. **ADR 23 keeps this and stops it being
+  silent**: a rule whose group the stream does not keep together is not
+  activated, unless a deployment declares it is the only reader and is held to
+  the declaration.
 - **`Distinct` counts non-empty values.** An event that names nothing contributes
   to the count and not to the cardinality, so a rule can ask both questions of one
   key without the events that cannot answer the second distorting it.

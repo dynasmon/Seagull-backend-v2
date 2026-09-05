@@ -176,7 +176,7 @@ func TestTheShippedTreeRunsUntilARulesetIsPublished(t *testing.T) {
 	shipped := held.Current().ID()
 
 	log := rulesetLog{catalogue: ruleset.NewCatalogue()}
-	apply := log.applying(quiet(), held)
+	apply := log.applying(quiet(), held, deployment())
 
 	version := publishedVersion(t, otherRule)
 	if err := apply(context.Background(), recorded(t, version.Record())); err != nil {
@@ -205,7 +205,7 @@ func TestARulesetRecordTheEngineCannotReadLeavesItRunningWhatItHad(t *testing.T)
 	shipped := held.Current().ID()
 
 	log := rulesetLog{catalogue: ruleset.NewCatalogue()}
-	apply := log.applying(quiet(), held)
+	apply := log.applying(quiet(), held, deployment())
 
 	if err := apply(context.Background(), []broker.Record{{Value: []byte{0xff, 0xfe}}}); err != nil {
 		t.Fatalf("an unreadable record ended the replay: %v", err)
@@ -223,7 +223,7 @@ func TestAnActivationForARulesetTheEngineHasNotSeenChangesNothing(t *testing.T) 
 	shipped := held.Current().ID()
 
 	log := rulesetLog{catalogue: ruleset.NewCatalogue()}
-	apply := log.applying(quiet(), held)
+	apply := log.applying(quiet(), held, deployment())
 
 	activation := &rulesetv1.Record{Record: &rulesetv1.Record_Active{
 		Active: &rulesetv1.Active{RulesetId: "0000000000000000", ActivatedBy: "dev-engineer"},
@@ -237,3 +237,98 @@ func TestAnActivationForARulesetTheEngineHasNotSeenChangesNothing(t *testing.T) 
 }
 
 func quiet() *slog.Logger { return slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)) }
+
+const countsAcrossAgents = `schema_version: 1
+rules:
+  - id: ssh.repeated_failed_password
+    revision: 1
+    name: Repeated failed SSH passwords from one address
+    description: A count across every agent an address reached, which one reader cannot hold.
+    class: authentication
+    severity: high
+    status: active
+    count:
+      at_least: 20
+      within: 1m
+      group_by: [authentication.network.source.ip]
+    match:
+      field: authentication.outcome
+      equals: failure
+`
+
+// Compiling is not the same as being executable. A ruleset holding a rule this
+// deployment cannot answer is refused whole, and the process keeps running the
+// last one it could: the alternative is a rule that looks active and reports
+// part of what it was written to find.
+func TestARulesetThisDeploymentCannotRunIsRefusedAndTheLastOneKeepsRunning(t *testing.T) {
+	directory := t.TempDir()
+	write(t, filepath.Join(directory, "rules.yml"), oneRule)
+
+	held := registry(t, directory)
+	shipped := held.Current().ID()
+
+	log := rulesetLog{catalogue: ruleset.NewCatalogue()}
+	apply := log.applying(quiet(), held, deployment())
+
+	version := publishedVersion(t, countsAcrossAgents)
+	if err := apply(context.Background(), recorded(t, version.Record())); err != nil {
+		t.Fatalf("apply a published version: %v", err)
+	}
+	activation := &rulesetv1.Record{Record: &rulesetv1.Record_Active{
+		Active: &rulesetv1.Active{RulesetId: string(version.ID()), ActivatedBy: "dev-engineer"},
+	}}
+	if err := apply(context.Background(), recorded(t, activation)); err != nil {
+		t.Fatalf("apply an activation: %v", err)
+	}
+
+	if held.Current().ID() != shipped {
+		t.Fatalf("the engine ran %s, which it cannot answer, instead of keeping %s",
+			held.Current().ID(), shipped)
+	}
+}
+
+// The same ruleset on a deployment that can answer it. Without this the test
+// above would pass on a refusal for any reason at all.
+func TestTheSameRulesetRunsWhereTheDeploymentCanAnswerIt(t *testing.T) {
+	directory := t.TempDir()
+	write(t, filepath.Join(directory, "rules.yml"), oneRule)
+
+	held := registry(t, directory)
+	sole := deployment()
+	sole.partitioning.Sole = true
+
+	log := rulesetLog{catalogue: ruleset.NewCatalogue()}
+	apply := log.applying(quiet(), held, sole)
+
+	version := publishedVersion(t, countsAcrossAgents)
+	if err := apply(context.Background(), recorded(t, version.Record())); err != nil {
+		t.Fatalf("apply a published version: %v", err)
+	}
+	activation := &rulesetv1.Record{Record: &rulesetv1.Record_Active{
+		Active: &rulesetv1.Active{RulesetId: string(version.ID()), ActivatedBy: "dev-engineer"},
+	}}
+	if err := apply(context.Background(), recorded(t, activation)); err != nil {
+		t.Fatalf("apply an activation: %v", err)
+	}
+
+	if held.Current().ID() != version.ID() {
+		t.Fatalf("the engine runs %s and was told to run %s", held.Current().ID(), version.ID())
+	}
+}
+
+// The ruleset the local stack mounts is held to being runnable by the deployment
+// the stack runs, so a rule that would stop the engine is caught here rather
+// than by `make up`.
+func TestTheRulesTheStackMountsAreExecutableByTheDeploymentItRuns(t *testing.T) {
+	programs, err := written(filepath.Join("..", "..", "deploy", "rules"))()
+	if err != nil {
+		t.Fatalf("the rules the local stack mounts were refused: %v", err)
+	}
+	snapshot, err := ruleset.Compose(programs)
+	if err != nil {
+		t.Fatalf("compose the rules the local stack mounts: %v", err)
+	}
+	if err := deployment().admits(snapshot); err != nil {
+		t.Fatalf("the rules the local stack mounts are not executable where it runs: %v", err)
+	}
+}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/analysis"
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
+	"github.com/dynasmon/Seagull-backend-v2/internal/detectionstate"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/run"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
@@ -35,6 +36,51 @@ func engine(ctx context.Context) error {
 		return err
 	}
 
+	// What the engine decides leaves the process on a topic of its own, produced
+	// by a client of its own: the group that reads telemetry and the producer
+	// that reports findings fail apart from each other.
+	detections, err := broker.NewDetections(broker.Config{
+		Brokers:  settings.brokers,
+		Topic:    settings.topology.Detections.Name,
+		ClientID: serviceName,
+	})
+	if err != nil {
+		return err
+	}
+	defer detections.Close()
+
+	engineRuntime := runtime{
+		bounds:       settings.state,
+		partitioning: detectionstate.Partitioning{By: broker.PartitionedBy, Sole: settings.sole},
+		skew:         settings.skew,
+	}
+
+	// A process that cannot read its rules does not start: running against a
+	// ruleset nobody chose is worse than refusing to run.
+	registry, err := ruleset.New(ruleset.Options{
+		Source:  written(settings.rules),
+		Metrics: ruleset.NewMetrics(platform.Metrics()),
+		Logger:  platform.Logger(),
+	})
+	if err != nil {
+		return err
+	}
+
+	// The rule tree this process ships with is what it runs until the control
+	// plane has published something: an engine that cannot reach a control plane
+	// still detects, and a published ruleset takes over the moment it is read.
+	published, err := publishedRulesets(ctx, settings, platform, registry, engineRuntime)
+	if err != nil {
+		return err
+	}
+	defer published.reader.Close()
+
+	keeper, err := keeping(engineRuntime, registry.Current())
+	if err != nil {
+		return err
+	}
+	analysis.ObserveState(platform.Metrics(), settings.state, keeper.Keys)
+
 	consumer, err := broker.NewConsumer(broker.ConsumerConfig{
 		Brokers:      settings.brokers,
 		Topic:        settings.topology.Events.Name,
@@ -43,6 +89,7 @@ func engine(ctx context.Context) error {
 		MaxRecords:   settings.batchEvents,
 		FetchMaxWait: settings.fetchMaxWait,
 		Metrics:      broker.NewConsumerMetrics(platform.Metrics()),
+		Recovery:     recovering(engineRuntime, settings.topology.Events.Partitions, registry, platform.Logger()),
 	})
 	if err != nil {
 		return err
@@ -61,45 +108,6 @@ func engine(ctx context.Context) error {
 		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
 	}
 
-	// What the engine decides leaves the process on a topic of its own, produced
-	// by a client of its own: the group that reads telemetry and the producer
-	// that reports findings fail apart from each other.
-	detections, err := broker.NewDetections(broker.Config{
-		Brokers:  settings.brokers,
-		Topic:    settings.topology.Detections.Name,
-		ClientID: serviceName,
-	})
-	if err != nil {
-		return err
-	}
-	defer detections.Close()
-
-	// A process that cannot read its rules does not start: running against a
-	// ruleset nobody chose is worse than refusing to run.
-	registry, err := ruleset.New(ruleset.Options{
-		Source:  written(settings.rules),
-		Metrics: ruleset.NewMetrics(platform.Metrics()),
-		Logger:  platform.Logger(),
-	})
-	if err != nil {
-		return err
-	}
-
-	// The rule tree this process ships with is what it runs until the control
-	// plane has published something: an engine that cannot reach a control plane
-	// still detects, and a published ruleset takes over the moment it is read.
-	published, err := publishedRulesets(ctx, settings, platform, registry)
-	if err != nil {
-		return err
-	}
-	defer published.reader.Close()
-
-	keeper, err := keeping(settings.state, registry.Current())
-	if err != nil {
-		return err
-	}
-	analysis.ObserveState(platform.Metrics(), settings.state, keeper.Keys)
-
 	component, err := analysis.NewEngine(analysis.EngineOptions{
 		Source:         source{consumer: consumer},
 		Rules:          rules{registry: registry},
@@ -117,7 +125,7 @@ func engine(ctx context.Context) error {
 
 	platform.Health().Register("backbone", consumer.Ping)
 	platform.Health().Register("detections", detections.Ping)
-	platform.Add(published.follower(platform.Logger(), registry))
+	platform.Add(published.follower(platform.Logger(), registry, engineRuntime))
 	platform.Add(component)
 
 	platform.Logger().Info("analysis_engine_configured",
@@ -131,6 +139,9 @@ func engine(ctx context.Context) error {
 		slog.Duration("state_window", settings.state.Window),
 		slog.Int("state_observations_per_key", settings.state.ObservationsPerKey),
 		slog.Int("state_keys", settings.state.Keys),
+		slog.Any("stream_keyed_by", broker.PartitionedBy),
+		slog.Bool("sole_reader", settings.sole),
+		slog.Duration("state_recovery", engineRuntime.recovering(registry.Current())),
 	)
 
 	return platform.Run(ctx)

@@ -124,6 +124,13 @@ var within = map[string]restriction{
 		},
 		because: "what analysing an event means has no transport of its own: this half is reached from the backbone",
 	},
+	"internal/broker": {
+		prefixes: []string{
+			modulePath + "/internal/analysis",
+			modulePath + "/internal/ruleset",
+		},
+		because: "how far a reader must read back to rebuild what it remembers is a property of the rules it runs, and the backbone is handed the answer rather than working it out",
+	},
 	"internal/alert": {
 		prefixes: []string{modulePath + "/internal/incident"},
 		because:  "an alert is one detection somebody owns and an incident is a story several events tell; they share a plane and a store, and neither is defined in terms of the other",

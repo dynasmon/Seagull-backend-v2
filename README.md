@@ -103,6 +103,29 @@ only after the work it did is durable, so a crash replays rather than skips. A
 record that can never be stored is quarantined with the reason and its position,
 so one poison record cannot hold up a partition.
 
+### State, restarts and replicas
+
+A rule that counts or orders remembers a bounded window of events, held by the
+process that decided them. That state does not move with a partition, so
+whenever the group hands the engine a partition — at startup and at every
+rebalance — the engine is put back to the first record inside the window its
+rules need and reads forward. The window is rebuilt from the stream rather than
+from a checkpoint, because an observation names the event it came from and every
+window is measured in event time: replaying decides the same detections, under
+the same names, and counts nothing twice.
+
+Which rules an engine may run follows from that. `security.events.raw` is keyed
+by the agent, so a rule grouping by anything that includes the agent is exact at
+any number of replicas, and one grouping across agents is only exact where a
+single reader holds the whole stream. A deployment may declare that it does, and
+the declaration is checked against what the group actually assigned it: a claim
+that stops being true stops the engine rather than halving what such a rule
+reports. A ruleset carrying a rule this deployment cannot answer — a window
+wider than the store keeps, a threshold no key could reach, a group the stream
+splits — is refused whole, and the last ruleset the process could answer keeps
+running. Active means executable. See
+[ADR 23](docs/decisions/0023-state-is-owned-by-the-partition-and-rebuilt-by-reading-it-back.md).
+
 ## Architecture
 
 ```text
@@ -269,7 +292,12 @@ container without going through the environment. The settings that matter most:
 | `SEAGULL_GATEWAY_TLS_CERT`, `SEAGULL_GATEWAY_TLS_KEY`, `SEAGULL_GATEWAY_AGENT_CA` | The gateway's mutual TLS material; there is no plaintext mode. |
 | `SEAGULL_TENANT_ID` | The tenant the gateway stamps on everything it admits. |
 | `SEAGULL_DETECTION_RULES` | The rule tree the engine starts on and falls back to. |
-| `SEAGULL_DETECTION_STATE_WINDOW`, `SEAGULL_DETECTION_STATE_OBSERVATIONS`, `SEAGULL_DETECTION_STATE_KEYS` | What a counting or ordering rule may remember: the longest window, the events one key holds, and how many keys at once. |
+| `SEAGULL_DETECTION_STATE_WINDOW`, `SEAGULL_DETECTION_STATE_OBSERVATIONS`, `SEAGULL_DETECTION_STATE_KEYS` | What a counting or ordering rule may remember: the longest window, the events one key holds, and how many keys at once. The window is also what a restart re-reads. |
+| `SEAGULL_DETECTION_STATE_SOLE_READER` | Declares that this engine reads the whole stream, which is what makes a rule counting across agents answerable. Verified against the assignment; a broken claim stops the engine. |
+| `SEAGULL_GATEWAY_MAX_INFLIGHT_BYTES`, `SEAGULL_GATEWAY_MAX_INFLIGHT_REQUESTS` | What the gateway holds at once across every caller. Past it a batch is refused with `503` and `Retry-After`, never queued. |
+| `SEAGULL_BACKBONE_TLS`, `SEAGULL_BACKBONE_TLS_CA`, `SEAGULL_BACKBONE_SASL_MECHANISM`, `SEAGULL_BACKBONE_SASL_USER`, `SEAGULL_BACKBONE_SASL_PASSWORD` | How every process reaches the backbone. Off is a development posture stated rather than inherited; authenticating without TLS is refused. |
+| `SEAGULL_BACKBONE_REPLICAS`, `SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS` | How many copies of a record the backbone keeps and how many must be in sync to acknowledge one. Acknowledging on every in-sync replica means nothing when one replica is in sync. |
+| `SEAGULL_EVENT_STORE_TLS`, `SEAGULL_EVENT_STORE_TLS_CA` | Encryption to the telemetry store. There is no option to skip verification. |
 | `SEAGULL_CONTROL_API_POLICY` | The policy document the control plane is pinned to. |
 | `SEAGULL_CONTROL_API_SESSION_KEY` | Key sessions are signed with; drawn at random when unset. |
 | `SEAGULL_EVENT_STORE_ADDRESS`, `SEAGULL_EVENT_STORE_PASSWORD` | The telemetry store and its credentials. |
@@ -288,8 +316,12 @@ make test-load         # the ingest load scenarios against a live Redpanda
 make bench             # the hot path, one core, no infrastructure
 ```
 
-The end-to-end suite mints its own certificate authority and drives the real
-listeners over real mutual TLS, so it depends on no fixture files and no
+The integration suite includes the failure scenarios the guarantees rest on: a
+restart in the middle of an active window, the same restart without the read
+back so the assertion cannot pass for another reason, a partition moving to a
+second replica while three agents are being counted, and a reader losing the
+whole stream it claimed. The end-to-end suite mints its own certificate
+authority and drives the real listeners over real mutual TLS, so it depends on no fixture files and no
 property of the machine it runs on. The integration suite ends with the whole
 slice — admission, backbone, writer, store — against real infrastructure, which
 is what the rest of it is a decomposition of. The load suite fails a run when

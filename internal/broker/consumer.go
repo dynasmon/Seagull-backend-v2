@@ -39,6 +39,7 @@ type ConsumerConfig struct {
 	MaxRecords   int
 	FetchMaxWait time.Duration
 	Metrics      *ConsumerMetrics
+	Security     Security
 
 	Recovery Recovery
 }
@@ -84,7 +85,12 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 		assigned:   make(map[int32]struct{}),
 	}
 
-	client, err := kgo.NewClient(
+	secured, err := config.Security.options()
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := kgo.NewClient(append([]kgo.Opt{
 		kgo.SeedBrokers(config.Brokers...),
 		kgo.ClientID(config.ClientID),
 		kgo.ConsumerGroup(config.Group),
@@ -101,7 +107,7 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 			consumer.gave(revoked)
 			consumer.metrics.forget(revoked)
 		}),
-	)
+	}, secured...)...)
 	if err != nil {
 		return nil, fmt.Errorf("create backbone consumer: %w", err)
 	}

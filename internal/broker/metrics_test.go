@@ -87,11 +87,16 @@ func TestLagRefreshFailureIsObservable(t *testing.T) {
 
 type staticEndOffsets struct {
 	offsets kadm.ListedOffsets
+	after   kadm.ListedOffsets
 	err     error
 }
 
 func (s staticEndOffsets) ListEndOffsets(context.Context, ...string) (kadm.ListedOffsets, error) {
 	return s.offsets, s.err
+}
+
+func (s staticEndOffsets) ListOffsetsAfterMilli(context.Context, int64, ...string) (kadm.ListedOffsets, error) {
+	return s.after, s.err
 }
 
 func fetchedPartition(partition int32, first, last, highWatermark int64) kgo.FetchTopicPartition {

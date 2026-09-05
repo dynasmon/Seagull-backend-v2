@@ -62,11 +62,13 @@ type gateway struct {
 }
 
 type gatewayOptions struct {
-	maxBodyBytes      int64
-	maxEventsPerBatch int
-	ratePerSecond     float64
-	rateBurst         int
-	backbone          *backbone
+	maxBodyBytes        int64
+	maxEventsPerBatch   int
+	ratePerSecond       float64
+	rateBurst           int
+	maxInflightBytes    int64
+	maxInflightRequests int
+	backbone            *backbone
 }
 
 func startGateway(t *testing.T, options gatewayOptions) *gateway {
@@ -77,6 +79,12 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	}
 	if options.maxEventsPerBatch == 0 {
 		options.maxEventsPerBatch = 100
+	}
+	if options.maxInflightBytes == 0 {
+		options.maxInflightBytes = 64 << 20
+	}
+	if options.maxInflightRequests == 0 {
+		options.maxInflightRequests = 256
 	}
 	if options.backbone == nil {
 		options.backbone = &backbone{}
@@ -121,12 +129,13 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		t.Fatalf("build service: %v", err)
 	}
 
+	instruments := ingest.NewMetrics(platform.Metrics())
 	admitter, err := ingest.NewAdmitter(options.backbone, ingest.Policy{
 		Gateway:           "gateway-test",
 		TenantID:          "acme",
 		MaxEventsPerBatch: options.maxEventsPerBatch,
 		Event:             event.Policy{MaxClockSkew: 5 * time.Minute, MaxAge: 168 * time.Hour},
-	}, ingest.NewMetrics(platform.Metrics()))
+	}, instruments)
 	if err != nil {
 		t.Fatalf("build admitter: %v", err)
 	}
@@ -136,9 +145,16 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		limiter = ratelimit.NewLimiter(options.ratePerSecond, options.rateBurst, 64)
 	}
 
+	capacity, err := ingest.NewCapacity(options.maxInflightBytes, options.maxInflightRequests)
+	if err != nil {
+		t.Fatalf("bound what the gateway holds at once: %v", err)
+	}
+
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{
 		Admitter:       admitter,
 		Limiter:        limiter,
+		Capacity:       capacity,
+		Metrics:        instruments,
 		MaxBodyBytes:   options.maxBodyBytes,
 		PublishTimeout: 2 * time.Second,
 	})

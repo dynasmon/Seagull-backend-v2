@@ -18,6 +18,7 @@ const (
 	retentionKey   = "retention.ms"
 	cleanupKey     = "cleanup.policy"
 	compressionKey = "compression.type"
+	minInSyncKey   = "min.insync.replicas"
 
 	cleanupDelete   = "delete"
 	cleanupCompact  = "compact"
@@ -31,6 +32,9 @@ type Topic struct {
 	Retention   time.Duration
 	Cleanup     string
 	Compression string
+
+	// With one replica in sync, acks from all of them is acks from one.
+	MinInSync int16
 }
 
 type Topology struct {
@@ -47,6 +51,7 @@ type Topology struct {
 // are made from, so the topic carrying them is narrower than the one it reads.
 func LoadTopology(parser *config.Parser) Topology {
 	replicas := int16(parser.Int("SEAGULL_BACKBONE_REPLICAS", 1, 1, 15))
+	minInSync := int16(parser.Int("SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS", int(replicas)/2+1, 1, 15))
 	return Topology{
 		Events: Topic{
 			Name:        parser.String("SEAGULL_BACKBONE_EVENTS_TOPIC", "security.events.raw"),
@@ -55,6 +60,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Retention:   parser.Duration("SEAGULL_BACKBONE_EVENTS_RETENTION", 7*24*time.Hour, time.Hour, 10*365*24*time.Hour),
 			Cleanup:     cleanupDelete,
 			Compression: compressionZstd,
+			MinInSync:   minInSync,
 		},
 		Quarantine: Topic{
 			Name:        parser.String("SEAGULL_BACKBONE_QUARANTINE_TOPIC", "security.events.quarantine"),
@@ -63,6 +69,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Retention:   parser.Duration("SEAGULL_BACKBONE_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
 			Cleanup:     cleanupDelete,
 			Compression: compressionZstd,
+			MinInSync:   minInSync,
 		},
 		Detections: Topic{
 			Name:        parser.String("SEAGULL_BACKBONE_DETECTIONS_TOPIC", "security.detections"),
@@ -71,6 +78,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Retention:   parser.Duration("SEAGULL_BACKBONE_DETECTIONS_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
 			Cleanup:     cleanupDelete,
 			Compression: compressionZstd,
+			MinInSync:   minInSync,
 		},
 		// One quarantine per stream, not one for the platform: a refused record
 		// carries the partition and offset it came from, and those only mean
@@ -82,6 +90,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Retention:   parser.Duration("SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
 			Cleanup:     cleanupDelete,
 			Compression: compressionZstd,
+			MinInSync:   minInSync,
 		},
 		Rulesets: Topic{
 			Name:        parser.String("SEAGULL_BACKBONE_RULESETS_TOPIC", "security.rulesets"),
@@ -89,6 +98,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Replicas:    replicas,
 			Cleanup:     cleanupCompact,
 			Compression: compressionZstd,
+			MinInSync:   minInSync,
 		},
 	}
 }
@@ -113,6 +123,11 @@ func (t Topic) Validate() error {
 		return fmt.Errorf("%s is compacted and keeps the latest of every key, so it declares no retention", t.Name)
 	case t.Compression == "":
 		return fmt.Errorf("%s needs a compression type", t.Name)
+	case t.MinInSync < 1:
+		return fmt.Errorf("%s needs at least one in-sync replica to acknowledge a write", t.Name)
+	case t.MinInSync > t.Replicas:
+		return fmt.Errorf("%s keeps %d replicas and would need %d of them in sync, so no write could ever be acknowledged",
+			t.Name, t.Replicas, t.MinInSync)
 	}
 	return nil
 }
@@ -133,6 +148,7 @@ func (t Topic) settings() []setting {
 		{key: retentionKey, value: retentionOf(t)},
 		{key: cleanupKey, value: t.Cleanup},
 		{key: compressionKey, value: t.Compression},
+		{key: minInSyncKey, value: strconv.FormatInt(int64(t.MinInSync), 10)},
 	}
 }
 
@@ -141,11 +157,18 @@ type Provisioner struct {
 	admin  *kadm.Client
 }
 
-func NewProvisioner(brokers []string, clientID string) (*Provisioner, error) {
+func NewProvisioner(brokers []string, clientID string, security Security) (*Provisioner, error) {
 	if len(brokers) == 0 {
 		return nil, errors.New("the backbone needs at least one broker address")
 	}
-	client, err := kgo.NewClient(kgo.SeedBrokers(brokers...), kgo.ClientID(clientID))
+	secured, err := security.options()
+	if err != nil {
+		return nil, err
+	}
+	client, err := kgo.NewClient(append([]kgo.Opt{
+		kgo.SeedBrokers(brokers...),
+		kgo.ClientID(clientID),
+	}, secured...)...)
 	if err != nil {
 		return nil, fmt.Errorf("create backbone admin client: %w", err)
 	}
@@ -258,7 +281,7 @@ func describe(ctx context.Context, admin *kadm.Client, name string) (*kadm.Topic
 }
 
 func create(ctx context.Context, admin *kadm.Client, topic Topic) (bool, error) {
-	declared := make(map[string]*string, 3)
+	declared := make(map[string]*string, len(topic.settings()))
 	for _, entry := range topic.settings() {
 		declared[entry.key] = kadm.StringPtr(entry.value)
 	}
@@ -294,9 +317,12 @@ func shapeAgrees(topic Topic, detail kadm.TopicDetail) error {
 	return nil
 }
 
+// Declared again on every run rather than only when something diverged, and a
+// setting the broker does not report is unverifiable rather than drift: some
+// accept a setting and never answer for it.
 func converge(ctx context.Context, admin *kadm.Client, topic Topic) ([]string, error) {
 	diverged, err := diverging(ctx, admin, topic)
-	if err != nil || len(diverged) == 0 {
+	if err != nil {
 		return nil, err
 	}
 
@@ -341,10 +367,12 @@ func diverging(ctx context.Context, admin *kadm.Client, topic Topic) ([]string, 
 
 	var diverged []string
 	for _, entry := range topic.settings() {
-		if held, known := current[entry.key]; !known || held != entry.value {
-			diverged = append(diverged, fmt.Sprintf("%s %s is %q and the topology declares %q",
-				topic.Name, entry.key, held, entry.value))
+		held, known := current[entry.key]
+		if !known || held == entry.value {
+			continue
 		}
+		diverged = append(diverged, fmt.Sprintf("%s %s is %q and the topology declares %q",
+			topic.Name, entry.key, held, entry.value))
 	}
 	return diverged, nil
 }

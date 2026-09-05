@@ -8,11 +8,17 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 )
 
+const (
+	Applied = "applied"
+	Refused = "refused"
+)
+
 type Metrics struct {
-	info    *prometheus.GaugeVec
-	rules   *prometheus.GaugeVec
-	loaded  prometheus.Gauge
-	reloads *prometheus.CounterVec
+	info        *prometheus.GaugeVec
+	rules       *prometheus.GaugeVec
+	loaded      prometheus.Gauge
+	reloads     *prometheus.CounterVec
+	activations *prometheus.CounterVec
 }
 
 // Created once per process and handed to the registry, as the engine does it.
@@ -42,8 +48,20 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "reloads_total",
 			Help:      "Attempts to read the source again, by what came of them.",
 		}, []string{"outcome"}),
+		activations: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "ruleset",
+			Name:      "activations_total",
+			Help:      "Rulesets this process was asked to run, by whether it could.",
+		}, []string{"outcome"}),
 	}
-	registry.MustRegister(instruments.info, instruments.rules, instruments.loaded, instruments.reloads)
+	registry.MustRegister(
+		instruments.info,
+		instruments.rules,
+		instruments.loaded,
+		instruments.reloads,
+		instruments.activations,
+	)
 	return instruments
 }
 
@@ -59,3 +77,5 @@ func (m *Metrics) pinned(snapshot *Snapshot, since time.Time) {
 }
 
 func (m *Metrics) reloaded(outcome string) { m.reloads.WithLabelValues(outcome).Inc() }
+
+func (m *Metrics) activated(outcome string) { m.activations.WithLabelValues(outcome).Inc() }

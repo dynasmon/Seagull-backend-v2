@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"google.golang.org/protobuf/encoding/prototext"
@@ -347,8 +348,18 @@ func post(client *http.Client, url, contentType string, message proto.Message) (
 	return response.StatusCode, body, nil
 }
 
+// An agent verifies the gateway with the agent authority, and a person verifies
+// the control and query planes with the operator one. The two are separate
+// trust domains, so neither identity can be presented to the other's plane.
+func trustedBy(name string) string {
+	if name == "agent" {
+		return "agent-ca.pem"
+	}
+	return "operator-ca.pem"
+}
+
 func speaker(pki, name string) (*http.Client, error) {
-	authority, err := os.ReadFile(pki + "/agent-ca.pem")
+	authority, err := os.ReadFile(filepath.Join(pki, trustedBy(name)))
 	if err != nil {
 		return nil, err
 	}

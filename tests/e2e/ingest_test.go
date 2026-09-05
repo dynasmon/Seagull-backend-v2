@@ -292,3 +292,54 @@ func TestOneProcessExposesEveryListenerOnOneOperationalSurface(t *testing.T) {
 		}
 	}
 }
+
+// A body ceiling bounds one caller and nothing about it bounds the sum of them.
+// A gateway holding as much as it was bounded to refuses the next batch rather
+// than accepting work it has no memory for.
+func TestAGatewayAtItsCeilingRefusesWorkInsteadOfHoldingIt(t *testing.T) {
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	gateway := startGateway(t, gatewayOptions{
+		backbone:            &backbone{release: release, entered: entered},
+		maxInflightRequests: 1,
+	})
+
+	holding := gateway.client(t, "web-01")
+	waiting := gateway.client(t, "web-02")
+
+	held := make(chan int, 1)
+	go func() {
+		response, _ := gateway.send(t, holding, fixtures.Batch("batch-held",
+			fixtures.SSHAuthentication{EventID: "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"}.Event()))
+		held <- response.StatusCode
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first batch never reached the backbone")
+	}
+
+	response, payload := gateway.send(t, waiting, fixtures.Batch("batch-refused",
+		fixtures.SSHAuthentication{EventID: "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb"}.Event()))
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("a gateway at its ceiling answered %d: %s", response.StatusCode, payload)
+	}
+	if code := decodeRejection(t, payload).GetCode(); code != ingest.CodeAtCapacity {
+		t.Errorf("the refusal reads %q, so an agent cannot tell it from a rejected batch", code)
+	}
+	if retry := response.Header.Get("Retry-After"); retry == "" {
+		t.Error("the refusal does not tell the agent when to come back")
+	}
+
+	close(release)
+	if status := <-held; status != http.StatusOK {
+		t.Fatalf("the batch that was already in flight answered %d", status)
+	}
+
+	admitted, _ := gateway.send(t, waiting, fixtures.Batch("batch-after",
+		fixtures.SSHAuthentication{EventID: "cccccccc-3333-4333-8333-cccccccccccc"}.Event()))
+	if admitted.StatusCode != http.StatusOK {
+		t.Fatalf("the gateway kept refusing after the work it was holding finished: %d", admitted.StatusCode)
+	}
+}

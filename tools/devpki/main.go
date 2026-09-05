@@ -16,7 +16,7 @@ func main() {
 	caller := flag.String("caller", "dev-analyst", "common name of the development query caller certificate")
 	admin := flag.String("admin", "dev-admin", "common name of the development control plane administrator certificate")
 	tenants := flag.String("tenants", "default", "tenants the query caller certificate is authorised to read")
-	hosts := flag.String("hosts", "localhost,127.0.0.1,ingest-gateway,query-api,control-api", "names and addresses the gateway certificate covers")
+	hosts := flag.String("hosts", "localhost,127.0.0.1", "names and addresses every server certificate covers, on top of its own service name")
 	validity := flag.Duration("validity", 90*24*time.Hour, "how long the issued certificates stay valid")
 	flag.Parse()
 
@@ -27,41 +27,81 @@ func main() {
 }
 
 func generate(directory, agentID, caller, admin string, tenants, hosts []string, validity time.Duration) error {
+	agents, err := agentDomain(agentID, hosts, validity)
+	if err != nil {
+		return err
+	}
+	operators, err := operatorDomain(caller, admin, tenants, hosts, validity)
+	if err != nil {
+		return err
+	}
+
+	bundle, err := devpki.Write(directory, agents, operators)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("agent authority     %s\n", bundle.AgentAuthority)
+	fmt.Printf("gateway             %s\n", bundle.GatewayCertificate)
+	fmt.Printf("agent               %s\n", bundle.AgentCertificate)
+	fmt.Printf("operator authority  %s\n", bundle.OperatorAuthority)
+	fmt.Printf("control-api         %s\n", bundle.ControlCertificate)
+	fmt.Printf("query-api           %s\n", bundle.QueryCertificate)
+	fmt.Printf("caller              %s\n", bundle.CallerCertificate)
+	fmt.Printf("administrator       %s\n", bundle.AdminCertificate)
+	return nil
+}
+
+// What an agent may authenticate to, and nothing else: the gateway it sends
+// telemetry to, and the identity it sends it with.
+func agentDomain(agentID string, hosts []string, validity time.Duration) (devpki.Domain, error) {
 	authority, err := devpki.NewAuthority("Seagull Development Agent CA", validity+24*time.Hour)
 	if err != nil {
-		return err
+		return devpki.Domain{}, err
 	}
-	server, err := authority.IssueServer("ingest-gateway", hosts, validity)
+	gateway, err := authority.IssueServer("ingest-gateway", append([]string{"ingest-gateway"}, hosts...), validity)
 	if err != nil {
-		return err
+		return devpki.Domain{}, err
 	}
-	client, err := authority.IssueClient(agentID, validity)
+	agent, err := authority.IssueClient(agentID, validity)
 	if err != nil {
-		return err
+		return devpki.Domain{}, err
 	}
+	return devpki.Domain{
+		Authority: authority.Material(),
+		Servers:   map[string]devpki.Material{"gateway": gateway},
+		Clients:   map[string]devpki.Material{"agent": agent},
+	}, nil
+}
+
+// What a person or an automation may authenticate to. Each plane gets a key of
+// its own, so the gateway's key is not also the control plane's.
+func operatorDomain(caller, admin string, tenants, hosts []string, validity time.Duration) (devpki.Domain, error) {
+	authority, err := devpki.NewAuthority("Seagull Development Operator CA", validity+24*time.Hour)
+	if err != nil {
+		return devpki.Domain{}, err
+	}
+
+	servers := map[string]devpki.Material{}
+	for _, name := range []string{"control-api", "query-api"} {
+		issued, err := authority.IssueServer(name, append([]string{name}, hosts...), validity)
+		if err != nil {
+			return devpki.Domain{}, err
+		}
+		servers[name] = issued
+	}
+
 	reader, err := authority.IssueCaller(caller, tenants, validity)
 	if err != nil {
-		return err
+		return devpki.Domain{}, err
 	}
-
 	administrator, err := authority.IssueCaller(admin, tenants, validity)
 	if err != nil {
-		return err
+		return devpki.Domain{}, err
 	}
-
-	bundle, err := devpki.Write(directory, authority.Material(), server, client, reader, administrator)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("authority   %s\n", bundle.AuthorityCertificate)
-	fmt.Printf("gateway     %s\n", bundle.ServerCertificate)
-	fmt.Printf("gateway key %s\n", bundle.ServerKey)
-	fmt.Printf("agent       %s\n", bundle.ClientCertificate)
-	fmt.Printf("agent key   %s\n", bundle.ClientKey)
-	fmt.Printf("caller      %s\n", bundle.CallerCertificate)
-	fmt.Printf("caller key  %s\n", bundle.CallerKey)
-	fmt.Printf("admin       %s\n", bundle.AdminCertificate)
-	fmt.Printf("admin key   %s\n", bundle.AdminKey)
-	return nil
+	return devpki.Domain{
+		Authority: authority.Material(),
+		Servers:   servers,
+		Clients:   map[string]devpki.Material{"caller": reader, "admin": administrator},
+	}, nil
 }

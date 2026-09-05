@@ -67,14 +67,23 @@ func gateway(ctx context.Context) error {
 		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
 	}
 
-	admitter, err := ingest.NewAdmitter(publisher, settings.admissionRules, ingest.NewMetrics(platform.Metrics()))
+	instruments := ingest.NewMetrics(platform.Metrics())
+	admitter, err := ingest.NewAdmitter(publisher, settings.admissionRules, instruments)
 	if err != nil {
 		return err
 	}
 
+	capacity, err := ingest.NewCapacity(settings.maxInflightBytes, settings.maxInflightRequests)
+	if err != nil {
+		return err
+	}
+	ingest.ObserveCapacity(platform.Metrics(), capacity)
+
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{
 		Admitter:       admitter,
 		Limiter:        ratelimit.NewLimiter(settings.ratePerSecond, settings.rateBurst, settings.trackedAgents),
+		Capacity:       capacity,
+		Metrics:        instruments,
 		MaxBodyBytes:   settings.maxBodyBytes,
 		PublishTimeout: settings.publishTimeout,
 	})

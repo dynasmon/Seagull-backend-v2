@@ -18,6 +18,10 @@ type ConsumerMetrics struct {
 	commits      prometheus.Counter
 	lagRefreshes *prometheus.CounterVec
 	lag          *prometheus.GaugeVec
+	rebuilds     *prometheus.CounterVec
+	replayed     *prometheus.CounterVec
+	movements    *prometheus.CounterVec
+	held         *prometheus.GaugeVec
 	mu           sync.Mutex
 	positions    map[lagPartition]lagPosition
 }
@@ -65,6 +69,30 @@ func NewConsumerMetrics(registry *metrics.Registry) *ConsumerMetrics {
 			Name:      "consumer_lag_records",
 			Help:      "Records between the committed processing position and the end of the partition.",
 		}, []string{"topic", "partition"}),
+		rebuilds: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "backbone",
+			Name:      "state_rebuild_partitions_total",
+			Help:      "Partitions read back from an earlier position so what a rule remembers could be rebuilt.",
+		}, []string{"topic"}),
+		replayed: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "backbone",
+			Name:      "state_rebuild_records_total",
+			Help:      "Records a rebuild put back in front of the reader.",
+		}, []string{"topic"}),
+		movements: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "backbone",
+			Name:      "partitions_moved_total",
+			Help:      "Partitions this reader took from its group or gave back to it.",
+		}, []string{"topic", "movement"}),
+		held: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "backbone",
+			Name:      "partitions_held",
+			Help:      "Partitions of the topic this reader is currently assigned.",
+		}, []string{"topic"}),
 		positions: make(map[lagPartition]lagPosition),
 	}
 	registry.MustRegister(
@@ -73,6 +101,10 @@ func NewConsumerMetrics(registry *metrics.Registry) *ConsumerMetrics {
 		instruments.commits,
 		instruments.lagRefreshes,
 		instruments.lag,
+		instruments.rebuilds,
+		instruments.replayed,
+		instruments.movements,
+		instruments.held,
 	)
 	return instruments
 }
@@ -166,6 +198,19 @@ func (m *ConsumerMetrics) fetchFailed(topic string, partition int32) {
 }
 
 func (m *ConsumerMetrics) commitFailed() { m.commits.Inc() }
+
+func (m *ConsumerMetrics) rebuilt(topic string, records int64) {
+	m.rebuilds.WithLabelValues(topic).Inc()
+	m.replayed.WithLabelValues(topic).Add(float64(records))
+}
+
+func (m *ConsumerMetrics) moved(topic, movement string, partitions int) {
+	m.movements.WithLabelValues(topic, movement).Add(float64(partitions))
+}
+
+func (m *ConsumerMetrics) holding(topic string, partitions int) {
+	m.held.WithLabelValues(topic).Set(float64(partitions))
+}
 
 func (m *ConsumerMetrics) lagRefreshFailed(topic string) {
 	m.lagRefreshes.WithLabelValues(topic).Inc()

@@ -126,6 +126,19 @@ func (p *Parser) Int(key string, fallback, minimum, maximum int) int {
 	return parsed
 }
 
+func (p *Parser) Bool(key string, fallback bool) bool {
+	value, ok := p.raw(key)
+	if !ok {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		p.fail(key, fmt.Errorf("%q is not true or false", value))
+		return fallback
+	}
+	return parsed
+}
+
 func (p *Parser) Duration(key string, fallback, minimum, maximum time.Duration) time.Duration {
 	value, ok := p.raw(key)
 	if !ok {

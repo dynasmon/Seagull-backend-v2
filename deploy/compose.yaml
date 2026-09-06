@@ -18,6 +18,15 @@ x-backbone: &backbone
   SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_RETENTION: ${SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_RETENTION:-720h}
   SEAGULL_BACKBONE_RULESETS_TOPIC: security.rulesets
   SEAGULL_BACKBONE_REPLICAS: ${SEAGULL_BACKBONE_REPLICAS:-1}
+  SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS: ${SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS:-1}
+  # Plaintext and unauthenticated is a development posture, stated rather than
+  # inherited. A deployment turns both on together; the two never separate,
+  # because a password on a plaintext connection is a password given away.
+  SEAGULL_BACKBONE_TLS: ${SEAGULL_BACKBONE_TLS:-false}
+  SEAGULL_BACKBONE_TLS_CA: ${SEAGULL_BACKBONE_TLS_CA:-}
+  SEAGULL_BACKBONE_SASL_MECHANISM: ${SEAGULL_BACKBONE_SASL_MECHANISM:-none}
+  SEAGULL_BACKBONE_SASL_USER: ${SEAGULL_BACKBONE_SASL_USER:-}
+  SEAGULL_BACKBONE_SASL_PASSWORD: ${SEAGULL_BACKBONE_SASL_PASSWORD:-}
 
 # One declaration of the relational store, read by the command that applies its
 # schema and by the two processes that verify it before they serve.
@@ -122,6 +131,7 @@ services:
       SEAGULL_EVENT_STORE_DATABASE: ${SEAGULL_EVENT_STORE_DATABASE:-seagull}
       SEAGULL_EVENT_STORE_USER: ${SEAGULL_EVENT_STORE_USER:-seagull}
       SEAGULL_EVENT_STORE_PASSWORD: ${SEAGULL_EVENT_STORE_PASSWORD:-}
+      SEAGULL_EVENT_STORE_TLS: ${SEAGULL_EVENT_STORE_TLS:-false}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
     restart: "no"
     <<: *hardening
@@ -178,6 +188,11 @@ services:
     environment:
       <<: *backbone
       SEAGULL_DETECTION_RULES: /etc/seagull/rules
+      SEAGULL_DETECTION_STATE_WINDOW: ${SEAGULL_DETECTION_STATE_WINDOW:-1h}
+      # One engine reads the whole stream here, which is what lets a rule count
+      # across agents. It is checked against the assignment, so scaling this
+      # service stops it rather than halving what such a rule reports.
+      SEAGULL_DETECTION_STATE_SOLE_READER: ${SEAGULL_DETECTION_STATE_SOLE_READER:-true}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
     volumes:
@@ -203,6 +218,7 @@ services:
       SEAGULL_EVENT_STORE_DATABASE: ${SEAGULL_EVENT_STORE_DATABASE:-seagull}
       SEAGULL_EVENT_STORE_USER: ${SEAGULL_EVENT_STORE_USER:-seagull}
       SEAGULL_EVENT_STORE_PASSWORD: ${SEAGULL_EVENT_STORE_PASSWORD:-}
+      SEAGULL_EVENT_STORE_TLS: ${SEAGULL_EVENT_STORE_TLS:-false}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
     <<: *hardening
@@ -275,6 +291,8 @@ services:
       SEAGULL_GATEWAY_TLS_CERT: /run/pki/gateway.pem
       SEAGULL_GATEWAY_TLS_KEY: /run/pki/gateway-key.pem
       SEAGULL_GATEWAY_AGENT_CA: /run/pki/agent-ca.pem
+      SEAGULL_GATEWAY_MAX_INFLIGHT_BYTES: ${SEAGULL_GATEWAY_MAX_INFLIGHT_BYTES:-128MiB}
+      SEAGULL_GATEWAY_MAX_INFLIGHT_REQUESTS: ${SEAGULL_GATEWAY_MAX_INFLIGHT_REQUESTS:-512}
       SEAGULL_TENANT_ID: ${SEAGULL_TENANT_ID:-default}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
@@ -300,9 +318,9 @@ services:
     environment:
       <<: [*backbone, *alertstore]
       SEAGULL_CONTROL_API_ADDRESS: 0.0.0.0:8445
-      SEAGULL_CONTROL_API_TLS_CERT: /run/pki/gateway.pem
-      SEAGULL_CONTROL_API_TLS_KEY: /run/pki/gateway-key.pem
-      SEAGULL_CONTROL_API_CALLER_CA: /run/pki/agent-ca.pem
+      SEAGULL_CONTROL_API_TLS_CERT: /run/pki/control-api.pem
+      SEAGULL_CONTROL_API_TLS_KEY: /run/pki/control-api-key.pem
+      SEAGULL_CONTROL_API_CALLER_CA: /run/pki/operator-ca.pem
       SEAGULL_CONTROL_API_POLICY: /etc/seagull/policy.yml
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
@@ -331,9 +349,9 @@ services:
       - "${SEAGULL_QUERY_API_PUBLISH:-127.0.0.1:8444}:8444"
     environment:
       SEAGULL_QUERY_API_ADDRESS: 0.0.0.0:8444
-      SEAGULL_QUERY_API_TLS_CERT: /run/pki/gateway.pem
-      SEAGULL_QUERY_API_TLS_KEY: /run/pki/gateway-key.pem
-      SEAGULL_QUERY_API_CALLER_CA: /run/pki/agent-ca.pem
+      SEAGULL_QUERY_API_TLS_CERT: /run/pki/query-api.pem
+      SEAGULL_QUERY_API_TLS_KEY: /run/pki/query-api-key.pem
+      SEAGULL_QUERY_API_CALLER_CA: /run/pki/operator-ca.pem
       SEAGULL_QUERY_STORE_ADDRESS: clickhouse:9000
       SEAGULL_QUERY_STORE_DATABASE: ${SEAGULL_EVENT_STORE_DATABASE:-seagull}
       SEAGULL_QUERY_STORE_USER: ${SEAGULL_EVENT_STORE_USER:-seagull}

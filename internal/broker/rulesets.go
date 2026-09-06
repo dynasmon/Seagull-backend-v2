@@ -109,12 +109,17 @@ func NewRulesetLog(config Config, maxRecords int) (*RulesetLog, error) {
 		return nil, errors.New("a ruleset reader needs a positive record ceiling")
 	}
 
-	client, err := kgo.NewClient(
+	secured, err := config.Security.options()
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := kgo.NewClient(append([]kgo.Opt{
 		kgo.SeedBrokers(config.Brokers...),
 		kgo.ClientID(config.ClientID),
 		kgo.ConsumeTopics(config.Topic),
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
-	)
+	}, secured...)...)
 	if err != nil {
 		return nil, fmt.Errorf("create backbone client: %w", err)
 	}

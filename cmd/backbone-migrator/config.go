@@ -13,6 +13,7 @@ type configuration struct {
 	logFormat string
 	brokers   []string
 	topology  broker.Topology
+	security  broker.Security
 }
 
 // Provisions the backbone and exits, so it takes none of the settings that
@@ -23,6 +24,7 @@ func load(parser *config.Parser) (configuration, error) {
 		logFormat: parser.Enum("SEAGULL_LOG_FORMAT", log.FormatJSON, log.FormatJSON, log.FormatText),
 		brokers:   parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
 		topology:  broker.LoadTopology(parser),
+		security:  broker.LoadSecurity(parser),
 	}
 
 	return loaded, parser.Err()

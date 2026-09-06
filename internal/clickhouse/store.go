@@ -2,8 +2,11 @@ package clickhouse
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -149,6 +152,49 @@ type Config struct {
 	User     string
 	Password config.Secret
 	Timeout  time.Duration
+
+	// There is no option to skip verification: a deployment that cannot verify
+	// the store names the authority that signs it.
+	TLS        bool
+	CAFile     string
+	ServerName string
+}
+
+func LoadConfig(prefix string, parser *config.Parser) Config {
+	return Config{
+		Address:    parser.RequiredString(prefix + "_ADDRESS"),
+		Database:   parser.String(prefix+"_DATABASE", "seagull"),
+		User:       parser.String(prefix+"_USER", "seagull"),
+		Password:   parser.Secret(prefix + "_PASSWORD"),
+		Timeout:    parser.Duration(prefix+"_TIMEOUT", 30*time.Second, time.Second, 5*time.Minute),
+		TLS:        parser.Bool(prefix+"_TLS", false),
+		CAFile:     parser.FilePath(prefix+"_TLS_CA", ""),
+		ServerName: parser.String(prefix+"_TLS_SERVER_NAME", ""),
+	}
+}
+
+func (c Config) tls() (*tls.Config, error) {
+	if !c.TLS {
+		if c.CAFile != "" {
+			return nil, errors.New("event store tls material was given and tls is off")
+		}
+		return nil, nil
+	}
+
+	configured := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: c.ServerName}
+	if c.CAFile == "" {
+		return configured, nil
+	}
+	authority, err := os.ReadFile(c.CAFile)
+	if err != nil {
+		return nil, fmt.Errorf("read the event store authority: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(authority) {
+		return nil, fmt.Errorf("%s carries no certificate", c.CAFile)
+	}
+	configured.RootCAs = pool
+	return configured, nil
 }
 
 type Store struct {
@@ -286,7 +332,13 @@ func connect(configuration Config) (driver.Conn, error) {
 		return nil, errors.New("the event store needs a positive timeout")
 	}
 
+	secured, err := configuration.tls()
+	if err != nil {
+		return nil, err
+	}
+
 	connection, err := clickhouse.Open(&clickhouse.Options{
+		TLS:  secured,
 		Addr: []string{configuration.Address},
 		Auth: clickhouse.Auth{
 			Database: configuration.Database,

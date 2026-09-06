@@ -25,6 +25,7 @@ type Config struct {
 	Brokers  []string
 	Topic    string
 	ClientID string
+	Security Security
 }
 
 type Publisher struct {
@@ -43,15 +44,20 @@ func newProducerClient(config Config) (*kgo.Client, error) {
 		return nil, errors.New("the backbone needs a topic")
 	}
 
-	client, err := kgo.NewClient(
+	secured, err := config.Security.options()
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := kgo.NewClient(append([]kgo.Opt{
 		kgo.SeedBrokers(config.Brokers...),
 		kgo.ClientID(config.ClientID),
 		kgo.RequiredAcks(kgo.AllISRAcks()),
 		kgo.ProducerBatchCompression(kgo.ZstdCompression(), kgo.NoCompression()),
-		kgo.ProducerLinger(5*time.Millisecond),
+		kgo.ProducerLinger(5 * time.Millisecond),
 		kgo.MaxBufferedRecords(200_000),
 		kgo.RecordRetries(3),
-	)
+	}, secured...)...)
 	if err != nil {
 		return nil, fmt.Errorf("create backbone client: %w", err)
 	}

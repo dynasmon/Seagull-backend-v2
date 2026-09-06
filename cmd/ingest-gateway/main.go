@@ -49,6 +49,7 @@ func gateway(ctx context.Context) error {
 		Brokers:  settings.brokers,
 		Topic:    settings.topology.Events.Name,
 		ClientID: settings.admissionRules.Gateway,
+		Security: settings.security,
 	})
 	if err != nil {
 		return err

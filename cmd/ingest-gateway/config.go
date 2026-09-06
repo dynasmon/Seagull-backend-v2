@@ -36,6 +36,7 @@ type configuration struct {
 
 	brokers  []string
 	topology broker.Topology
+	security broker.Security
 }
 
 func load(parser *config.Parser) (configuration, error) {
@@ -64,6 +65,7 @@ func load(parser *config.Parser) (configuration, error) {
 
 		brokers:  parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
 		topology: broker.LoadTopology(parser),
+		security: broker.LoadSecurity(parser),
 	}
 
 	loaded.ratePerSecond = float64(parser.Int("SEAGULL_GATEWAY_RATE_PER_SECOND", 200, 0, 1_000_000))

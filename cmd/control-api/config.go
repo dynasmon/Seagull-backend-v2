@@ -21,6 +21,7 @@ type configuration struct {
 
 	brokers      []string
 	topology     broker.Topology
+	security     broker.Security
 	startTimeout time.Duration
 	logRecords   int
 
@@ -51,6 +52,7 @@ func load(parser *config.Parser) (configuration, error) {
 
 		brokers:      parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
 		topology:     broker.LoadTopology(parser),
+		security:     broker.LoadSecurity(parser),
 		startTimeout: parser.Duration("SEAGULL_CONTROL_API_START_TIMEOUT", 30*time.Second, time.Second, 5*time.Minute),
 		logRecords:   parser.Int("SEAGULL_CONTROL_API_RULESET_RECORDS", 256, 1, 10_000),
 

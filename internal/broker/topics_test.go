@@ -99,6 +99,10 @@ func TestEveryTopicPropertyIsConfigurablePerEnvironment(t *testing.T) {
 		if topic.Replicas != 3 {
 			t.Errorf("%s is declared with %d replicas: the topology must not assume a single broker", topic.Name, topic.Replicas)
 		}
+		if topic.MinInSync != 2 {
+			t.Errorf("%s acknowledges a write on %d of 3 replicas: acks from every in-sync replica means nothing when one of them is in sync",
+				topic.Name, topic.MinInSync)
+		}
 	}
 }
 
@@ -110,18 +114,24 @@ func TestAnIncompleteTopicIsRefused(t *testing.T) {
 		Retention:   time.Hour,
 		Cleanup:     cleanupDelete,
 		Compression: compressionZstd,
+		MinInSync:   1,
 	}
 	if err := complete.Validate(); err != nil {
 		t.Fatalf("a complete topic was refused: %v", err)
 	}
 
 	for name, broken := range map[string]func(Topic) Topic{
-		"no name":        func(topic Topic) Topic { topic.Name = ""; return topic },
-		"no partition":   func(topic Topic) Topic { topic.Partitions = 0; return topic },
-		"no replica":     func(topic Topic) Topic { topic.Replicas = 0; return topic },
-		"no retention":   func(topic Topic) Topic { topic.Retention = 0; return topic },
-		"no cleanup":     func(topic Topic) Topic { topic.Cleanup = ""; return topic },
-		"no compression": func(topic Topic) Topic { topic.Compression = ""; return topic },
+		"no name":            func(topic Topic) Topic { topic.Name = ""; return topic },
+		"no partition":       func(topic Topic) Topic { topic.Partitions = 0; return topic },
+		"no replica":         func(topic Topic) Topic { topic.Replicas = 0; return topic },
+		"no retention":       func(topic Topic) Topic { topic.Retention = 0; return topic },
+		"no cleanup":         func(topic Topic) Topic { topic.Cleanup = ""; return topic },
+		"no compression":     func(topic Topic) Topic { topic.Compression = ""; return topic },
+		"no in-sync replica": func(topic Topic) Topic { topic.MinInSync = 0; return topic },
+		"more in-sync replicas than replicas": func(topic Topic) Topic {
+			topic.Replicas, topic.MinInSync = 2, 3
+			return topic
+		},
 	} {
 		if err := broken(complete).Validate(); err == nil {
 			t.Errorf("a topic with %s was accepted", name)
@@ -138,7 +148,7 @@ func TestTheSettingsOfATopicAreOrdered(t *testing.T) {
 	for _, entry := range topic.settings() {
 		keys = append(keys, entry.key)
 	}
-	if want := []string{retentionKey, cleanupKey, compressionKey}; !slices.Equal(keys, want) {
+	if want := []string{retentionKey, cleanupKey, compressionKey, minInSyncKey}; !slices.Equal(keys, want) {
 		t.Fatalf("settings are ordered %v, want %v", keys, want)
 	}
 

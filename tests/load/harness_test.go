@@ -136,13 +136,15 @@ func (g *gateway) awaitStop(budget time.Duration) error {
 }
 
 type gatewayOptions struct {
-	backbone          ingest.Backbone
-	maxBodyBytes      int64
-	maxEventsPerBatch int
-	ratePerSecond     float64
-	rateBurst         int
-	trackedAgents     int
-	publishTimeout    time.Duration
+	backbone            ingest.Backbone
+	maxBodyBytes        int64
+	maxInflightBytes    int64
+	maxInflightRequests int
+	maxEventsPerBatch   int
+	ratePerSecond       float64
+	rateBurst           int
+	trackedAgents       int
+	publishTimeout      time.Duration
 }
 
 func startGateway(t *testing.T, options gatewayOptions) *gateway {
@@ -153,6 +155,12 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	}
 	if options.maxEventsPerBatch == 0 {
 		options.maxEventsPerBatch = 10_000
+	}
+	if options.maxInflightBytes == 0 {
+		options.maxInflightBytes = 512 << 20
+	}
+	if options.maxInflightRequests == 0 {
+		options.maxInflightRequests = 4096
 	}
 	if options.trackedAgents == 0 {
 		options.trackedAgents = 10_000
@@ -203,12 +211,13 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		t.Fatalf("build service: %v", err)
 	}
 
+	instruments := ingest.NewMetrics(platform.Metrics())
 	admitter, err := ingest.NewAdmitter(options.backbone, ingest.Policy{
 		Gateway:           "gateway-load",
 		TenantID:          "acme",
 		MaxEventsPerBatch: options.maxEventsPerBatch,
 		Event:             event.Policy{MaxClockSkew: 5 * time.Minute, MaxAge: 168 * time.Hour},
-	}, ingest.NewMetrics(platform.Metrics()))
+	}, instruments)
 	if err != nil {
 		t.Fatalf("build admitter: %v", err)
 	}
@@ -218,9 +227,16 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		limiter = ratelimit.NewLimiter(options.ratePerSecond, options.rateBurst, options.trackedAgents)
 	}
 
+	capacity, err := ingest.NewCapacity(options.maxInflightBytes, options.maxInflightRequests)
+	if err != nil {
+		t.Fatalf("bound what the gateway holds at once: %v", err)
+	}
+
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{
 		Admitter:       admitter,
 		Limiter:        limiter,
+		Capacity:       capacity,
+		Metrics:        instruments,
 		MaxBodyBytes:   options.maxBodyBytes,
 		PublishTimeout: options.publishTimeout,
 	})

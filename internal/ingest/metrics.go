@@ -88,6 +88,38 @@ func (m *Metrics) batchUnavailable(events int) {
 	m.events.WithLabelValues("unavailable").Add(float64(events))
 }
 
+// Registered by the executable, because only it knows which gateway the
+// ceiling was chosen for.
+func ObserveCapacity(registry *metrics.Registry, capacity *Capacity) {
+	bytes, requests := capacity.Bounds()
+	registry.MustRegister(
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "ingest",
+			Name:      "inflight_bytes",
+			Help:      "Request bytes the gateway has reserved and not yet released.",
+		}, func() float64 { held, _ := capacity.Held(); return float64(held) }),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "ingest",
+			Name:      "inflight_requests",
+			Help:      "Requests the gateway is holding at once.",
+		}, func() float64 { _, inflight := capacity.Held(); return float64(inflight) }),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "ingest",
+			Name:      "inflight_byte_ceiling",
+			Help:      "Request bytes the gateway holds at once before it refuses work.",
+		}, func() float64 { return float64(bytes) }),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "ingest",
+			Name:      "inflight_request_ceiling",
+			Help:      "Requests the gateway holds at once before it refuses work.",
+		}, func() float64 { return float64(requests) }),
+	)
+}
+
 func (m *Metrics) observeLag(received time.Time, record *eventv1.Event) {
 	eventTime := record.GetTime().GetEventTime()
 	if eventTime == nil {

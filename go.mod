@@ -2,6 +2,8 @@ module github.com/dynasmon/Seagull-backend-v2
 
 go 1.25.0
 
+toolchain go1.25.13
+
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.40.3
 	github.com/dynasmon/Seagull-contracts v0.10.0

@@ -26,3 +26,4 @@ rediscovered by reading the code.
 - [20. A sequence is a rule whose stages are ordered in event time, decided once per window that holds it](0020-a-sequence-is-decided-by-the-window-that-holds-it.md)
 - [21. An incident is a correlation somebody owns, and how far its order can be trusted is measured](0021-an-incident-is-a-correlation-somebody-owns.md)
 - [22. Sigma is translated and never adopted, and what it can say here is what the canonical form made comparable](0022-sigma-is-translated-and-never-adopted.md)
+- [23. Detection state is owned by the partition that feeds it, and rebuilt by reading that partition back](0023-state-is-owned-by-the-partition-and-rebuilt-by-reading-it-back.md)

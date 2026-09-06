@@ -46,6 +46,8 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_GATEWAY_TLS_KEY` | required | server private key |
 | `SEAGULL_GATEWAY_AGENT_CA` | required | authority that agent certificates must chain to |
 | `SEAGULL_GATEWAY_MAX_BODY` | `8MiB` | ceiling on a batch body, counted as it is read |
+| `SEAGULL_GATEWAY_MAX_INFLIGHT_BYTES` | `128MiB` | request bytes held at once across every caller |
+| `SEAGULL_GATEWAY_MAX_INFLIGHT_REQUESTS` | `512` | requests held at once across every caller |
 | `SEAGULL_GATEWAY_MAX_EVENTS_PER_BATCH` | `1000` | ceiling on events in one batch |
 | `SEAGULL_GATEWAY_PUBLISH_TIMEOUT` | `10s` | budget for making a batch durable |
 | `SEAGULL_GATEWAY_RATE_PER_SECOND` | `200` | per-agent batch budget, `0` disables it |
@@ -77,9 +79,25 @@ numbers come from.
 | `SEAGULL_BACKBONE_QUARANTINE_PARTITIONS` | `3` | |
 | `SEAGULL_BACKBONE_QUARANTINE_RETENTION` | `720h` | |
 | `SEAGULL_BACKBONE_REPLICAS` | `1` | replication factor of every topic |
+| `SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS` | `replicas/2 + 1` | replicas that must be in sync for a write to be acknowledged |
+| `SEAGULL_BACKBONE_TLS` | `false` | encrypt the connection to the brokers |
+| `SEAGULL_BACKBONE_TLS_CA` | unset | authority the brokers must chain to; the system pool when unset |
+| `SEAGULL_BACKBONE_TLS_CERT`, `SEAGULL_BACKBONE_TLS_KEY` | unset | client certificate for mutual TLS to the brokers |
+| `SEAGULL_BACKBONE_TLS_SERVER_NAME` | unset | name the broker certificate must carry |
+| `SEAGULL_BACKBONE_SASL_MECHANISM` | `none` | `scram-sha-256` or `scram-sha-512` |
+| `SEAGULL_BACKBONE_SASL_USER`, `SEAGULL_BACKBONE_SASL_PASSWORD` | unset | credentials for that mechanism |
 
 Every process reads the same declaration: `backbone-migrator` applies it, and
 the gateway and the writer verify it before they serve.
+
+Plaintext and unauthenticated is a development posture, written down rather than
+inherited. A deployment turns encryption and authentication on together:
+authenticating without TLS is refused, because a password on a plaintext
+connection is a password given away. Acknowledging on every in-sync replica is
+only a durability statement alongside `SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS`:
+with one replica in sync, acks from all of them is acks from one. Redpanda
+accepts the setting and does not report it back, so the migrator declares it on
+every run and reports drift only for settings a broker answers for.
 
 ### analysis-engine
 
@@ -97,6 +115,28 @@ the gateway and the writer verify it before they serve.
 | `SEAGULL_DETECTION_STATE_WINDOW` | `1h` | the longest window a counting rule may ask for, and what a restart costs to rebuild |
 | `SEAGULL_DETECTION_STATE_OBSERVATIONS` | `128` | events one key holds; past it the count is a floor and says so |
 | `SEAGULL_DETECTION_STATE_KEYS` | `4096` | keys held at once; at the ceiling a new key is refused rather than an old one evicted |
+| `SEAGULL_DETECTION_STATE_SOLE_READER` | `false` | declares that this engine reads the whole stream, which is what makes a rule counting across agents answerable |
+
+State held in a process does not move with a partition, so whenever the group
+hands the engine one — at startup and at every rebalance — the engine is put back
+to the first record inside the window its running rules need and reads forward
+from there. That is what `SEAGULL_DETECTION_STATE_WINDOW` costs on a restart,
+widened by `SEAGULL_EVENT_MAX_CLOCK_SKEW` because a window is event time and the
+stream is ordered by arrival. A deployment running no stateful rule reads
+nothing back, and a reader further behind than the window keeps its position
+rather than being moved forward onto telemetry nobody has decided.
+`backbone_state_rebuild_partitions_total` and
+`backbone_state_rebuild_records_total` say how often that happened and how much
+it cost; `backbone_partitions_held` and `backbone_partitions_moved_total` say
+what the group is doing.
+
+`security.events.raw` is keyed by the agent. A rule whose `group_by` includes
+the agent is exact at any number of replicas; one that groups across agents is
+exact only where a single reader holds the whole stream, which is what
+`SEAGULL_DETECTION_STATE_SOLE_READER` declares. The claim is checked against the
+assignment on every rebalance, and a reader that loses the stream it claimed
+stops rather than reporting a share of what such a rule was written to find. See
+[ADR 23](decisions/0023-state-is-owned-by-the-partition-and-rebuilt-by-reading-it-back.md).
 
 The rule tree is the bootstrap, not the source of truth. The engine runs it
 until `security.rulesets` names a published ruleset to run, and from then on the
@@ -118,7 +158,12 @@ The tenant is always part of the grouping and is never written; grouping by the
 class, the tenant or the event identifier is refused. A count above what
 `SEAGULL_DETECTION_STATE_OBSERVATIONS` holds, or a window longer than
 `SEAGULL_DETECTION_STATE_WINDOW`, stops the process at startup rather than
-running a rule that could never fire. Past its threshold a rule decides once per
+running a rule that could never fire, and the same check runs again on every
+ruleset the log names active: a published ruleset this deployment cannot answer
+is refused whole and counted as
+`ruleset_activations_total{outcome="refused"}`, leaving the last one it could
+answer running. Rules that do not run are not held to it, so a translated Sigma
+catalogue of drafts still ships. Past its threshold a rule decides once per
 matching event and never more — nothing resets when a rule fires — so folding
 those into one piece of work is the alerting document's job.
 `detection_state_observations_total` says what became of every event a counting

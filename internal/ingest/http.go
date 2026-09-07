@@ -24,11 +24,20 @@ const (
 
 	ContentType = "application/x-protobuf"
 
-	CodeAtCapacity = "gateway_at_capacity"
+	CodeAtCapacity  = "gateway_at_capacity"
+	CodeNotAdmitted = "agent_not_admitted"
 )
+
+// Whether the platform still honours an agent's identity. The gateway is told
+// the answer rather than looking it up: the registry is a control-plane store
+// and the ingest path reads no store per batch.
+type Roster interface {
+	Admits(agentID string) bool
+}
 
 type HandlerOptions struct {
 	Admitter       *Admitter
+	Roster         Roster
 	Limiter        *ratelimit.Limiter
 	Capacity       *Capacity
 	Metrics        *Metrics
@@ -38,6 +47,7 @@ type HandlerOptions struct {
 
 type Handler struct {
 	admitter       *Admitter
+	roster         Roster
 	limiter        *ratelimit.Limiter
 	capacity       *Capacity
 	metrics        *Metrics
@@ -48,6 +58,9 @@ type Handler struct {
 func NewHandler(options HandlerOptions) (*Handler, error) {
 	if options.Admitter == nil {
 		return nil, errors.New("the ingest handler needs an admitter")
+	}
+	if options.Roster == nil {
+		return nil, errors.New("the ingest handler needs to know which agents the platform still honours")
 	}
 	if options.MaxBodyBytes <= 0 {
 		return nil, errors.New("the ingest handler needs a positive body ceiling")
@@ -67,6 +80,7 @@ func NewHandler(options HandlerOptions) (*Handler, error) {
 	}
 	return &Handler{
 		admitter:       options.Admitter,
+		roster:         options.Roster,
 		limiter:        options.Limiter,
 		capacity:       options.Capacity,
 		metrics:        options.Metrics,
@@ -83,6 +97,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := log.With(r.Context(), slog.String("agent_id", identity.AgentID))
+
+	// A certificate says who an agent is and the registry says whether the
+	// platform still listens to it. The answer is held in memory from a
+	// compacted topic, so refusing costs a map lookup and no round trip.
+	if !h.roster.Admits(identity.AgentID) {
+		h.metrics.batchRejected(CodeNotAdmitted)
+		refuse(w, http.StatusForbidden, CodeNotAdmitted,
+			"the platform no longer admits telemetry from this agent", "", -1)
+		return
+	}
 
 	if !h.limiter.Allow(identity.AgentID) {
 		w.Header().Set("Retry-After", "1")

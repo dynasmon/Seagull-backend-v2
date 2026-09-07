@@ -312,6 +312,8 @@ services:
         condition: service_completed_successfully
       control-migrator:
         condition: service_completed_successfully
+      store-migrator:
+        condition: service_completed_successfully
     networks: [backbone, agents]
     ports:
       - "${SEAGULL_CONTROL_API_PUBLISH:-127.0.0.1:8445}:8445"
@@ -322,6 +324,10 @@ services:
       SEAGULL_CONTROL_API_TLS_KEY: /run/pki/control-api-key.pem
       SEAGULL_CONTROL_API_CALLER_CA: /run/pki/operator-ca.pem
       SEAGULL_CONTROL_API_POLICY: /etc/seagull/policy.yml
+      SEAGULL_CONTROL_TELEMETRY_STORE_ADDRESS: clickhouse:9000
+      SEAGULL_CONTROL_TELEMETRY_STORE_DATABASE: ${SEAGULL_EVENT_STORE_DATABASE:-seagull}
+      SEAGULL_CONTROL_TELEMETRY_STORE_USER: ${SEAGULL_EVENT_STORE_USER:-seagull}
+      SEAGULL_CONTROL_TELEMETRY_STORE_PASSWORD: ${SEAGULL_EVENT_STORE_PASSWORD:-}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
     volumes:

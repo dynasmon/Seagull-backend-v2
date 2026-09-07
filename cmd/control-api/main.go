@@ -12,6 +12,7 @@ import (
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/authz"
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
+	"github.com/dynasmon/Seagull-backend-v2/internal/clickhouse"
 	"github.com/dynasmon/Seagull-backend-v2/internal/control"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/ratelimit"
@@ -101,6 +102,45 @@ func controlAPI(ctx context.Context) error {
 		return err
 	}
 
+	admissions, err := broker.NewAgents(broker.Config{
+		Brokers:  settings.brokers,
+		Topic:    settings.topology.Agents.Name,
+		ClientID: serviceName,
+		Security: settings.security,
+	})
+	if err != nil {
+		return err
+	}
+	defer admissions.Close()
+
+	agentCtx, cancelAgents := context.WithTimeout(ctx, settings.startTimeout)
+	defer cancelAgents()
+	drift, err := admissions.VerifyTopics(agentCtx, settings.topology.Agents)
+	if err != nil {
+		return err
+	}
+	for _, entry := range drift {
+		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
+	}
+
+	seen, err := clickhouse.NewLiveness(settings.telemetry, settings.livenessHorizon)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = seen.Close() }()
+
+	announcer, err := control.NewAnnouncer(control.AnnouncerOptions{
+		Agents:     raised.Agents(),
+		Admissions: admissions,
+		Metrics:    instruments,
+		Logger:     platform.Logger(),
+		Every:      settings.announceEvery,
+		Batch:      settings.announceBatch,
+	})
+	if err != nil {
+		return err
+	}
+
 	transport, err := mutualTransport(settings)
 	if err != nil {
 		return err
@@ -115,6 +155,9 @@ func controlAPI(ctx context.Context) error {
 		Rulesets:        rulesets{catalogue: published.catalogue, publisher: published.publisher},
 		Alerts:          raised,
 		Incidents:       raised.Incidents(),
+		Agents:          raised.Agents(),
+		Admissions:      admissions,
+		Liveness:        seen,
 		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
@@ -139,12 +182,16 @@ func controlAPI(ctx context.Context) error {
 		slog.Int("rulesets_published", published.catalogue.Count()),
 		slog.String("ruleset_active", published.catalogue.Activation().GetRulesetId()),
 		slog.String("alert_store_database", settings.alerts.Database),
+		slog.String("agents_topic", settings.topology.Agents.Name),
+		slog.Duration("liveness_horizon", settings.livenessHorizon),
 	)
 
 	platform.Health().Register("backbone", published.publisher.Ping)
 	platform.Health().Register("alert-store", raised.Ping)
+	platform.Health().Register("telemetry-store", seen.Ping)
 	platform.Add(published.follower(platform.Logger()))
 	platform.Add(listener)
+	platform.Add(announcer)
 	platform.Add(sweeper{sessions: sessions, every: settings.sessionLife})
 
 	return platform.Run(ctx)

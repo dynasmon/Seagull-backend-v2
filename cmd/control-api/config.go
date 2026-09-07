@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
+	"github.com/dynasmon/Seagull-backend-v2/internal/clickhouse"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 	"github.com/dynasmon/Seagull-backend-v2/internal/postgres"
@@ -34,7 +35,12 @@ type configuration struct {
 	rateBurst      int
 	trackedCallers int
 
-	alerts postgres.Config
+	alerts    postgres.Config
+	telemetry clickhouse.Config
+
+	livenessHorizon time.Duration
+	announceEvery   time.Duration
+	announceBatch   int
 
 	readTimeout  time.Duration
 	writeTimeout time.Duration
@@ -64,7 +70,13 @@ func load(parser *config.Parser) (configuration, error) {
 		rateBurst:      parser.Int("SEAGULL_CONTROL_API_RATE_BURST", 40, 1, 100_000),
 		trackedCallers: parser.Int("SEAGULL_CONTROL_API_TRACKED_CALLERS", 4096, 1, 1_000_000),
 
-		alerts: postgres.LoadConfig("SEAGULL_ALERT_STORE", parser),
+		alerts:    postgres.LoadConfig("SEAGULL_ALERT_STORE", parser),
+		telemetry: clickhouse.LoadConfig("SEAGULL_CONTROL_TELEMETRY_STORE", parser),
+
+		livenessHorizon: parser.Duration("SEAGULL_CONTROL_API_LIVENESS_HORIZON",
+			clickhouse.DefaultLivenessHorizon, time.Hour, 365*24*time.Hour),
+		announceEvery: parser.Duration("SEAGULL_CONTROL_API_ANNOUNCE_INTERVAL", 30*time.Second, time.Second, time.Hour),
+		announceBatch: parser.Int("SEAGULL_CONTROL_API_ANNOUNCE_BATCH", 100, 1, 500),
 
 		readTimeout:  parser.Duration("SEAGULL_CONTROL_API_READ_TIMEOUT", 15*time.Second, time.Second, 5*time.Minute),
 		writeTimeout: parser.Duration("SEAGULL_CONTROL_API_WRITE_TIMEOUT", 15*time.Second, time.Second, 5*time.Minute),

@@ -6,7 +6,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/postgres"
 )
 
-const serviceName = "alert-migrator"
+const serviceName = "control-migrator"
 
 type configuration struct {
 	logLevel  string

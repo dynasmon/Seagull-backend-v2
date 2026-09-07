@@ -25,6 +25,9 @@ type Metrics struct {
 	activated   *prometheus.CounterVec
 	moved       *prometheus.CounterVec
 	correlated  *prometheus.CounterVec
+	registered  *prometheus.CounterVec
+	announced   *prometheus.CounterVec
+	outstanding prometheus.Gauge
 }
 
 func NewMetrics(registry *metrics.Registry) *Metrics {
@@ -119,6 +122,24 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "incidents_moved_total",
 			Help:      "Attempts to move an incident, by the state it reached or by refusal.",
 		}, []string{"outcome"}),
+		registered: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "agents_moved_total",
+			Help:      "Attempts to register or move an agent, by the state it reached or by refusal.",
+		}, []string{"outcome"}),
+		announced: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "agent_admissions_total",
+			Help:      "Attempts to tell the data plane what was decided about an agent, by what came of them.",
+		}, []string{"outcome"}),
+		outstanding: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "agent_admissions_outstanding",
+			Help:      "Agents whose recorded state the data plane has not been told about.",
+		}),
 	}
 
 	registry.MustRegister(
@@ -126,6 +147,7 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 		instruments.reloads, instruments.authn, instruments.authz,
 		instruments.sessions, instruments.opened, instruments.revoked, instruments.ratelimited,
 		instruments.published, instruments.activated, instruments.moved, instruments.correlated,
+		instruments.registered, instruments.announced, instruments.outstanding,
 	)
 	return instruments
 }
@@ -210,5 +232,23 @@ func (m *Metrics) alertMoved(outcome string) {
 func (m *Metrics) incidentMoved(outcome string) {
 	if m != nil {
 		m.correlated.WithLabelValues(outcome).Inc()
+	}
+}
+
+func (m *Metrics) agentMoved(outcome string) {
+	if m != nil {
+		m.registered.WithLabelValues(outcome).Inc()
+	}
+}
+
+func (m *Metrics) agentAnnounced(outcome string) {
+	if m != nil {
+		m.announced.WithLabelValues(outcome).Inc()
+	}
+}
+
+func (m *Metrics) agentsOutstanding(count int) {
+	if m != nil {
+		m.outstanding.Set(float64(count))
 	}
 }

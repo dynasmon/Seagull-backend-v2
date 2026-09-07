@@ -26,6 +26,9 @@ type ServerOptions struct {
 	Rulesets        Rulesets
 	Alerts          Alerts
 	Incidents       Incidents
+	Agents          Agents
+	Admissions      Admissions
+	Liveness        Liveness
 	Metrics         *Metrics
 	Instrumentation *httpx.Instrumentation
 	Logger          *slog.Logger
@@ -37,13 +40,17 @@ type ServerOptions struct {
 }
 
 type Server struct {
-	sessions  *Sessions
-	registry  *Registry
-	rulesets  Rulesets
-	alerts    Alerts
-	incidents Incidents
-	metrics   *Metrics
-	now       func() time.Time
+	sessions   *Sessions
+	registry   *Registry
+	rulesets   Rulesets
+	alerts     Alerts
+	incidents  Incidents
+	agents     Agents
+	admissions Admissions
+	liveness   Liveness
+	metrics    *Metrics
+	logger     *slog.Logger
+	now        func() time.Time
 }
 
 type route struct {
@@ -92,6 +99,12 @@ func NewHandler(options ServerOptions) (http.Handler, error) {
 		return nil, errors.New("the control listener works alerts and needs somewhere to read and move them")
 	case options.Incidents == nil:
 		return nil, errors.New("the control listener works incidents and needs somewhere to read and move them")
+	case options.Agents == nil:
+		return nil, errors.New("the control listener administers agents and needs a registry to keep them in")
+	case options.Admissions == nil:
+		return nil, errors.New("the control listener decides what a gateway admits and needs somewhere to say so")
+	case options.Logger == nil:
+		return nil, errors.New("the control listener needs a logger")
 	case options.Metrics == nil:
 		return nil, errors.New("the control listener needs metrics")
 	case options.Instrumentation == nil:
@@ -102,13 +115,17 @@ func NewHandler(options ServerOptions) (http.Handler, error) {
 	}
 
 	server := &Server{
-		sessions:  options.Sessions,
-		registry:  options.Registry,
-		rulesets:  options.Rulesets,
-		alerts:    options.Alerts,
-		incidents: options.Incidents,
-		metrics:   options.Metrics,
-		now:       options.Now,
+		sessions:   options.Sessions,
+		registry:   options.Registry,
+		rulesets:   options.Rulesets,
+		alerts:     options.Alerts,
+		incidents:  options.Incidents,
+		agents:     options.Agents,
+		admissions: options.Admissions,
+		liveness:   options.Liveness,
+		metrics:    options.Metrics,
+		logger:     options.Logger,
+		now:        options.Now,
 	}
 
 	mux := http.NewServeMux()
@@ -131,7 +148,7 @@ func (s *Server) routes() []route {
 		{http.MethodGet, SessionPath, "session_describe", Session(), s.describeSession()},
 		{http.MethodDelete, SessionPath, "session_revoke", Session(), s.revokeSession()},
 		{http.MethodGet, SessionsPath, "session_list", Session(), s.listSessions()},
-	}, slices.Concat(rulesetRoutes(s), alertRoutes(s), incidentRoutes(s))...)
+	}, slices.Concat(rulesetRoutes(s), alertRoutes(s), incidentRoutes(s), agentRoutes(s))...)
 }
 
 func (s *Server) descriptor() http.Handler {

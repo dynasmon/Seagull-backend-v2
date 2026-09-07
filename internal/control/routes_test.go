@@ -3,6 +3,7 @@ package control_test
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -35,6 +36,20 @@ func listener(t *testing.T, h *harness, store control.Rulesets, raised control.A
 
 func listenerTelling(t *testing.T, h *harness, store control.Rulesets, raised control.Alerts, told control.Incidents) http.Handler {
 	t.Helper()
+	return listenerRegistering(t, h, store, raised, told, newStubAgents(), &stubAdmissions{}, nil)
+}
+
+func listenerRegistering(
+	t *testing.T,
+	h *harness,
+	store control.Rulesets,
+	raised control.Alerts,
+	told control.Incidents,
+	registered control.Agents,
+	admissions control.Admissions,
+	seen control.Liveness,
+) http.Handler {
+	t.Helper()
 
 	handler, err := control.NewHandler(control.ServerOptions{
 		Guard:           h.guard,
@@ -43,7 +58,11 @@ func listenerTelling(t *testing.T, h *harness, store control.Rulesets, raised co
 		Rulesets:        store,
 		Alerts:          raised,
 		Incidents:       told,
+		Agents:          registered,
+		Admissions:      admissions,
+		Liveness:        seen,
 		Metrics:         h.metrics,
+		Logger:          slog.New(slog.DiscardHandler),
 		Instrumentation: httpx.NewInstrumentation(metrics.New("control-api-routes")),
 	})
 	if err != nil {

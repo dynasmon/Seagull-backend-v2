@@ -27,3 +27,4 @@ rediscovered by reading the code.
 - [21. An incident is a correlation somebody owns, and how far its order can be trusted is measured](0021-an-incident-is-a-correlation-somebody-owns.md)
 - [22. Sigma is translated and never adopted, and what it can say here is what the canonical form made comparable](0022-sigma-is-translated-and-never-adopted.md)
 - [23. Detection state is owned by the partition that feeds it, and rebuilt by reading that partition back](0023-state-is-owned-by-the-partition-and-rebuilt-by-reading-it-back.md)
+- [24. An agent is registered by the control plane, and the gateway is told when to stop honouring it](0024-an-agent-is-registered-by-the-control-plane-and-refused-by-the-gateway.md)

@@ -62,11 +62,11 @@ func recovering(engine runtime, partitions int32, registry *ruleset.Registry, lo
 // asks the registry what to decide against, exactly as before.
 type rulesetLog struct {
 	catalogue *ruleset.Catalogue
-	reader    *broker.RulesetLog
+	reader    *broker.StateLog
 }
 
 func publishedRulesets(ctx context.Context, settings configuration, platform *service.Service, registry *ruleset.Registry, engine runtime) (rulesetLog, error) {
-	reader, err := broker.NewRulesetLog(broker.Config{
+	reader, err := broker.NewStateLog(broker.Config{
 		Brokers:  settings.brokers,
 		Topic:    settings.topology.Rulesets.Name,
 		ClientID: serviceName,
@@ -150,7 +150,7 @@ func (l rulesetLog) follower(logger *slog.Logger, registry *ruleset.Registry, en
 }
 
 type follower struct {
-	reader  *broker.RulesetLog
+	reader  *broker.StateLog
 	deliver broker.Deliver
 }
 

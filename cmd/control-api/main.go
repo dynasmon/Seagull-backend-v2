@@ -207,7 +207,7 @@ func (s sweeper) Run(ctx context.Context) error {
 type rulesetLog struct {
 	catalogue *ruleset.Catalogue
 	publisher *broker.Rulesets
-	reader    *broker.RulesetLog
+	reader    *broker.StateLog
 }
 
 func publishedRulesets(ctx context.Context, settings configuration, platform *service.Service) (rulesetLog, error) {
@@ -221,7 +221,7 @@ func publishedRulesets(ctx context.Context, settings configuration, platform *se
 		return rulesetLog{}, err
 	}
 
-	reader, err := broker.NewRulesetLog(broker.Config{
+	reader, err := broker.NewStateLog(broker.Config{
 		Brokers:  settings.brokers,
 		Topic:    settings.topology.Rulesets.Name,
 		ClientID: serviceName,
@@ -284,7 +284,7 @@ func (l rulesetLog) close() {
 }
 
 type follower struct {
-	reader  *broker.RulesetLog
+	reader  *broker.StateLog
 	deliver broker.Deliver
 }
 

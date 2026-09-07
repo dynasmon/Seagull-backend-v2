@@ -35,6 +35,7 @@ roles:
       - detections:read
       - alerts:read
       - incidents:read
+      - agents:read
 
   - name: responder
     description: works alerts and incidents through their lifecycle
@@ -65,6 +66,8 @@ roles:
       - incidents:delete
       - sessions:read
       - sessions:delete
+      - agents:read
+      - agents:write
 
 bindings:
   - subject: e2e-analyst
@@ -96,6 +99,8 @@ type controlPlane struct {
 	address   string
 	authority *devpki.Authority
 	sessions  *control.Sessions
+	agents    *registeredAgents
+	told      *announcedAdmissions
 	stopped   chan error
 }
 
@@ -175,6 +180,8 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 		t.Fatalf("build a guard: %v", err)
 	}
 
+	registered, told := newRegisteredAgents(), &announcedAdmissions{}
+
 	listener, err := control.NewServer(control.ServerOptions{
 		Address:         "127.0.0.1:0",
 		TLS:             mutual,
@@ -184,6 +191,8 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 		Rulesets:        &recordingRulesets{},
 		Alerts:          newRaisedAlerts(),
 		Incidents:       newOpenedIncidents(),
+		Agents:          registered,
+		Admissions:      told,
 		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
@@ -202,6 +211,8 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 		address:   listener.Address(),
 		authority: authority,
 		sessions:  sessions,
+		agents:    registered,
+		told:      told,
 		stopped:   make(chan error, 1),
 	}
 	go func() { running.stopped <- platform.Run(ctx) }()

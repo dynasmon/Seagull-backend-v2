@@ -101,7 +101,7 @@ func publishedFrom(t *testing.T, document, by string) *ruleset.Version {
 func replayed(t *testing.T, addresses []string, topic string) *ruleset.Catalogue {
 	t.Helper()
 
-	reader, err := broker.NewRulesetLog(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"}, 64)
+	reader, err := broker.NewStateLog(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"}, 64)
 	if err != nil {
 		t.Fatalf("build a ruleset reader: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestAFollowerSeesARulesetPublishedAfterItStarted(t *testing.T) {
 	}
 	defer publisher.Close()
 
-	reader, err := broker.NewRulesetLog(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"}, 64)
+	reader, err := broker.NewStateLog(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"}, 64)
 	if err != nil {
 		t.Fatalf("build a ruleset reader: %v", err)
 	}

@@ -100,7 +100,7 @@ func (m *Migrator) pending(ctx context.Context) ([]migration, error) {
 
 func (m *Migrator) Ping(ctx context.Context) error {
 	if err := m.pool.Ping(ctx); err != nil {
-		return fmt.Errorf("reach the alert store: %w", err)
+		return fmt.Errorf("reach the control store: %w", err)
 	}
 	return nil
 }

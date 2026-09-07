@@ -34,9 +34,11 @@ type configuration struct {
 	trackedAgents  int
 	admissionRules ingest.Policy
 
-	brokers  []string
-	topology broker.Topology
-	security broker.Security
+	brokers       []string
+	topology      broker.Topology
+	security      broker.Security
+	startTimeout  time.Duration
+	rosterRecords int
 }
 
 func load(parser *config.Parser) (configuration, error) {
@@ -63,9 +65,11 @@ func load(parser *config.Parser) (configuration, error) {
 		rateBurst:     parser.Int("SEAGULL_GATEWAY_RATE_BURST", 400, 1, 1_000_000),
 		trackedAgents: parser.Int("SEAGULL_GATEWAY_RATE_TRACKED_AGENTS", 10_000, 1, 1_000_000),
 
-		brokers:  parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
-		topology: broker.LoadTopology(parser),
-		security: broker.LoadSecurity(parser),
+		brokers:       parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
+		topology:      broker.LoadTopology(parser),
+		security:      broker.LoadSecurity(parser),
+		startTimeout:  parser.Duration("SEAGULL_GATEWAY_START_TIMEOUT", 30*time.Second, time.Second, 5*time.Minute),
+		rosterRecords: parser.Int("SEAGULL_GATEWAY_ROSTER_RECORDS", 500, 1, 100_000),
 	}
 
 	loaded.ratePerSecond = float64(parser.Int("SEAGULL_GATEWAY_RATE_PER_SECOND", 200, 0, 1_000_000))

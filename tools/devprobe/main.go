@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
@@ -22,6 +24,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/incident"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
 	"github.com/dynasmon/Seagull-backend-v2/internal/protocol"
+	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 	alertv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/alert/v1"
 	controlv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/control/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
@@ -35,6 +38,8 @@ func main() {
 	huntEndpoint := flag.String("hunt", "", "query plane base URL; asks what was stored instead of sending a batch")
 	alertEndpoint := flag.String("alerts", "", "control plane base URL; works an alert through its lifecycle instead of sending a batch")
 	incidentEndpoint := flag.String("incidents", "", "control plane base URL; reads a correlated story back to its events and works it")
+	agentEndpoint := flag.String("agents", "", "control plane base URL; registers an agent, binds its certificate and revokes it")
+	agentID := flag.String("agent-id", "probe-agent-01", "agent the registry probe registers")
 	window := flag.Duration("window", time.Hour, "how far back a hunt looks")
 	pki := flag.String("pki", ".local/pki", "directory holding the development material")
 	batchID := flag.String("batch-id", "probe-0001", "batch identifier")
@@ -52,10 +57,110 @@ func main() {
 	if *incidentEndpoint != "" {
 		run = func() error { return investigate(*incidentEndpoint, *pki) }
 	}
+	if *agentEndpoint != "" {
+		run = func() error { return enrol(*agentEndpoint, *pki, *agentID) }
+	}
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "devprobe: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func enrol(endpoint, pki, agentID string) error {
+	client, token, err := authenticate(endpoint, pki)
+	if err != nil {
+		return err
+	}
+
+	status, body, err := send(client, http.MethodPost, endpoint+control.AgentsPath, token, &agentv1.Registration{
+		AgentId:      agentID,
+		TenantId:     "default",
+		Platform:     &agentv1.Platform{Os: "linux", Architecture: "amd64", Hostname: agentID + ".dev"},
+		AgentVersion: "2.0.0",
+		Note:         "registered by devprobe",
+	})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusCreated && status != http.StatusConflict {
+		return refused("register", status, body)
+	}
+	fmt.Printf("register status %d\n", status)
+
+	now := time.Now().UTC()
+	digest := sha256.Sum256([]byte(agentID))
+	status, body, err = send(client, http.MethodPost, endpoint+"/v1/agents/"+agentID+"/identity", token,
+		&agentv1.BindingRequest{Identity: &agentv1.Identity{
+			Subject:           agentID,
+			Serial:            hex.EncodeToString(digest[:8]),
+			FingerprintSha256: hex.EncodeToString(digest[:]),
+			IssuedAt:          timestamppb.New(now),
+			ExpiresAt:         timestamppb.New(now.Add(90 * 24 * time.Hour)),
+		}})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		fmt.Printf("bind status %d\n", status)
+	} else {
+		var bound agentv1.Agent
+		if err := proto.Unmarshal(body, &bound); err != nil {
+			return err
+		}
+		fmt.Printf("bound %s state %s revision %d\n", bound.GetAgentId(), bound.GetState(), bound.GetRevision())
+	}
+
+	status, body, err = send(client, http.MethodPost, endpoint+control.AgentSearch, token, &agentv1.Query{Limit: 10})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return refused("search", status, body)
+	}
+	var page agentv1.Page
+	if err := proto.Unmarshal(body, &page); err != nil {
+		return err
+	}
+	fmt.Printf("agents %d\n", len(page.GetAgents()))
+	for _, one := range page.GetAgents() {
+		seen := "never"
+		if one.GetLastSeen() != nil {
+			seen = one.GetLastSeen().AsTime().Format(time.RFC3339)
+		}
+		fmt.Printf("  %s %s %s last seen %s\n", one.GetAgentId(), one.GetState(), one.GetTenantId(), seen)
+	}
+
+	status, body, err = send(client, http.MethodPost, endpoint+"/v1/agents/"+agentID+"/transition", token,
+		&agentv1.TransitionRequest{To: agentv1.State_STATE_REVOKED, Note: "the devprobe run is over"})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return refused("revoke", status, body)
+	}
+	var revoked agentv1.Agent
+	if err := proto.Unmarshal(body, &revoked); err != nil {
+		return err
+	}
+	fmt.Printf("revoked %s state %s revision %d\n", revoked.GetAgentId(), revoked.GetState(), revoked.GetRevision())
+
+	status, body, err = send(client, http.MethodGet, endpoint+"/v1/agents/"+agentID+"/history", token, nil)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return refused("history", status, body)
+	}
+	var history agentv1.History
+	if err := proto.Unmarshal(body, &history); err != nil {
+		return err
+	}
+	fmt.Printf("trail %d\n", len(history.GetTransitions()))
+	for _, line := range history.GetTransitions() {
+		fmt.Printf("  %d %s -> %s by %s: %s\n", line.GetRevision(), line.GetFrom(), line.GetTo(),
+			line.GetActor(), line.GetNote())
+	}
+	return nil
 }
 
 // The query plane authorises by certificate, so this speaks as the caller

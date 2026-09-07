@@ -1,6 +1,7 @@
-// Package postgres holds the relational store: the alerts a person owns, their
-// trail, and the schema both live in. It is an adapter — an executable chooses
-// it, and what an alert means is stated in internal/alert.
+// Package postgres holds the control plane's relational store: the alerts and
+// incidents a person owns, the agents the platform admits telemetry from, their
+// trails, and the schema they live in. It is an adapter — an executable chooses
+// it, and what each record means is stated in its own domain package.
 package postgres
 
 import (
@@ -22,6 +23,8 @@ const (
 	transitionsTable         = "alert_transitions"
 	incidentsTable           = "incidents"
 	incidentTransitionsTable = "incident_transitions"
+	agentsTable              = "agents"
+	agentTransitionsTable    = "agent_transitions"
 )
 
 type Config struct {
@@ -51,11 +54,11 @@ func LoadConfig(prefix string, parser *config.Parser) Config {
 func (c Config) Validate() error {
 	switch {
 	case c.Address == "":
-		return errors.New("the alert store needs an address")
+		return errors.New("the control store needs an address")
 	case c.Database == "":
-		return errors.New("the alert store needs a database")
+		return errors.New("the control store needs a database")
 	case c.User == "":
-		return errors.New("the alert store needs a user")
+		return errors.New("the control store needs a user")
 	}
 	return nil
 }
@@ -97,20 +100,20 @@ func connect(ctx context.Context, configuration Config) (*pgxpool.Pool, error) {
 	}
 	settings, err := pgxpool.ParseConfig(configuration.dsn())
 	if err != nil {
-		return nil, fmt.Errorf("read the alert store address: %w", err)
+		return nil, fmt.Errorf("read the control store address: %w", err)
 	}
 	settings.MaxConns = int32(configuration.MaxConns)
 
 	pool, err := pgxpool.NewWithConfig(ctx, settings)
 	if err != nil {
-		return nil, fmt.Errorf("reach the alert store: %w", err)
+		return nil, fmt.Errorf("reach the control store: %w", err)
 	}
 	return pool, nil
 }
 
 func (s *Store) Ping(ctx context.Context) error {
 	if err := s.pool.Ping(ctx); err != nil {
-		return fmt.Errorf("reach the alert store: %w", err)
+		return fmt.Errorf("reach the control store: %w", err)
 	}
 	return nil
 }
@@ -120,17 +123,21 @@ func (s *Store) Close() error {
 	return nil
 }
 
-// Migrations are applied by alert-migrator and never here: a process on its way
+// Migrations are applied by control-migrator and never here: a process on its way
 // to serving traffic refuses to run against a schema behind the one it ships.
 func (s *Store) VerifySchema(ctx context.Context) error {
-	for _, table := range []string{alertsTable, transitionsTable, incidentsTable, incidentTransitionsTable} {
+	for _, table := range []string{
+		alertsTable, transitionsTable,
+		incidentsTable, incidentTransitionsTable,
+		agentsTable, agentTransitionsTable,
+	} {
 		var present bool
 		err := s.pool.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", table).Scan(&present)
 		if err != nil {
-			return fmt.Errorf("read the alert store schema: %w", err)
+			return fmt.Errorf("read the control store schema: %w", err)
 		}
 		if !present {
-			return fmt.Errorf("the alert store has no %s table: run alert-migrator", table)
+			return fmt.Errorf("the control store has no %s table: run control-migrator", table)
 		}
 	}
 	return nil

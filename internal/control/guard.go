@@ -38,6 +38,10 @@ const (
 	CodeIllegalMove       = "illegal_move"
 	CodeHeldByAnother     = "alert_held_by_another"
 	CodeBadCursor         = "invalid_cursor"
+	CodeUnknownAgent      = "unknown_agent"
+	CodeAgentRegistered   = "agent_already_registered"
+	CodeAgentMoved        = "agent_moved"
+	CodeAgentsUnavailable = "agent_registry_unavailable"
 	CodeAlertsUnavailable = "alerts_unavailable"
 
 	CodeUnknownIncident      = "unknown_incident"

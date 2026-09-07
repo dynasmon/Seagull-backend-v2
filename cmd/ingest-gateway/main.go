@@ -68,6 +68,12 @@ func gateway(ctx context.Context) error {
 		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
 	}
 
+	admitted, err := admissible(ctx, settings, platform)
+	if err != nil {
+		return err
+	}
+	defer admitted.close()
+
 	instruments := ingest.NewMetrics(platform.Metrics())
 	admitter, err := ingest.NewAdmitter(publisher, settings.admissionRules, instruments)
 	if err != nil {
@@ -82,6 +88,7 @@ func gateway(ctx context.Context) error {
 
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{
 		Admitter:       admitter,
+		Roster:         admitted.held,
 		Limiter:        ratelimit.NewLimiter(settings.ratePerSecond, settings.rateBurst, settings.trackedAgents),
 		Capacity:       capacity,
 		Metrics:        instruments,
@@ -107,7 +114,14 @@ func gateway(ctx context.Context) error {
 		return err
 	}
 
+	platform.Logger().Info("agent_roster_read",
+		slog.String("agents_topic", settings.topology.Agents.Name),
+		slog.Int("agents_known", admitted.held.Known()),
+		slog.Int("agents_refused", admitted.held.Refused()),
+	)
+
 	platform.Health().Register("backbone", publisher.Ping)
+	platform.Add(admitted.follower(platform.Logger()))
 	platform.Add(listener)
 
 	return platform.Run(ctx)

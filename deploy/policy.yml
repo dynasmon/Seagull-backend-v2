@@ -13,6 +13,7 @@ roles:
       - detections:read
       - alerts:read
       - incidents:read
+      - agents:read
 
   - name: responder
     description: works alerts and incidents through their lifecycle without changing what detects them
@@ -23,6 +24,7 @@ roles:
       - alerts:write
       - incidents:read
       - incidents:write
+      - agents:read
 
   - name: engineer
     description: writes and publishes the rules the analysis engine runs

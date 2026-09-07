@@ -155,12 +155,12 @@ services:
 
   # Applied by a command that runs to completion, never by a process on its way
   # to serving traffic. The writer and the control plane verify the result.
-  alert-migrator:
+  control-migrator:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
       args:
-        COMPONENT: alert-migrator
+        COMPONENT: control-migrator
         VERSION: ${SEAGULL_VERSION:-dev}
     depends_on:
       postgres:
@@ -259,7 +259,7 @@ services:
     depends_on:
       backbone-migrator:
         condition: service_completed_successfully
-      alert-migrator:
+      control-migrator:
         condition: service_completed_successfully
     networks: [backbone]
     environment:
@@ -310,7 +310,7 @@ services:
     depends_on:
       backbone-migrator:
         condition: service_completed_successfully
-      alert-migrator:
+      control-migrator:
         condition: service_completed_successfully
     networks: [backbone, agents]
     ports:

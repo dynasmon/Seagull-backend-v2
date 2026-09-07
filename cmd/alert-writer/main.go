@@ -58,7 +58,7 @@ func writer(ctx context.Context) error {
 	}
 	defer func() { _ = store.Close() }()
 
-	// Migrations are applied by alert-migrator, never here. This only refuses to
+	// Migrations are applied by control-migrator, never here. This only refuses to
 	// run against a store behind the schema it ships.
 	schemaCtx, cancel := context.WithTimeout(ctx, settings.store.Timeout)
 	defer cancel()

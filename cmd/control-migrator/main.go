@@ -18,7 +18,7 @@ func main() {
 	defer stop()
 
 	if err := migrate(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "alert-migrator: %v\n", err)
+		fmt.Fprintf(os.Stderr, "control-migrator: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -55,7 +55,7 @@ func migrate(ctx context.Context) error {
 		return err
 	}
 
-	logger.Info("alert_store_schema_current",
+	logger.Info("control_store_schema_current",
 		slog.String("database", settings.store.Database),
 		slog.Int("applied", len(applied)),
 	)

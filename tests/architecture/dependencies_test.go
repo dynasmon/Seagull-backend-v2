@@ -132,6 +132,13 @@ var within = map[string]restriction{
 		},
 		because: "how far a reader must read back to rebuild what it remembers is a property of the rules it runs, and the backbone is handed the answer rather than working it out",
 	},
+	"internal/ingest": {
+		prefixes: []string{
+			modulePath + "/internal/agent",
+			modulePath + "/internal/postgres",
+		},
+		because: "whether the platform still honours an agent is decided in the control plane and handed to the gateway as an answer; an ingest path that could reach the registry would be an ingest path that reads a store per batch",
+	},
 	"internal/alert": {
 		prefixes: []string{modulePath + "/internal/incident"},
 		because:  "an alert is one detection somebody owns and an incident is a story several events tell; they share a plane and a store, and neither is defined in terms of the other",

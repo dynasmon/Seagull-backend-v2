@@ -25,6 +25,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agent"
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/devpki"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
@@ -234,6 +235,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{
 		Admitter:       admitter,
+		Roster:         agent.NewRoster(),
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        instruments,

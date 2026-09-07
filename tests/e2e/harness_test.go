@@ -16,6 +16,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agent"
 	"github.com/dynasmon/Seagull-backend-v2/internal/devpki"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
@@ -69,6 +70,7 @@ type gatewayOptions struct {
 	maxInflightBytes    int64
 	maxInflightRequests int
 	backbone            *backbone
+	roster              *agent.Roster
 }
 
 func startGateway(t *testing.T, options gatewayOptions) *gateway {
@@ -88,6 +90,9 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	}
 	if options.backbone == nil {
 		options.backbone = &backbone{}
+	}
+	if options.roster == nil {
+		options.roster = agent.NewRoster()
 	}
 
 	authority, err := devpki.NewAuthority("Seagull Test CA", time.Hour)
@@ -152,6 +157,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{
 		Admitter:       admitter,
+		Roster:         options.roster,
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        instruments,

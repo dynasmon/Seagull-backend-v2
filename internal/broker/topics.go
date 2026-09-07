@@ -43,6 +43,7 @@ type Topology struct {
 	Detections           Topic
 	DetectionsQuarantine Topic
 	Rulesets             Topic
+	Agents               Topic
 }
 
 // Refused records and detections are both kept far longer than admitted events:
@@ -100,11 +101,19 @@ func LoadTopology(parser *config.Parser) Topology {
 			Compression: compressionZstd,
 			MinInSync:   minInSync,
 		},
+		Agents: Topic{
+			Name:        parser.String("SEAGULL_BACKBONE_AGENTS_TOPIC", "security.agents"),
+			Partitions:  1,
+			Replicas:    replicas,
+			Cleanup:     cleanupCompact,
+			Compression: compressionZstd,
+			MinInSync:   minInSync,
+		},
 	}
 }
 
 func (t Topology) Topics() []Topic {
-	return []Topic{t.Events, t.Quarantine, t.Detections, t.DetectionsQuarantine, t.Rulesets}
+	return []Topic{t.Events, t.Quarantine, t.Detections, t.DetectionsQuarantine, t.Rulesets, t.Agents}
 }
 
 func (t Topic) Validate() error {

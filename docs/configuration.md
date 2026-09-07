@@ -54,6 +54,8 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_GATEWAY_RATE_BURST` | `400` | per-agent burst |
 | `SEAGULL_GATEWAY_RATE_TRACKED_AGENTS` | `10000` | how many agents the limiter remembers |
 | `SEAGULL_GATEWAY_ID` | `ingest-gateway` | recorded on every admitted event |
+| `SEAGULL_GATEWAY_START_TIMEOUT` | `30s` | how long it will spend reading the agent roster before it gives up |
+| `SEAGULL_GATEWAY_ROSTER_RECORDS` | `500` | admission records read per fetch |
 | `SEAGULL_EVENT_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock an event may be |
 | `SEAGULL_EVENT_MAX_AGE` | `168h` | how old an event may be and still be admitted |
 
@@ -307,12 +309,12 @@ first time. `alertstore_alerts_total` counts what became of every detection —
 is labelled by rule and by the reason written down. See
 [ADR 17](decisions/0017-noise-is-removed-from-the-alert-and-never-from-the-detection.md).
 
-### alert-writer, control-api and alert-migrator
+### alert-writer, control-api and control-migrator
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `SEAGULL_ALERT_STORE_ADDRESS` | required | PostgreSQL address, `postgres:5432` |
-| `SEAGULL_ALERT_STORE_DATABASE` | `seagull` | the database holding `alerts` and `alert_transitions` |
+| `SEAGULL_ALERT_STORE_DATABASE` | `seagull` | the database holding alerts, incidents and agents with their trails |
 | `SEAGULL_ALERT_STORE_USER` | `seagull` | |
 | `SEAGULL_ALERT_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
 | `SEAGULL_ALERT_STORE_SSLMODE` | `prefer` | `disable` only on a network you already trust |
@@ -320,8 +322,10 @@ is labelled by rule and by the reason written down. See
 | `SEAGULL_ALERT_STORE_TIMEOUT` | `30s` | budget for one statement |
 | `SEAGULL_ALERT_STORE_CONNECT_TIMEOUT` | `10s` | budget to dial |
 
-`alert-migrator` applies the schema and exits, as `store-migrator` does for
-ClickHouse. Both processes that read the store verify the schema before they
+`control-migrator` applies the schema and exits, as `store-migrator` does for
+ClickHouse. The variables keep the `SEAGULL_ALERT_STORE_` prefix they were named
+under; the store now holds three kinds of record and the migrator is named for
+the plane rather than for one of them. Both processes that read the store verify the schema before they
 serve and refuse to run against one behind what they ship. The writer only ever
 inserts and the control plane only ever updates, which is what keeps a replayed
 detection away from somebody's triage.
@@ -343,6 +347,13 @@ detection away from somebody's triage.
 | `SEAGULL_CONTROL_API_RATE_BURST` | `40` | burst above that budget |
 | `SEAGULL_CONTROL_API_START_TIMEOUT` | `30s` | how long it will spend reading the ruleset log before it gives up |
 | `SEAGULL_CONTROL_API_RULESET_RECORDS` | `256` | ruleset records read per fetch |
+| `SEAGULL_CONTROL_API_ANNOUNCE_INTERVAL` | `30s` | how often it republishes agent decisions the backbone has not taken |
+| `SEAGULL_CONTROL_API_ANNOUNCE_BATCH` | `100` | outstanding decisions carried per sweep |
+| `SEAGULL_CONTROL_API_LIVENESS_HORIZON` | `720h` | how far back it looks for when an agent was last heard from |
+| `SEAGULL_CONTROL_TELEMETRY_STORE_ADDRESS` | required | ClickHouse address, read only, for that one question |
+| `SEAGULL_CONTROL_TELEMETRY_STORE_DATABASE` | `seagull` | |
+| `SEAGULL_CONTROL_TELEMETRY_STORE_USER` | `seagull` | |
+| `SEAGULL_CONTROL_TELEMETRY_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
 
 The control plane authenticates a caller by certificate, so it has no plaintext
 mode and no mode without a caller authority: without one there is nobody to be
@@ -351,8 +362,13 @@ being spendable when the process stops.
 
 It also reads `SEAGULL_BACKBONE_BROKERS` and the ruleset topic, and reads that
 topic whole before it serves: a control plane that had seen half the log would
-report an estate nobody has. It holds the only mutating connection to the alert
-store and takes the `SEAGULL_ALERT_STORE_*` settings above.
+report an estate nobody has. It holds the only mutating connection to the
+relational store and takes the `SEAGULL_ALERT_STORE_*` settings above.
+
+It writes the agent topic rather than reading it: what it decided about an agent
+is published there for the gateway, and a decision the backbone did not take is
+carried again on the next sweep. Its connection to the telemetry store answers
+one question — when an agent was last heard from — and writes nothing.
 
 ### query-api
 
@@ -414,7 +430,7 @@ platform's timeline.
 
 ## The backbone topology
 
-Five topics, declared once in `internal/broker` and applied by
+Six topics, declared once in `internal/broker` and applied by
 `backbone-migrator`:
 
 | Topic | Partitions | Retention | Why |
@@ -424,6 +440,7 @@ Five topics, declared once in `internal/broker` and applied by
 | `security.detections` | 6 | 30 days | what the rules decided, keyed by the agent it is about; narrower than the stream it is made from and kept as long as a refused record, for the same reason |
 | `security.detections.quarantine` | 3 | 30 days | records the detection writer could not store; one quarantine per stream, because a refused record's partition and offset only mean something alongside the topic they came from |
 | `security.rulesets` | 1 | compacted, kept | every published ruleset under its own content id, plus one `active` key naming the one to run; one partition because a version and the record activating it are only meaningful in the order they were written |
+| `security.agents` | 1 | compacted, kept | the last thing the control plane decided about each agent, keyed by the agent; one partition because the last record about an agent has to be the last one every gateway sees |
 
 **Partitions and replication are refused, never converged.** Records are keyed
 by `agent_id`, so growing the partition count moves an agent to a different

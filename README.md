@@ -95,6 +95,25 @@ against a policy of typed permissions resolved per request. A token carries
 identity and no authority. Every route declares what it requires and a route
 that declares nothing cannot be registered, so deny-by-default is structural.
 
+### Agent registry and admission
+
+The platform records what it decided about every machine it takes telemetry
+from: which tenant it belongs to, what it says it is, the certificate identity
+bound to it, and where it stands. Registering an agent creates it `pending`;
+binding the certificate it will present makes it `active`; disabling, revoking
+and decommissioning are three different endings, and the last two are final
+because an identifier that came back would re-admit the certificate that was
+revoked. Every change carries an actor and a reason, and the trail is
+append-only.
+
+The gateway keeps authenticating from the certificate and reads no store. What
+the control plane decided crosses `security.agents`, a compacted topic keyed by
+the agent: the gateway replays it before it serves, follows it afterwards, and
+refuses a batch from an agent the platform stopped honouring with a map lookup
+and no round trip. A decision the backbone did not take stays outstanding in the
+registry and is published again until it lands. See
+[ADR 24](docs/decisions/0024-an-agent-is-registered-by-the-control-plane-and-refused-by-the-gateway.md).
+
 ### Storage and failure semantics
 
 Storage is owned per workload: ClickHouse holds telemetry and detections in
@@ -169,9 +188,9 @@ Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 | `event-writer` | Makes admitted telemetry queryable, quarantining what it cannot store. |
 | `detection-writer` | Makes a detection queryable, on the same terms and as a consumer of its own. |
 | `alert-writer` | Opens the work a detection at or above a severity floor becomes: an alert for a finding about one event, folded on a declared key, or an incident for a story several events told. It inserts and never updates. |
-| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, and the alert and incident lifecycles. |
+| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, and the agent registry. |
 | `query-api` | The read plane, and the only reader of the analytical store. |
-| `backbone-migrator`, `store-migrator`, `alert-migrator` | Apply the topic topology, the analytical schema and the relational schema, then exit. Nothing migrates on the way to serving traffic. |
+| `backbone-migrator`, `store-migrator`, `control-migrator` | Apply the topic topology, the analytical schema and the relational schema, then exit. Nothing migrates on the way to serving traffic. |
 
 Dependencies point one way — `cmd` → capability → domain, with adapters plugged
 in at the edges and `internal/platform` never learning about the product. That
@@ -299,6 +318,8 @@ container without going through the environment. The settings that matter most:
 | `SEAGULL_BACKBONE_REPLICAS`, `SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS` | How many copies of a record the backbone keeps and how many must be in sync to acknowledge one. Acknowledging on every in-sync replica means nothing when one replica is in sync. |
 | `SEAGULL_EVENT_STORE_TLS`, `SEAGULL_EVENT_STORE_TLS_CA` | Encryption to the telemetry store. There is no option to skip verification. |
 | `SEAGULL_CONTROL_API_POLICY` | The policy document the control plane is pinned to. |
+| `SEAGULL_BACKBONE_AGENTS_TOPIC` | Where the control plane says what it decided about an agent and the gateway reads it. Compacted, keyed by the agent. |
+| `SEAGULL_CONTROL_TELEMETRY_STORE_ADDRESS` | Where the control plane reads when an agent was last heard from. It writes nothing there. |
 | `SEAGULL_CONTROL_API_SESSION_KEY` | Key sessions are signed with; drawn at random when unset. |
 | `SEAGULL_EVENT_STORE_ADDRESS`, `SEAGULL_EVENT_STORE_PASSWORD` | The telemetry store and its credentials. |
 

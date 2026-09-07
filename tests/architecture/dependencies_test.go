@@ -29,6 +29,7 @@ const (
 // rules below instead of by nothing. The longest matching prefix wins.
 var layers = map[string]layer{
 	"cmd":                     executable,
+	"internal/agent":          domain,
 	"internal/agentidentity":  domain,
 	"internal/alert":          domain,
 	"internal/alertfile":      adapter,

@@ -51,6 +51,16 @@ func (r runtime) admits(running *ruleset.Snapshot) error {
 	return nil
 }
 
+type stream func() (held, partitions int32)
+
+func (r runtime) executes(running *ruleset.Snapshot, held stream) error {
+	if err := r.admits(running); err != nil {
+		return err
+	}
+	assigned, partitions := held()
+	return r.owns(running, assigned, partitions)
+}
+
 // The longest window anything running keeps, widened by the skew the gateway
 // admits: a window is event time and the stream is ordered by arrival.
 func (r runtime) recovering(running *ruleset.Snapshot) time.Duration {

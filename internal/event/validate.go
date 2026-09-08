@@ -158,12 +158,16 @@ func validateBody(record *eventv1.Event) error {
 	}
 }
 
+// An enum is checked for membership and not only against its zero value. The
+// store keeps the name of a value, and a number no build has a name for is kept
+// as the number and read back as unspecified, so an event carrying one would
+// lose what it said between being written and being read.
 func validateAuthentication(authentication *eventv1.Authentication) error {
-	if authentication.GetActivity() == eventv1.Authentication_ACTIVITY_UNSPECIFIED {
-		return &Violation{Field: "authentication.activity", Reason: "is unspecified"}
+	if err := declared("authentication.activity", int32(authentication.GetActivity()), eventv1.Authentication_Activity_name); err != nil {
+		return err
 	}
-	if authentication.GetOutcome() == eventv1.Outcome_OUTCOME_UNSPECIFIED {
-		return &Violation{Field: "authentication.outcome", Reason: "is unspecified"}
+	if err := declared("authentication.outcome", int32(authentication.GetOutcome()), eventv1.Outcome_name); err != nil {
+		return err
 	}
 	if err := text("authentication.outcome_reason", authentication.GetOutcomeReason(), MaxOutcomeReasonLen, false); err != nil {
 		return err
@@ -210,10 +214,23 @@ func validateNetwork(network *eventv1.Network) error {
 	if network == nil {
 		return nil
 	}
+	if _, named := eventv1.Transport_name[int32(network.GetTransport())]; !named {
+		return &Violation{Field: "authentication.network.transport", Reason: "is not a transport the contract declares"}
+	}
 	if err := endpoint("authentication.network.source", network.GetSource()); err != nil {
 		return err
 	}
 	return endpoint("authentication.network.destination", network.GetDestination())
+}
+
+func declared(field string, value int32, names map[int32]string) error {
+	if value == 0 {
+		return &Violation{Field: field, Reason: "is unspecified"}
+	}
+	if _, named := names[value]; !named {
+		return &Violation{Field: field, Reason: "is not a value the contract declares"}
+	}
+	return nil
 }
 
 func endpoint(field string, value *eventv1.Endpoint) error {

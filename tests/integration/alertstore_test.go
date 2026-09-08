@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -641,5 +642,83 @@ func TestAClosedAlertIsNotReraisedInsideItsCooldown(t *testing.T) {
 	}
 	if len(page.GetAlerts()) != 2 {
 		t.Fatalf("the cooldown left %d alerts, want the closed one and the one raised after it", len(page.GetAlerts()))
+	}
+}
+
+// Detections are partitioned by agent and a correlation key need not name one,
+// so two writers can reach one logical alert at once. Reading for an open alert
+// locks nothing when there is not one yet, which is exactly the moment both
+// would raise one; the key is held for the transaction so the second writer
+// reads what the first wrote and folds into it.
+func TestTwoWritersReachingOneKeyAtOnceRaiseOneAlert(t *testing.T) {
+	address := alertStoreAddress(t)
+	tenant := isolated(t)
+	tuning := folding(t, 15*time.Minute, 0)
+	at := time.Now().UTC()
+
+	const writers = 8
+	stores := make([]*postgres.Store, writers)
+	candidates := make([]alert.Candidate, writers)
+	for index := range writers {
+		stores[index] = migratedAlertStore(t, address)
+		candidates[index] = candidate(t, tuning, tenant,
+			fmt.Sprintf("%s-detection-%d", tenant, index), detectionv1.Severity_SEVERITY_HIGH, at)
+	}
+
+	var (
+		start    sync.WaitGroup
+		done     sync.WaitGroup
+		mu       sync.Mutex
+		outcomes []alert.Outcome
+		failures []error
+	)
+	start.Add(1)
+	for index := range writers {
+		done.Add(1)
+		go func() {
+			defer done.Done()
+			start.Wait()
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+
+			answered, err := stores[index].Record(ctx, []alert.Candidate{candidates[index]})
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				failures = append(failures, err)
+				return
+			}
+			outcomes = append(outcomes, answered[0])
+		}()
+	}
+	start.Done()
+	done.Wait()
+
+	if len(failures) > 0 {
+		t.Fatalf("a writer could not record: %v", failures)
+	}
+
+	raised := 0
+	for _, outcome := range outcomes {
+		if outcome == alert.OutcomeRaised {
+			raised++
+		}
+	}
+	if raised != 1 {
+		t.Fatalf("%d writers sharing one correlation key raised %d alerts", writers, raised)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	page, err := stores[0].Page(ctx, &alertv1.Query{}, []string{tenant})
+	if err != nil {
+		t.Fatalf("list what was raised: %v", err)
+	}
+	if len(page.GetAlerts()) != 1 {
+		t.Fatalf("the tenant holds %d alerts", len(page.GetAlerts()))
+	}
+	if occurrences := page.GetAlerts()[0].GetOccurrences(); occurrences != writers {
+		t.Errorf("the alert counts %d occurrences and %d detections reached it", occurrences, writers)
 	}
 }

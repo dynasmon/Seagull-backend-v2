@@ -176,7 +176,7 @@ func TestTheShippedTreeRunsUntilARulesetIsPublished(t *testing.T) {
 	shipped := held.Current().ID()
 
 	log := rulesetLog{catalogue: ruleset.NewCatalogue()}
-	apply := log.applying(quiet(), held, deployment())
+	apply := log.applying(quiet(), held, deployment(), whole)
 
 	version := publishedVersion(t, otherRule)
 	if err := apply(context.Background(), recorded(t, version.Record())); err != nil {
@@ -205,7 +205,7 @@ func TestARulesetRecordTheEngineCannotReadLeavesItRunningWhatItHad(t *testing.T)
 	shipped := held.Current().ID()
 
 	log := rulesetLog{catalogue: ruleset.NewCatalogue()}
-	apply := log.applying(quiet(), held, deployment())
+	apply := log.applying(quiet(), held, deployment(), whole)
 
 	if err := apply(context.Background(), []broker.Record{{Value: []byte{0xff, 0xfe}}}); err != nil {
 		t.Fatalf("an unreadable record ended the replay: %v", err)
@@ -223,7 +223,7 @@ func TestAnActivationForARulesetTheEngineHasNotSeenChangesNothing(t *testing.T) 
 	shipped := held.Current().ID()
 
 	log := rulesetLog{catalogue: ruleset.NewCatalogue()}
-	apply := log.applying(quiet(), held, deployment())
+	apply := log.applying(quiet(), held, deployment(), whole)
 
 	activation := &rulesetv1.Record{Record: &rulesetv1.Record_Active{
 		Active: &rulesetv1.Active{RulesetId: "0000000000000000", ActivatedBy: "dev-engineer"},
@@ -237,6 +237,9 @@ func TestAnActivationForARulesetTheEngineHasNotSeenChangesNothing(t *testing.T) 
 }
 
 func quiet() *slog.Logger { return slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)) }
+
+// One reader holding every partition, which is what a single-process test is.
+func whole() (int32, int32) { return 12, 12 }
 
 const countsAcrossAgents = `schema_version: 1
 rules:
@@ -268,7 +271,7 @@ func TestARulesetThisDeploymentCannotRunIsRefusedAndTheLastOneKeepsRunning(t *te
 	shipped := held.Current().ID()
 
 	log := rulesetLog{catalogue: ruleset.NewCatalogue()}
-	apply := log.applying(quiet(), held, deployment())
+	apply := log.applying(quiet(), held, deployment(), whole)
 
 	version := publishedVersion(t, countsAcrossAgents)
 	if err := apply(context.Background(), recorded(t, version.Record())); err != nil {
@@ -298,7 +301,7 @@ func TestTheSameRulesetRunsWhereTheDeploymentCanAnswerIt(t *testing.T) {
 	sole.partitioning.Sole = true
 
 	log := rulesetLog{catalogue: ruleset.NewCatalogue()}
-	apply := log.applying(quiet(), held, sole)
+	apply := log.applying(quiet(), held, sole, whole)
 
 	version := publishedVersion(t, countsAcrossAgents)
 	if err := apply(context.Background(), recorded(t, version.Record())); err != nil {
@@ -330,5 +333,39 @@ func TestTheRulesTheStackMountsAreExecutableByTheDeploymentItRuns(t *testing.T) 
 	}
 	if err := deployment().admits(snapshot); err != nil {
 		t.Fatalf("the rules the local stack mounts are not executable where it runs: %v", err)
+	}
+}
+
+// The rebalance path already refuses a cross-agent rule on a reader holding part
+// of the stream. An activation arriving while the process runs is the same
+// question asked at another moment, and is answered the same way.
+func TestARulesetThisReaderHoldsPartOfTheStreamForIsRefusedOnActivation(t *testing.T) {
+	directory := t.TempDir()
+	write(t, filepath.Join(directory, "rules.yml"), oneRule)
+
+	held := registry(t, directory)
+	shipped := held.Current().ID()
+
+	sole := deployment()
+	sole.partitioning.Sole = true
+
+	log := rulesetLog{catalogue: ruleset.NewCatalogue()}
+	partial := func() (int32, int32) { return 4, 12 }
+	apply := log.applying(quiet(), held, sole, partial)
+
+	version := publishedVersion(t, countsAcrossAgents)
+	if err := apply(context.Background(), recorded(t, version.Record())); err != nil {
+		t.Fatalf("apply a published version: %v", err)
+	}
+	activation := &rulesetv1.Record{Record: &rulesetv1.Record_Active{
+		Active: &rulesetv1.Active{RulesetId: string(version.ID()), ActivatedBy: "dev-engineer"},
+	}}
+	if err := apply(context.Background(), recorded(t, activation)); err != nil {
+		t.Fatalf("apply an activation: %v", err)
+	}
+
+	if held.Current().ID() != shipped {
+		t.Fatalf("a reader holding 4 of 12 partitions started counting across agents: it runs %s",
+			held.Current().ID())
 	}
 }

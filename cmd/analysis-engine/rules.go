@@ -88,14 +88,15 @@ func publishedRulesets(ctx context.Context, settings configuration, platform *se
 	for _, entry := range drift {
 		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
 	}
-	if err := reader.Replay(startCtx, held.applying(platform.Logger(), registry, engine)); err != nil {
+	unassigned := func() (int32, int32) { return 0, settings.topology.Events.Partitions }
+	if err := reader.Replay(startCtx, held.applying(platform.Logger(), registry, engine, unassigned)); err != nil {
 		reader.Close()
 		return rulesetLog{}, err
 	}
 	return held, nil
 }
 
-func (l rulesetLog) applying(logger *slog.Logger, registry *ruleset.Registry, engine runtime) broker.Deliver {
+func (l rulesetLog) applying(logger *slog.Logger, registry *ruleset.Registry, engine runtime, held stream) broker.Deliver {
 	return func(_ context.Context, records []broker.Record) error {
 		for _, record := range records {
 			if err := l.catalogue.Read(record.Value); err != nil {
@@ -106,7 +107,7 @@ func (l rulesetLog) applying(logger *slog.Logger, registry *ruleset.Registry, en
 				)
 			}
 		}
-		l.pin(registry, engine, logger)
+		l.pin(registry, engine, logger, held)
 		return nil
 	}
 }
@@ -115,7 +116,11 @@ func (l rulesetLog) applying(logger *slog.Logger, registry *ruleset.Registry, en
 // never moves a rule out from under an event halfway through being decided.
 // Compiling is not enough to run: a ruleset this deployment could only answer
 // partially is refused whole, and the last one it could answer keeps running.
-func (l rulesetLog) pin(registry *ruleset.Registry, engine runtime, logger *slog.Logger) {
+// The partitions this reader holds are part of that, and are asked here as well
+// as at every rebalance: a rule counting across agents is answerable only by a
+// reader holding the whole stream, and a rollout must not be able to start one
+// where a rebalance would have refused it.
+func (l rulesetLog) pin(registry *ruleset.Registry, engine runtime, logger *slog.Logger, held stream) {
 	version, published := l.catalogue.Active()
 	if !published {
 		return
@@ -126,7 +131,7 @@ func (l rulesetLog) pin(registry *ruleset.Registry, engine runtime, logger *slog
 	}
 
 	snapshot := version.Snapshot()
-	if err := engine.admits(snapshot); err != nil {
+	if err := engine.executes(snapshot, held); err != nil {
 		registry.Refuse()
 		logger.Error("ruleset_not_executable",
 			slog.String("ruleset", string(version.ID())),
@@ -145,8 +150,8 @@ func running(current *ruleset.Snapshot) string {
 	return string(current.ID())
 }
 
-func (l rulesetLog) follower(logger *slog.Logger, registry *ruleset.Registry, engine runtime) follower {
-	return follower{reader: l.reader, deliver: l.applying(logger, registry, engine)}
+func (l rulesetLog) follower(logger *slog.Logger, registry *ruleset.Registry, engine runtime, held stream) follower {
+	return follower{reader: l.reader, deliver: l.applying(logger, registry, engine, held)}
 }
 
 type follower struct {

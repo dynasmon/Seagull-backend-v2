@@ -1,0 +1,8 @@
+# The build needs the module and the Go tree it compiles. Everything else in the
+# repository reaches the daemon and the layer cache without ever reaching an
+# image, and the development PKI under .local holds private keys.
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/

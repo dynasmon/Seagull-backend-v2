@@ -38,7 +38,7 @@ func (m *Migrator) Apply(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("create %s: %w", ledger, err)
 	}
 
-	outstanding, err := m.pending(ctx)
+	outstanding, err := pending(ctx, m.pool)
 	if err != nil {
 		return nil, err
 	}
@@ -74,8 +74,10 @@ func (m *Migrator) apply(ctx context.Context, entry migration) error {
 	return nil
 }
 
-func (m *Migrator) pending(ctx context.Context) ([]migration, error) {
-	rows, err := m.pool.Query(ctx, "SELECT version FROM "+ledger)
+// A store that was never migrated has no ledger, so the message says so rather
+// than reading as a broken database.
+func pending(ctx context.Context, pool *pgxpool.Pool) ([]migration, error) {
+	rows, err := pool.Query(ctx, "SELECT version FROM "+ledger)
 	if err != nil {
 		return nil, fmt.Errorf("read %s, which a migrated store always has: %w", ledger, err)
 	}

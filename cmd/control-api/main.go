@@ -185,6 +185,7 @@ func controlAPI(ctx context.Context) error {
 		slog.String("agents_topic", settings.topology.Agents.Name),
 		slog.Duration("liveness_horizon", settings.livenessHorizon),
 		slog.Duration("liveness_backdating", settings.livenessBackdating),
+		slog.Any("permissions_not_shown_to_callers", control.Unnamed()),
 	)
 
 	platform.Health().Register("backbone", published.publisher.Ping)

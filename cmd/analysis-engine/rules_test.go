@@ -143,7 +143,16 @@ func recorded(t *testing.T, record *rulesetv1.Record) []broker.Record {
 	if err != nil {
 		t.Fatalf("encode a ruleset record: %v", err)
 	}
-	return []broker.Record{{Partition: 0, Offset: 0, Key: []byte("k"), Value: encoded}}
+	return []broker.Record{{Partition: 0, Offset: 0, Key: []byte(loggedUnder(record)), Value: encoded}}
+}
+
+// The key the log carries a record under, which is what tells the engine a
+// pointer from a line of the activation trail.
+func loggedUnder(record *rulesetv1.Record) string {
+	if version, published := record.GetRecord().(*rulesetv1.Record_Version); published {
+		return version.Version.GetId()
+	}
+	return broker.ActiveKey
 }
 
 func publishedVersion(t *testing.T, document string) *ruleset.Version {

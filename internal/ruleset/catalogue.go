@@ -1,10 +1,13 @@
 package ruleset
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
 	"sync"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -28,6 +31,21 @@ func (c *Conflict) Error() string {
 		c.Rule, c.Revision)
 }
 
+// The key one line of the activation trail is kept under, named by what happened
+// rather than by when it was written: an activation a retry publishes twice is
+// one thing that happened, so compaction keeps one record of it and a reader
+// that replays the log before compaction runs holds one line of it.
+func ActivationKey(active *rulesetv1.Active) string {
+	digest := sha256.New()
+	write := func(value string) { fmt.Fprintf(digest, "%d:%s", len(value), value) }
+
+	write(active.GetRulesetId())
+	write(active.GetActivatedBy())
+	write(active.GetActivatedAt().AsTime().UTC().Format(time.RFC3339Nano))
+	write(active.GetNote())
+	return "activated." + hex.EncodeToString(digest.Sum(nil)[:16])
+}
+
 // What has been published and which of it is meant to be running, built by
 // applying the records of the published log in the order they were written. Two
 // processes that have read the same log hold the same catalogue, which is what
@@ -38,6 +56,8 @@ type Catalogue struct {
 	versions  map[ID]*Version
 	order     []ID
 	active    *rulesetv1.Active
+	activated []*rulesetv1.Active
+	recorded  map[string]struct{}
 	revisions map[revised]string
 }
 
@@ -47,7 +67,11 @@ type revised struct {
 }
 
 func NewCatalogue() *Catalogue {
-	return &Catalogue{versions: make(map[ID]*Version), revisions: make(map[revised]string)}
+	return &Catalogue{
+		versions:  make(map[ID]*Version),
+		recorded:  make(map[string]struct{}),
+		revisions: make(map[revised]string),
+	}
 }
 
 // An activation naming a version this catalogue has not seen is kept rather
@@ -107,12 +131,50 @@ func (c *Catalogue) conflicting(version *Version) error {
 	return nil
 }
 
-func (c *Catalogue) Read(value []byte) error {
+// A record read off the log, applied as the pointer or kept as a line of the
+// trail. Which of the two an activation is comes from the key it was written
+// under, and the key belongs to whatever carries the log rather than here. A
+// line of the trail never moves the pointer: one replayed as desired state would
+// activate a ruleset somebody had already rolled back. The lines are kept in the
+// order the log carries them, which is the order they happened, so what an
+// activation replaced is the line before it.
+func (c *Catalogue) Read(value []byte, desired bool) error {
 	var record rulesetv1.Record
 	if err := proto.Unmarshal(value, &record); err != nil {
 		return fmt.Errorf("a ruleset record could not be read: %w", err)
 	}
+	if activation, held := record.GetRecord().(*rulesetv1.Record_Active); held && !desired {
+		return c.Trailed(activation.Active)
+	}
 	return c.Apply(&record)
+}
+
+func (c *Catalogue) Trailed(active *rulesetv1.Active) error {
+	if active.GetRulesetId() == "" {
+		return errors.New("an activation names the ruleset it activates")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	key := ActivationKey(active)
+	if _, held := c.recorded[key]; held {
+		return nil
+	}
+	c.recorded[key] = struct{}{}
+	c.activated = append(c.activated, active)
+	return nil
+}
+
+func (c *Catalogue) Activations() []*rulesetv1.Active {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	held := make([]*rulesetv1.Active, 0, len(c.activated))
+	for _, one := range c.activated {
+		held = append(held, proto.Clone(one).(*rulesetv1.Active))
+	}
+	return held
 }
 
 func (c *Catalogue) Versions() []*Version {

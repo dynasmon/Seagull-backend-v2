@@ -24,6 +24,7 @@ type rulesets struct {
 
 type publisher interface {
 	Publish(ctx context.Context, record *rulesetv1.Record) error
+	Activate(ctx context.Context, key string, active *rulesetv1.Active) error
 }
 
 func (r rulesets) Validate(documents []*rulesetv1.Document) *rulesetv1.ValidationResponse {
@@ -107,12 +108,13 @@ func (r rulesets) Activate(ctx context.Context, id, note, by string, at time.Tim
 		ActivatedAt: timestamppb.New(at.UTC()),
 		Note:        note,
 	}
-	record := &rulesetv1.Record{Record: &rulesetv1.Record_Active{Active: active}}
-
-	if err := r.publisher.Publish(ctx, record); err != nil {
+	if err := r.publisher.Activate(ctx, ruleset.ActivationKey(active), active); err != nil {
 		return nil, err
 	}
-	if err := r.catalogue.Apply(record); err != nil {
+	if err := r.catalogue.Trailed(active); err != nil {
+		return nil, err
+	}
+	if err := r.catalogue.Apply(&rulesetv1.Record{Record: &rulesetv1.Record_Active{Active: active}}); err != nil {
 		return nil, err
 	}
 	return &rulesetv1.ActivationResponse{Active: active, Replaced: replaced}, nil

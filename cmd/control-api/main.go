@@ -181,6 +181,7 @@ func controlAPI(ctx context.Context) error {
 		slog.String("rulesets_topic", settings.topology.Rulesets.Name),
 		slog.Int("rulesets_published", published.catalogue.Count()),
 		slog.String("ruleset_active", published.catalogue.Activation().GetRulesetId()),
+		slog.Int("ruleset_activations", len(published.catalogue.Activations())),
 		slog.String("alert_store_database", settings.alerts.Database),
 		slog.String("agents_topic", settings.topology.Agents.Name),
 		slog.Duration("liveness_horizon", settings.livenessHorizon),
@@ -307,7 +308,7 @@ func publishedRulesets(ctx context.Context, settings configuration, platform *se
 func (l rulesetLog) applying(logger *slog.Logger) broker.Deliver {
 	return func(_ context.Context, records []broker.Record) error {
 		for _, record := range records {
-			if err := l.catalogue.Read(record.Value); err != nil {
+			if err := l.catalogue.Read(record.Value, broker.Desired(record.Key)); err != nil {
 				logger.Warn("ruleset_record_refused",
 					slog.Int64("offset", record.Offset),
 					slog.String("key", string(record.Key)),

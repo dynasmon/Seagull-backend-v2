@@ -59,6 +59,10 @@ func (r rulesets) Publish(ctx context.Context, request *rulesetv1.PublishRequest
 	if err != nil {
 		return nil, err
 	}
+	if err := r.catalogue.Admits(version); err != nil {
+		answer.Validation = &rulesetv1.ValidationResponse{RulesetId: validation.GetRulesetId(), Faults: faultsOf(err)}
+		return answer, nil
+	}
 
 	record := version.Record()
 	if err := r.publisher.Publish(ctx, record); err != nil {
@@ -186,6 +190,11 @@ func faultsOf(err error) []*rulesetv1.Fault {
 			all = append(all, faultsOf(one)...)
 		}
 		return all
+	}
+
+	var conflict *ruleset.Conflict
+	if errors.As(err, &conflict) {
+		return []*rulesetv1.Fault{{Rule: string(conflict.Rule), Part: "revision", Reason: conflict.Error()}}
 	}
 
 	var fault *rulefile.Fault

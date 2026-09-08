@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -285,4 +286,95 @@ func activated(id, by string) *rulesetv1.Record {
 	return &rulesetv1.Record{Record: &rulesetv1.Record_Active{
 		Active: &rulesetv1.Active{RulesetId: id, ActivatedBy: by},
 	}}
+}
+
+const rewrittenRule = `schema_version: 1
+rules:
+  - id: authentication.failed
+    revision: 1
+    name: An authentication failed
+    description: A rule narrow enough to be decided from one event.
+    class: authentication
+    severity: critical
+    status: active
+    match:
+      field: authentication.outcome
+      equals: failure
+`
+
+// A detection is named by the rule and the revision that decided it, and so is
+// the state a counting rule remembers. A second version reusing the pair for
+// another question is refused by every process that reads the log, so it never
+// becomes what an engine runs however it reached the topic — and the version
+// that was already published stays readable and still activates.
+func TestARevisionRepublishedAskingSomethingElseIsRefusedByEveryReader(t *testing.T) {
+	addresses := brokers(t)
+	topic := compactedTopic(t, addresses)
+
+	publisher, err := broker.NewRulesets(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	if err != nil {
+		t.Fatalf("build a ruleset publisher: %v", err)
+	}
+	defer publisher.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	published := publishedFrom(t, failedRule, "dev-engineer")
+	rewritten := publishedFrom(t, rewrittenRule, "dev-engineer")
+	if published.ID() == rewritten.ID() {
+		t.Fatal("the two versions are the same ruleset, so nothing is being tested")
+	}
+
+	for _, version := range []*ruleset.Version{published, rewritten} {
+		if err := publisher.Publish(ctx, version.Record()); err != nil {
+			t.Fatalf("publish %s: %v", version.ID(), err)
+		}
+	}
+	activation := &rulesetv1.Record{Record: &rulesetv1.Record_Active{
+		Active: &rulesetv1.Active{RulesetId: string(rewritten.ID()), ActivatedBy: "dev-engineer"},
+	}}
+	if err := publisher.Publish(ctx, activation); err != nil {
+		t.Fatalf("activate the rewritten version: %v", err)
+	}
+
+	catalogue := ruleset.NewCatalogue()
+	reader, err := broker.NewStateLog(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"}, 64)
+	if err != nil {
+		t.Fatalf("build a ruleset reader: %v", err)
+	}
+	t.Cleanup(reader.Close)
+
+	var refused []error
+	replayCtx, stop := context.WithTimeout(context.Background(), 30*time.Second)
+	defer stop()
+	err = reader.Replay(replayCtx, func(_ context.Context, records []broker.Record) error {
+		for _, record := range records {
+			if err := catalogue.Read(record.Value); err != nil {
+				refused = append(refused, err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("replay the ruleset log: %v", err)
+	}
+
+	if len(refused) != 1 {
+		t.Fatalf("the reader refused %d records: %v", len(refused), refused)
+	}
+	var conflict *ruleset.Conflict
+	if !errors.As(refused[0], &conflict) {
+		t.Fatalf("the refusal is not a revision conflict: %v", refused[0])
+	}
+
+	if !catalogue.Published(published.ID()) {
+		t.Error("the version that was published first is no longer readable")
+	}
+	if catalogue.Published(rewritten.ID()) {
+		t.Error("the rewritten version reached the catalogue")
+	}
+	if _, running := catalogue.Active(); running {
+		t.Error("a pointer at a refused version named something to run")
+	}
 }

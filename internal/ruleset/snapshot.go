@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"iter"
 	"slices"
 	"strconv"
@@ -106,51 +107,64 @@ func (s *Snapshot) For(class eventv1.EventClass) iter.Seq[*detection.Program] {
 // rulesets alike.
 func identify(programs []*detection.Program) ID {
 	digest := sha256.New()
-	write := func(value string) { fmt.Fprintf(digest, "%d:%s", len(value), value) }
-
 	for _, program := range programs {
-		rule := program.Rule()
-		for _, part := range []string{
-			string(rule.ID),
-			strconv.Itoa(rule.Revision),
-			strconv.Itoa(int(rule.Class)),
-			string(rule.Severity),
-			string(rule.Status),
-			rule.Technique.Tactic,
-			rule.Technique.ID,
-			rule.Technique.Name,
-			rule.Source.Catalogue,
-			rule.Source.Identifier,
-			rule.Name,
-			rule.Description,
-			rule.FalsePositives,
-			rule.Response,
-			program.String(),
-		} {
-			write(part)
-		}
-
-		write(strconv.Itoa(rule.Count.AtLeast))
-		write(rule.Count.Within.String())
-		write(strconv.Itoa(len(rule.Count.GroupBy)))
-		for _, field := range rule.Count.GroupBy {
-			write(string(field))
-		}
-
-		write(rule.Sequence.Within.String())
-		write(strconv.Itoa(len(rule.Sequence.GroupBy)))
-		for _, field := range rule.Sequence.GroupBy {
-			write(string(field))
-		}
-
-		write(strconv.Itoa(len(rule.Tags)))
-		for _, tag := range slices.Sorted(slices.Values(rule.Tags)) {
-			write(tag)
-		}
-		write(strconv.Itoa(len(rule.References)))
-		for _, reference := range rule.References {
-			write(reference)
-		}
+		describe(digest, program)
 	}
 	return ID(hex.EncodeToString(digest.Sum(nil)[:16]))
+}
+
+// One rule's share of the bytes above, on its own. Two rules sharing an id and a
+// revision and not these bytes are two different questions wearing one name,
+// which a detection named by the rule and the revision could never tell apart.
+func Fingerprint(program *detection.Program) string {
+	digest := sha256.New()
+	describe(digest, program)
+	return hex.EncodeToString(digest.Sum(nil)[:16])
+}
+
+func describe(digest io.Writer, program *detection.Program) {
+	write := func(value string) { fmt.Fprintf(digest, "%d:%s", len(value), value) }
+
+	rule := program.Rule()
+	for _, part := range []string{
+		string(rule.ID),
+		strconv.Itoa(rule.Revision),
+		strconv.Itoa(int(rule.Class)),
+		string(rule.Severity),
+		string(rule.Status),
+		rule.Technique.Tactic,
+		rule.Technique.ID,
+		rule.Technique.Name,
+		rule.Source.Catalogue,
+		rule.Source.Identifier,
+		rule.Name,
+		rule.Description,
+		rule.FalsePositives,
+		rule.Response,
+		program.String(),
+	} {
+		write(part)
+	}
+
+	write(strconv.Itoa(rule.Count.AtLeast))
+	write(rule.Count.Within.String())
+	write(strconv.Itoa(len(rule.Count.GroupBy)))
+	for _, field := range rule.Count.GroupBy {
+		write(string(field))
+	}
+
+	write(rule.Sequence.Within.String())
+	write(strconv.Itoa(len(rule.Sequence.GroupBy)))
+	for _, field := range rule.Sequence.GroupBy {
+		write(string(field))
+	}
+
+	write(strconv.Itoa(len(rule.Tags)))
+	for _, tag := range slices.Sorted(slices.Values(rule.Tags)) {
+		write(tag)
+	}
+	write(strconv.Itoa(len(rule.References)))
+	for _, reference := range rule.References {
+		write(reference)
+	}
 }

@@ -8,8 +8,25 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	rulesetv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ruleset/v1"
 )
+
+// A rule published twice under one revision and meaning two different things.
+// A detection is named by the rule and the revision that decided it, and so is
+// the state a counting rule remembers, so the pair has to mean one thing for as
+// long as the log lives or a replay rewrites what another rule found. Catalogue
+// refuses one as it is read back and Admits answers before anything is written,
+// where the author can still fix it.
+type Conflict struct {
+	Rule     detection.ID
+	Revision int
+}
+
+func (c *Conflict) Error() string {
+	return fmt.Sprintf("rule %q was already published at revision %d asking something else; a rule that changes takes the next revision",
+		c.Rule, c.Revision)
+}
 
 // What has been published and which of it is meant to be running, built by
 // applying the records of the published log in the order they were written. Two
@@ -17,13 +34,21 @@ import (
 // lets the control plane answer for a ruleset it does not run and an engine run
 // one it was not told about directly.
 type Catalogue struct {
-	mu       sync.RWMutex
-	versions map[ID]*Version
-	order    []ID
-	active   *rulesetv1.Active
+	mu        sync.RWMutex
+	versions  map[ID]*Version
+	order     []ID
+	active    *rulesetv1.Active
+	revisions map[revised]string
 }
 
-func NewCatalogue() *Catalogue { return &Catalogue{versions: make(map[ID]*Version)} }
+type revised struct {
+	rule     detection.ID
+	revision int
+}
+
+func NewCatalogue() *Catalogue {
+	return &Catalogue{versions: make(map[ID]*Version), revisions: make(map[revised]string)}
+}
 
 // An activation naming a version this catalogue has not seen is kept rather
 // than refused, so replaying a log never loses a pointer; the version it names
@@ -40,8 +65,15 @@ func (c *Catalogue) Apply(record *rulesetv1.Record) error {
 		if _, published := c.versions[version.ID()]; published {
 			return nil
 		}
+		if err := c.conflicting(version); err != nil {
+			return err
+		}
 		c.versions[version.ID()] = version
 		c.order = append(c.order, version.ID())
+		for program := range version.snapshot.All() {
+			rule := program.Rule()
+			c.revisions[revised{rule: rule.ID, revision: rule.Revision}] = Fingerprint(program)
+		}
 		return nil
 
 	case *rulesetv1.Record_Active:
@@ -56,6 +88,23 @@ func (c *Catalogue) Apply(record *rulesetv1.Record) error {
 	default:
 		return errors.New("a ruleset record carries nothing this build can read")
 	}
+}
+
+func (c *Catalogue) Admits(version *Version) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.conflicting(version)
+}
+
+func (c *Catalogue) conflicting(version *Version) error {
+	for program := range version.snapshot.All() {
+		rule := program.Rule()
+		held, published := c.revisions[revised{rule: rule.ID, revision: rule.Revision}]
+		if published && held != Fingerprint(program) {
+			return &Conflict{Rule: rule.ID, Revision: rule.Revision}
+		}
+	}
+	return nil
 }
 
 func (c *Catalogue) Read(value []byte) error {

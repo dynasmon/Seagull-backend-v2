@@ -206,7 +206,7 @@ func (s *Server) refuseAgent(w http.ResponseWriter, err error) {
 	case agent.Refused(err):
 		Refuse(w, http.StatusUnprocessableEntity, CodeIllegalMove, err.Error())
 	default:
-		Refuse(w, http.StatusServiceUnavailable, CodeAgentsUnavailable, err.Error())
+		s.unavailable(w, CodeAgentsUnavailable, err)
 	}
 }
 

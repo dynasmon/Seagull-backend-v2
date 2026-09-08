@@ -194,3 +194,51 @@ func TestMissingEventIsRefusedWithoutPanicking(t *testing.T) {
 		t.Fatal("a missing event must be refused")
 	}
 }
+
+// The store keeps the name of an enum value, so a number no build has a name for
+// is written as the number and read back as unspecified. Refusing it at the
+// gateway is what stops an event meaning one thing on the way in and another on
+// the way out.
+func TestEnumValuesTheContractDoesNotDeclareAreRefused(t *testing.T) {
+	cases := map[string]struct {
+		field  string
+		change func(*eventv1.Event)
+	}{
+		"activity": {
+			field:  "authentication.activity",
+			change: func(e *eventv1.Event) { e.GetAuthentication().Activity = eventv1.Authentication_Activity(99) },
+		},
+		"outcome": {
+			field:  "authentication.outcome",
+			change: func(e *eventv1.Event) { e.GetAuthentication().Outcome = eventv1.Outcome(99) },
+		},
+		"transport": {
+			field: "authentication.network.transport",
+			change: func(e *eventv1.Event) {
+				e.GetAuthentication().Network.Transport = eventv1.Transport(99)
+			},
+		},
+	}
+
+	for name, held := range cases {
+		t.Run(name, func(t *testing.T) {
+			record := valid()
+			held.change(record)
+			if field := violationField(t, event.Validate(record, now(), policy)); field != held.field {
+				t.Errorf("the violation names %q", field)
+			}
+		})
+	}
+}
+
+// Every transport the contract declares is still admitted, including the zero
+// value: an event that names no transport is not one that names a wrong one.
+func TestEveryDeclaredTransportIsAdmitted(t *testing.T) {
+	for value := range eventv1.Transport_name {
+		record := valid()
+		record.GetAuthentication().Network.Transport = eventv1.Transport(value)
+		if err := event.Validate(record, now(), policy); err != nil {
+			t.Errorf("transport %d was refused: %v", value, err)
+		}
+	}
+}

@@ -86,7 +86,7 @@ func (s *Server) openSession() http.Handler {
 			return
 		}
 
-		session, token, err := s.sessions.Open(caller.Subject, caller.Binding, s.now())
+		session, token, err := s.sessions.Open(caller.Subject, caller.Binding, s.now(), asked.GetRequestedLifetime().AsDuration())
 		if err != nil {
 			Refuse(w, http.StatusServiceUnavailable, "session_refused", err.Error())
 			return

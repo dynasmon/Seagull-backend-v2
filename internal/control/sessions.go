@@ -73,8 +73,8 @@ func NewSessions(options SessionOptions) (*Sessions, error) {
 
 func (s *Sessions) Lifetime() time.Duration { return s.issuer.Lifetime() }
 
-func (s *Sessions) Open(subject string, binding [sha256.Size]byte, now time.Time) (authz.Session, string, error) {
-	session, token, err := s.issuer.Issue(subject, binding, now)
+func (s *Sessions) Open(subject string, binding [sha256.Size]byte, now time.Time, asked time.Duration) (authz.Session, string, error) {
+	session, token, err := s.issuer.Issue(subject, binding, now, asked)
 	if err != nil {
 		return authz.Session{}, "", err
 	}

@@ -32,7 +32,7 @@ func bind(subject string) [32]byte { return authz.Fingerprint(certificate(subjec
 func TestAnUnknownSessionIsRefusedEvenWithAGoodSignature(t *testing.T) {
 	sessions := store(t, time.Hour, 0)
 
-	session, token, err := sessions.Open("alice", bind("alice"), now)
+	session, token, err := sessions.Open("alice", bind("alice"), now, 0)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -52,14 +52,14 @@ func TestAnUnknownSessionIsRefusedEvenWithAGoodSignature(t *testing.T) {
 func TestASubjectAtItsCeilingLosesItsOldestSession(t *testing.T) {
 	sessions := store(t, time.Hour, 2)
 
-	first, firstToken, err := sessions.Open("alice", bind("alice"), now)
+	first, firstToken, err := sessions.Open("alice", bind("alice"), now, 0)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if _, _, err := sessions.Open("alice", bind("alice"), now); err != nil {
+	if _, _, err := sessions.Open("alice", bind("alice"), now, 0); err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if _, _, err := sessions.Open("alice", bind("alice"), now); err != nil {
+	if _, _, err := sessions.Open("alice", bind("alice"), now, 0); err != nil {
 		t.Fatalf("open: %v", err)
 	}
 
@@ -74,14 +74,14 @@ func TestASubjectAtItsCeilingLosesItsOldestSession(t *testing.T) {
 func TestOneSubjectsCeilingDoesNotReachAnother(t *testing.T) {
 	sessions := store(t, time.Hour, 1)
 
-	if _, _, err := sessions.Open("alice", bind("alice"), now); err != nil {
+	if _, _, err := sessions.Open("alice", bind("alice"), now, 0); err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	_, token, err := sessions.Open("bob", bind("bob"), now)
+	_, token, err := sessions.Open("bob", bind("bob"), now, 0)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if _, _, err := sessions.Open("alice", bind("alice"), now); err != nil {
+	if _, _, err := sessions.Open("alice", bind("alice"), now, 0); err != nil {
 		t.Fatalf("open: %v", err)
 	}
 
@@ -95,13 +95,13 @@ func TestEndingASubjectEndsEverySessionItHolds(t *testing.T) {
 
 	tokens := make([]string, 0, 3)
 	for range 3 {
-		_, token, err := sessions.Open("alice", bind("alice"), now)
+		_, token, err := sessions.Open("alice", bind("alice"), now, 0)
 		if err != nil {
 			t.Fatalf("open: %v", err)
 		}
 		tokens = append(tokens, token)
 	}
-	if _, _, err := sessions.Open("bob", bind("bob"), now); err != nil {
+	if _, _, err := sessions.Open("bob", bind("bob"), now, 0); err != nil {
 		t.Fatalf("open: %v", err)
 	}
 
@@ -124,7 +124,7 @@ func TestEndingASubjectEndsEverySessionItHolds(t *testing.T) {
 func TestExpiredSessionsAreForgotten(t *testing.T) {
 	sessions := store(t, time.Minute, 4)
 
-	if _, _, err := sessions.Open("alice", bind("alice"), now); err != nil {
+	if _, _, err := sessions.Open("alice", bind("alice"), now, 0); err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	if sessions.Sweep(now) != 0 {
@@ -159,7 +159,7 @@ func TestAStoreRefusesWhatItCannotHold(t *testing.T) {
 func TestARecordCarriesNoWayBackToASession(t *testing.T) {
 	sessions := store(t, time.Hour, 4)
 
-	session, token, err := sessions.Open("alice", bind("alice"), now)
+	session, token, err := sessions.Open("alice", bind("alice"), now, 0)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

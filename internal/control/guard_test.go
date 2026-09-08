@@ -160,7 +160,7 @@ func request(t *testing.T, subject, token string) *http.Request {
 
 func open(t *testing.T, h *harness, subject string) string {
 	t.Helper()
-	_, token, err := h.sessions.Open(subject, authz.Fingerprint(certificate(subject)), now)
+	_, token, err := h.sessions.Open(subject, authz.Fingerprint(certificate(subject)), now, 0)
 	if err != nil {
 		t.Fatalf("open a session for %q: %v", subject, err)
 	}
@@ -281,7 +281,7 @@ func TestATokenCannotBeSpentOnAnotherConnection(t *testing.T) {
 
 func TestARevokedSessionStopsWorkingAtTheNextRequest(t *testing.T) {
 	h := newHarness(t, nil)
-	session, token, err := h.sessions.Open("dev-analyst", authz.Fingerprint(certificate("dev-analyst")), now)
+	session, token, err := h.sessions.Open("dev-analyst", authz.Fingerprint(certificate("dev-analyst")), now, 0)
 	if err != nil {
 		t.Fatalf("open a session: %v", err)
 	}
@@ -349,7 +349,7 @@ func TestAnExpiredSessionIsRefusedAsExpired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build a session store: %v", err)
 	}
-	_, token, err := sessions.Open("dev-analyst", authz.Fingerprint(certificate("dev-analyst")), now.Add(-time.Hour))
+	_, token, err := sessions.Open("dev-analyst", authz.Fingerprint(certificate("dev-analyst")), now.Add(-time.Hour), 0)
 	if err != nil {
 		t.Fatalf("open a session: %v", err)
 	}

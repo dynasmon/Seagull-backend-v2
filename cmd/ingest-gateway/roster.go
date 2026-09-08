@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"google.golang.org/protobuf/proto"
@@ -52,31 +53,44 @@ func admissible(ctx context.Context, settings configuration, platform *service.S
 	return held, nil
 }
 
-// A record that cannot be read is counted and stepped over rather than allowed
-// to end the replay: one unreadable admission must not stop every agent in the
-// estate from sending.
+// A record that cannot be read stops the agent it is about rather than ending
+// the replay: one unreadable admission must not stop every agent in the estate
+// from sending, and it must not quietly re-admit the one whose revocation it was
+// the only record of. A record naming no agent at all can do neither, so it ends
+// the replay and the process stays out of service.
 func (r roster) applying(logger *slog.Logger) broker.Deliver {
 	return func(_ context.Context, records []broker.Record) error {
 		for _, record := range records {
-			var admission agentv1.Admission
-			if err := proto.Unmarshal(record.Value, &admission); err != nil {
-				logger.Warn("agent_admission_refused",
-					slog.Int64("offset", record.Offset),
-					slog.String("key", string(record.Key)),
-					slog.String("error", err.Error()),
-				)
+			err := r.read(record)
+			if err == nil {
 				continue
 			}
-			if err := r.held.Apply(&admission); err != nil {
-				logger.Warn("agent_admission_refused",
-					slog.Int64("offset", record.Offset),
-					slog.String("key", string(record.Key)),
-					slog.String("error", err.Error()),
-				)
+			if len(record.Key) == 0 {
+				return fmt.Errorf("an admission record at offset %d of the agent log names no agent: %w", record.Offset, err)
 			}
+			r.held.Refuse(string(record.Key))
+			logger.Warn("agent_admission_refused",
+				slog.Int64("offset", record.Offset),
+				slog.String("key", string(record.Key)),
+				slog.String("error", err.Error()),
+			)
 		}
 		return nil
 	}
+}
+
+// The key is the agent the record is about and the payload says so again, so a
+// record where the two disagree is one this reader cannot attribute: applying it
+// under either name decides for an agent the control plane did not write about.
+func (r roster) read(record broker.Record) error {
+	var admission agentv1.Admission
+	if err := proto.Unmarshal(record.Value, &admission); err != nil {
+		return err
+	}
+	if admission.GetAgentId() != string(record.Key) {
+		return fmt.Errorf("the record is keyed %q and decides about agent %q", record.Key, admission.GetAgentId())
+	}
+	return r.held.Apply(&admission)
 }
 
 func (r roster) follower(logger *slog.Logger) follower {

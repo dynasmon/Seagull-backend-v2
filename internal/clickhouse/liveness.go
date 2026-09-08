@@ -9,7 +9,13 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
-const DefaultLivenessHorizon = 30 * 24 * time.Hour
+const (
+	DefaultLivenessHorizon = 30 * 24 * time.Hour
+
+	// The widest gap the gateway admits between when an event happened and when
+	// it reached the platform, which is `SEAGULL_EVENT_MAX_AGE` there.
+	DefaultLivenessBackdating = 7 * 24 * time.Hour
+)
 
 // When telemetry from an agent last reached the platform. It is a read of the
 // analytical store and not of the registry: an agent's administrative record
@@ -18,42 +24,52 @@ const DefaultLivenessHorizon = 30 * 24 * time.Hour
 type Liveness struct {
 	connection driver.Conn
 	horizon    time.Duration
+	backdated  time.Duration
 }
 
-func NewLiveness(configuration Config, horizon time.Duration) (*Liveness, error) {
+func NewLiveness(configuration Config, horizon, backdated time.Duration) (*Liveness, error) {
 	if horizon <= 0 {
 		return nil, errors.New("a liveness reader needs a positive horizon to look back over")
+	}
+	if backdated < 0 {
+		return nil, errors.New("a liveness reader needs a non-negative backdating allowance")
 	}
 	connection, err := connect(configuration)
 	if err != nil {
 		return nil, err
 	}
-	return &Liveness{connection: connection, horizon: horizon}, nil
+	return &Liveness{connection: connection, horizon: horizon, backdated: backdated}, nil
 }
 
 // Bounded three ways — the agents asked about, the tenants the caller holds and
 // how far back to look — so reading an agent list can never turn into a scan of
 // everything the platform ever collected. `ingest_time` is the platform's clock
-// and not the producer's, which is what stops an agent backdating itself alive.
+// and not the producer's, which is what stops an agent backdating itself alive,
+// and so it is what the horizon cuts on. The table is partitioned and ordered by
+// `event_time`, so a second cut is kept only to prune the parts that cannot hold
+// a row: it is widened by everything the gateway admits, because a row inside
+// the horizon may carry an event time that far behind its arrival.
 func (l *Liveness) LastSeen(ctx context.Context, agents, tenants []string) (map[string]time.Time, error) {
 	if len(agents) == 0 || len(tenants) == 0 {
 		return map[string]time.Time{}, nil
 	}
 
-	arguments := make([]any, 0, len(tenants)+len(agents)+1)
+	arguments := make([]any, 0, len(tenants)+len(agents)+2)
 	for _, tenant := range tenants {
 		arguments = append(arguments, tenant)
 	}
 	for _, agentID := range agents {
 		arguments = append(arguments, agentID)
 	}
-	arguments = append(arguments, time.Now().Add(-l.horizon).UnixMilli())
+	reached := time.Now().Add(-l.horizon)
+	arguments = append(arguments, reached.Add(-l.backdated).UnixMilli(), reached.UnixMilli())
 
 	rows, err := l.connection.Query(ctx,
 		"SELECT agent_id, max(ingest_time) FROM "+table+
 			" WHERE tenant_id IN ("+placeholders(len(tenants))+")"+
 			" AND agent_id IN ("+placeholders(len(agents))+")"+
 			" AND event_time >= "+instantPlaceholder+
+			" AND ingest_time >= "+instantPlaceholder+
 			" GROUP BY agent_id",
 		arguments...)
 	if err != nil {

@@ -38,9 +38,10 @@ type configuration struct {
 	alerts    postgres.Config
 	telemetry clickhouse.Config
 
-	livenessHorizon time.Duration
-	announceEvery   time.Duration
-	announceBatch   int
+	livenessHorizon    time.Duration
+	livenessBackdating time.Duration
+	announceEvery      time.Duration
+	announceBatch      int
 
 	readTimeout  time.Duration
 	writeTimeout time.Duration
@@ -75,6 +76,8 @@ func load(parser *config.Parser) (configuration, error) {
 
 		livenessHorizon: parser.Duration("SEAGULL_CONTROL_API_LIVENESS_HORIZON",
 			clickhouse.DefaultLivenessHorizon, time.Hour, 365*24*time.Hour),
+		livenessBackdating: parser.Duration("SEAGULL_CONTROL_API_LIVENESS_BACKDATING",
+			clickhouse.DefaultLivenessBackdating, 0, 365*24*time.Hour),
 		announceEvery: parser.Duration("SEAGULL_CONTROL_API_ANNOUNCE_INTERVAL", 30*time.Second, time.Second, time.Hour),
 		announceBatch: parser.Int("SEAGULL_CONTROL_API_ANNOUNCE_BATCH", 100, 1, 500),
 

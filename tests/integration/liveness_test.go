@@ -16,7 +16,7 @@ import (
 func liveness(t *testing.T, address string, horizon time.Duration) *clickhouse.Liveness {
 	t.Helper()
 
-	reader, err := clickhouse.NewLiveness(storeSettings(address), horizon)
+	reader, err := clickhouse.NewLiveness(storeSettings(address), horizon, clickhouse.DefaultLivenessBackdating)
 	if err != nil {
 		t.Fatalf("build the liveness reader: %v", err)
 	}
@@ -119,5 +119,35 @@ func TestAskingAboutNobodyReadsNothing(t *testing.T) {
 		if len(seen) != 0 {
 			t.Fatalf("a query with nothing to ask about answered %d rows", len(seen))
 		}
+	}
+}
+
+// The gateway admits an event whose own time is well behind its arrival, so
+// liveness is a question about arrival: a record that reached the platform a
+// minute ago says the agent is alive however old the event it carried is.
+func TestAnEventThatArrivedInsideTheHorizonIsReadHoweverOldItIs(t *testing.T) {
+	address := storeAddress(t)
+	store := migratedStore(t, address)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	agentID := agentIdentifier(t)
+
+	backdated := sentBy(agentID, "liveness-tenant", agentID+"-backdated", now.Add(-96*time.Hour))
+	backdated.Reception.IngestTime = timestamppb.New(now.Add(-time.Minute))
+	keep(t, store, backdated)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	seen, err := liveness(t, address, 24*time.Hour).LastSeen(ctx, []string{agentID}, []string{"liveness-tenant"})
+	if err != nil {
+		t.Fatalf("read when agents were last seen: %v", err)
+	}
+	at, found := seen[agentID]
+	if !found {
+		t.Fatal("an agent whose telemetry arrived a minute ago was reported silent")
+	}
+	if at.Before(now.Add(-2 * time.Minute)) {
+		t.Fatalf("the answer is when the event happened rather than when it arrived: %s", at)
 	}
 }

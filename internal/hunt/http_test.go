@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/hunt"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	huntv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/hunt/v1"
@@ -20,12 +21,32 @@ import (
 
 func handler(t *testing.T, dataset hunt.Dataset, source hunt.Source) *hunt.Handler {
 	t.Helper()
+	return holding(t, dataset, source, capacity(t, 8))
+}
 
-	built, err := hunt.NewHandler(dataset, hunt.HandlerOptions{Hunter: hunter(t, source), MaxBodyBytes: 4 << 10})
+func holding(t *testing.T, dataset hunt.Dataset, source hunt.Source, held *hunt.Capacity) *hunt.Handler {
+	t.Helper()
+
+	built, err := hunt.NewHandler(dataset, hunt.HandlerOptions{
+		Hunter:       hunter(t, source),
+		Capacity:     held,
+		Metrics:      hunt.NewMetrics(metrics.New("test")),
+		MaxBodyBytes: 4 << 10,
+	})
 	if err != nil {
 		t.Fatalf("build the handler: %v", err)
 	}
 	return built
+}
+
+func capacity(t *testing.T, ceiling int) *hunt.Capacity {
+	t.Helper()
+
+	held, err := hunt.NewCapacity(ceiling)
+	if err != nil {
+		t.Fatalf("build the capacity: %v", err)
+	}
+	return held
 }
 
 func query(t *testing.T, body *huntv1.Query, tenants ...string) *http.Request {
@@ -173,10 +194,71 @@ func TestAStoreThatRanOutOfTimeSaysSo(t *testing.T) {
 }
 
 func TestAHandlerNeedsAHunterACeilingAndADataset(t *testing.T) {
-	if _, err := hunt.NewHandler(hunt.Events, hunt.HandlerOptions{MaxBodyBytes: 1024}); err == nil {
+	if _, err := hunt.NewHandler(hunt.Events, hunt.HandlerOptions{MaxBodyBytes: 1024, Capacity: capacity(t, 1)}); err == nil {
 		t.Error("a handler was built with nothing to ask")
 	}
-	if _, err := hunt.NewHandler("alerts", hunt.HandlerOptions{Hunter: hunter(t, &store{}), MaxBodyBytes: 1024}); err == nil {
+	if _, err := hunt.NewHandler("alerts", hunt.HandlerOptions{Hunter: hunter(t, &store{}), MaxBodyBytes: 1024, Capacity: capacity(t, 1)}); err == nil {
 		t.Error("a handler was built for a dataset no store holds")
+	}
+}
+
+// The store's pool bounds what runs and nothing bounds what waits for it, so the
+// listener refuses rather than queueing: a caller told to come back can, and one
+// waiting behind an analyst's expensive question cannot.
+func TestAQueryBeyondWhatTheProcessHoldsAtOnceIsRefused(t *testing.T) {
+	held := capacity(t, 1)
+	serving := holding(t, hunt.Events, &store{}, held)
+
+	release, admitted := held.Hold()
+	if !admitted {
+		t.Fatal("the first question was refused")
+	}
+	defer release()
+
+	recorder := httptest.NewRecorder()
+	serving.ServeHTTP(recorder, query(t, asked(nil), "acme"))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("a question beyond the ceiling was answered with %d", recorder.Code)
+	}
+	var refusal huntv1.Refusal
+	answered(t, recorder, &refusal)
+	if refusal.GetCode() != hunt.CodeAtCapacity {
+		t.Errorf("refused as %q", refusal.GetCode())
+	}
+	if recorder.Header().Get("Retry-After") == "" {
+		t.Error("the caller was not told when to come back")
+	}
+}
+
+// What was held is given back, so a burst does not leave the process narrower
+// than it was configured to be.
+func TestWhatAQuestionHeldIsGivenBack(t *testing.T) {
+	held := capacity(t, 1)
+	serving := holding(t, hunt.Events, &store{}, held)
+
+	for range 3 {
+		recorder := httptest.NewRecorder()
+		serving.ServeHTTP(recorder, query(t, asked(nil), "acme"))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("a question was answered with %d: %s", recorder.Code, recorder.Body)
+		}
+	}
+	if held.Held() != 0 {
+		t.Errorf("the process still holds %d questions", held.Held())
+	}
+}
+
+// A caller with no certificate is refused before anything is spent on them.
+func TestAnUnscopedCallerSpendsNoCapacity(t *testing.T) {
+	held := capacity(t, 1)
+	serving := holding(t, hunt.Events, &store{}, held)
+
+	recorder := httptest.NewRecorder()
+	serving.ServeHTTP(recorder, query(t, asked(nil)))
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("an unauthenticated caller was answered with %d", recorder.Code)
+	}
+	if held.Held() != 0 {
+		t.Errorf("an unauthenticated caller held %d questions", held.Held())
 	}
 }

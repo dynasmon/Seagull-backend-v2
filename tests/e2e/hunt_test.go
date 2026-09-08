@@ -97,20 +97,28 @@ func startQueryAPI(t *testing.T, store *answering) *queryPlane {
 		t.Fatalf("build compiler: %v", err)
 	}
 
+	instruments := hunt.NewMetrics(platform.Metrics())
 	hunter, err := hunt.NewHunter(hunt.HunterOptions{
 		Source:   store,
 		Compiler: compiler,
-		Metrics:  hunt.NewMetrics(platform.Metrics()),
+		Metrics:  instruments,
 		Logger:   platform.Logger(),
 	})
 	if err != nil {
 		t.Fatalf("build hunter: %v", err)
 	}
 
+	held, err := hunt.NewCapacity(16)
+	if err != nil {
+		t.Fatalf("build capacity: %v", err)
+	}
+
 	listener, err := hunt.NewServer(hunt.ServerOptions{
 		Address:         "127.0.0.1:0",
 		TLS:             mutual,
 		Hunter:          hunter,
+		Capacity:        held,
+		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
 		MaxBodyBytes:    256 << 10,

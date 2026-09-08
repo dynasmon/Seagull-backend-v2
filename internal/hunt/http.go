@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/log"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/ratelimit"
 	huntv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/hunt/v1"
 )
 
@@ -22,15 +23,24 @@ const (
 	DetectionsRoute = "POST " + DetectionsPath
 
 	ContentType = "application/x-protobuf"
+
+	CodeAtCapacity  = "query_plane_at_capacity"
+	CodeRateLimited = "rate_limited"
 )
 
 type HandlerOptions struct {
 	Hunter       *Hunter
+	Capacity     *Capacity
+	Limiter      *ratelimit.Limiter
+	Metrics      *Metrics
 	MaxBodyBytes int64
 }
 
 type Handler struct {
 	hunter       *Hunter
+	capacity     *Capacity
+	limiter      *ratelimit.Limiter
+	metrics      *Metrics
 	maxBodyBytes int64
 	dataset      Dataset
 }
@@ -43,13 +53,27 @@ func NewHandler(dataset Dataset, options HandlerOptions) (*Handler, error) {
 		return nil, errors.New("the hunt handler needs a positive body ceiling")
 	case !Known(dataset):
 		return nil, errors.New("the hunt handler needs a dataset it can ask about")
+	case options.Capacity == nil:
+		return nil, errors.New("the hunt handler needs a ceiling on what the process holds at once")
+	case options.Metrics == nil:
+		return nil, errors.New("the hunt handler needs metrics")
 	}
-	return &Handler{hunter: options.Hunter, maxBodyBytes: options.MaxBodyBytes, dataset: dataset}, nil
+	return &Handler{
+		hunter:       options.Hunter,
+		capacity:     options.Capacity,
+		limiter:      options.Limiter,
+		metrics:      options.Metrics,
+		maxBodyBytes: options.MaxBodyBytes,
+		dataset:      dataset,
+	}, nil
 }
 
 // Authorisation is decided before the body is read, and the scope it produces is
 // the only thing that decides which tenants the answer can come from. There is
-// no query parameter and no header that widens it.
+// no query parameter and no header that widens it. What the caller may spend is
+// decided next and still before the body: a share of the process per certificate
+// and a ceiling on the whole of it, so one analyst asking expensive questions
+// cannot become every analyst waiting.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	scope, err := ScopeFromConnection(r.TLS)
 	if err != nil {
@@ -57,7 +81,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := log.With(r.Context(), slog.String("caller", CallerFromConnection(r.TLS)))
+	caller := CallerFromConnection(r.TLS)
+	ctx := log.With(r.Context(), slog.String("caller", caller))
+
+	if !h.limiter.Allow(caller) {
+		h.metrics.refused(h.dataset, CodeRateLimited)
+		w.Header().Set("Retry-After", "1")
+		refuse(w, http.StatusTooManyRequests, CodeRateLimited, "this caller is asking faster than the query plane answers", "")
+		return
+	}
+
+	release, admitted := h.capacity.Hold()
+	if !admitted {
+		h.metrics.refused(h.dataset, CodeAtCapacity)
+		w.Header().Set("Retry-After", "1")
+		refuse(w, http.StatusServiceUnavailable, CodeAtCapacity,
+			"the query plane is holding as many questions as it was bounded to", "")
+		return
+	}
+	defer release()
 
 	asked, ok := h.read(w, r)
 	if !ok {

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -125,7 +126,22 @@ func (s *Store) Close() error {
 
 // Migrations are applied by control-migrator and never here: a process on its way
 // to serving traffic refuses to run against a schema behind the one it ships.
+// The ledger is read as well as the tables, because a migration that only alters
+// a column adds no table to look for and would otherwise be missing in silence.
 func (s *Store) VerifySchema(ctx context.Context) error {
+	outstanding, err := pending(ctx, s.pool)
+	if err != nil {
+		return err
+	}
+	if len(outstanding) > 0 {
+		names := make([]string, 0, len(outstanding))
+		for _, entry := range outstanding {
+			names = append(names, entry.String())
+		}
+		return fmt.Errorf("the control store is missing %d migration(s): %s — run control-migrator",
+			len(outstanding), strings.Join(names, ", "))
+	}
+
 	for _, table := range []string{
 		alertsTable, transitionsTable,
 		incidentsTable, incidentTransitionsTable,

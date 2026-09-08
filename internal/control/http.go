@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"io"
 	"net/http"
+	"slices"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -186,6 +187,17 @@ var resources = map[authz.Resource]controlv1.Resource{
 	authz.Policies:   controlv1.Resource_RESOURCE_POLICIES,
 	authz.Sessions:   controlv1.Resource_RESOURCE_SESSIONS,
 }
+
+// What the platform authorises and the contract has no name for yet. A grant
+// over one of these is decided server-side exactly as any other and simply
+// cannot be shown to a caller, so it is declared here rather than dropped where
+// nobody would see it, and reported by Unnamed so the process that decides such
+// a grant says out loud that it cannot show it. It empties as the contract
+// catches up, and a resource in neither the map nor the list fails the test that
+// reads both.
+var unnamed = []authz.Resource{authz.Incidents}
+
+func Unnamed() []authz.Resource { return slices.Clone(unnamed) }
 
 var actions = map[authz.Action]controlv1.Action{
 	authz.Read:   controlv1.Action_ACTION_READ,

@@ -1,10 +1,12 @@
 package ruleset_test
 
 import (
+	"errors"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ruleset"
 	rulesetv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ruleset/v1"
 )
@@ -140,4 +142,82 @@ func activation(id, by string) *rulesetv1.Record {
 	return &rulesetv1.Record{Record: &rulesetv1.Record_Active{
 		Active: &rulesetv1.Active{RulesetId: id, ActivatedBy: by},
 	}}
+}
+
+// A detection is named by the rule and the revision that decided it, so the pair
+// has to keep meaning one thing: a second version reusing it for another
+// question is refused whole, and the catalogue stays as it was.
+func TestARevisionThatChangesWhatARuleAsksIsRefused(t *testing.T) {
+	catalogue := ruleset.NewCatalogue()
+
+	first := rule("ssh.session_opened")
+	first.Revision = 4
+	published := version(t, nil, compiled(t, first))
+	apply(t, catalogue, published.Record())
+
+	changed := first
+	changed.Severity = detection.Critical
+	rewritten := version(t, nil, compiled(t, changed))
+
+	if err := catalogue.Admits(rewritten); err == nil {
+		t.Error("a rewritten revision was admitted before it was written")
+	}
+	if err := catalogue.Apply(rewritten.Record()); err == nil {
+		t.Error("a rewritten revision was applied")
+	}
+	if catalogue.Count() != 1 {
+		t.Errorf("the catalogue holds %d versions after refusing one", catalogue.Count())
+	}
+
+	var conflict *ruleset.Conflict
+	if err := catalogue.Admits(rewritten); !errors.As(err, &conflict) {
+		t.Fatalf("the refusal does not name the rule: %v", err)
+	}
+	if conflict.Rule != first.ID || conflict.Revision != first.Revision {
+		t.Errorf("the refusal names %s revision %d", conflict.Rule, conflict.Revision)
+	}
+}
+
+// The next revision is how a rule changes, so raising it is admitted and the
+// version that carried the previous one is still published.
+func TestTheNextRevisionCarriesAChangedRule(t *testing.T) {
+	catalogue := ruleset.NewCatalogue()
+
+	first := rule("ssh.session_opened")
+	first.Revision = 4
+	apply(t, catalogue, version(t, nil, compiled(t, first)).Record())
+
+	changed := first
+	changed.Revision = 5
+	changed.Severity = detection.Critical
+	revised := version(t, nil, compiled(t, changed))
+
+	if err := catalogue.Admits(revised); err != nil {
+		t.Fatalf("a raised revision was refused: %v", err)
+	}
+	apply(t, catalogue, revised.Record())
+	if catalogue.Count() != 2 {
+		t.Errorf("the catalogue holds %d versions", catalogue.Count())
+	}
+}
+
+// A ruleset carries the rule beside others that changed, so refusing the version
+// whole is what stops half of it becoming what an engine runs.
+func TestARewrittenRuleRefusesTheWholeVersion(t *testing.T) {
+	catalogue := ruleset.NewCatalogue()
+
+	held := rule("ssh.session_opened")
+	held.Revision = 2
+	apply(t, catalogue, version(t, nil, compiled(t, held)).Record())
+
+	rewritten := held
+	rewritten.Description = "Something else entirely."
+	beside := version(t, nil, compiled(t, rewritten), compiled(t, rule("ssh.invalid_user")))
+
+	if err := catalogue.Apply(beside.Record()); err == nil {
+		t.Fatal("a version carrying a rewritten revision was applied")
+	}
+	if catalogue.Count() != 1 {
+		t.Errorf("the catalogue holds %d versions", catalogue.Count())
+	}
 }

@@ -182,7 +182,7 @@ func (s *Server) refuseIncident(w http.ResponseWriter, err error) {
 	case incident.Refused(err):
 		Refuse(w, http.StatusUnprocessableEntity, CodeIllegalMove, err.Error())
 	default:
-		Refuse(w, http.StatusServiceUnavailable, CodeIncidentsUnavailable, err.Error())
+		s.unavailable(w, CodeIncidentsUnavailable, err)
 	}
 }
 

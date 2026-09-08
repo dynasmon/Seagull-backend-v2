@@ -22,6 +22,7 @@ var (
 	ErrRegistered = errors.New("an agent is already registered under that identifier")
 	ErrUnknown    = errors.New("no agent is registered under that identifier, or it is outside this caller's tenants")
 	ErrCursor     = errors.New("the cursor was not issued for this listing")
+	ErrConflict   = errors.New("one revision of an agent was published deciding two different things")
 )
 
 // The identifier an agent is registered under is the one a certificate may

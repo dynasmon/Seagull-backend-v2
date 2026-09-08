@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kadm"
@@ -141,7 +142,26 @@ func (t Topic) Validate() error {
 	return nil
 }
 
-type setting struct{ key, value string }
+type setting struct {
+	key, value string
+	contract   agreement
+}
+
+// What a difference between the broker and the topology means. Retention and
+// compression cost the platform a window or some disk, and a process that
+// refused to serve over one would trade the stream for the setting. The other
+// two are promises: a cleanup policy decides whether a record still exists, and
+// `acks=all` on fewer in-sync replicas than were declared reports a write
+// durable that is not, which is a wrong answer rather than a degraded one. A
+// value compared for being at least the declared one reads a negative as
+// unbounded, which is never short of anything.
+type agreement int
+
+const (
+	operational agreement = iota
+	exact
+	atLeast
+)
 
 func retentionOf(t Topic) string {
 	if t.Retention <= 0 {
@@ -154,11 +174,46 @@ func retentionOf(t Topic) string {
 // describe the same divergence in the same words every time.
 func (t Topic) settings() []setting {
 	return []setting{
-		{key: retentionKey, value: retentionOf(t)},
-		{key: cleanupKey, value: t.Cleanup},
-		{key: compressionKey, value: t.Compression},
-		{key: minInSyncKey, value: strconv.FormatInt(int64(t.MinInSync), 10)},
+		{key: retentionKey, value: retentionOf(t), contract: operational},
+		{key: cleanupKey, value: t.Cleanup, contract: exact},
+		{key: compressionKey, value: t.Compression, contract: operational},
+		{key: minInSyncKey, value: strconv.FormatInt(int64(t.MinInSync), 10), contract: atLeast},
 	}
+}
+
+type difference struct {
+	topic, key, held, declared string
+	contract                   agreement
+}
+
+func (d difference) String() string {
+	return fmt.Sprintf("%s %s is %q and the topology declares %q", d.topic, d.key, d.held, d.declared)
+}
+
+func (d difference) breaks() bool {
+	switch d.contract {
+	case exact:
+		return true
+	case atLeast:
+		return shortOf(d.held, d.declared)
+	default:
+		return false
+	}
+}
+
+func shortOf(held, declared string) bool {
+	holding, err := strconv.ParseInt(held, 10, 64)
+	if err != nil {
+		return false
+	}
+	wanted, err := strconv.ParseInt(declared, 10, 64)
+	if err != nil {
+		return false
+	}
+	if holding < 0 {
+		return false
+	}
+	return wanted < 0 || holding < wanted
 }
 
 type Provisioner struct {
@@ -250,7 +305,7 @@ func (d *Detections) VerifyTopics(ctx context.Context, topics ...Topic) ([]strin
 // when an agent's first batch fails, and a reshaped one never surfaces at all:
 // one partition instead of twelve works, and only ends per-agent ordering.
 func verifyTopics(ctx context.Context, admin *kadm.Client, topics []Topic) ([]string, error) {
-	var drift []string
+	var drift, broken []string
 	for _, topic := range topics {
 		if err := topic.Validate(); err != nil {
 			return nil, err
@@ -269,7 +324,17 @@ func verifyTopics(ctx context.Context, admin *kadm.Client, topics []Topic) ([]st
 		if err != nil {
 			return nil, err
 		}
-		drift = append(drift, diverged...)
+		for _, one := range diverged {
+			if one.breaks() {
+				broken = append(broken, one.String())
+				continue
+			}
+			drift = append(drift, one.String())
+		}
+	}
+	if len(broken) > 0 {
+		return nil, fmt.Errorf("the backbone no longer holds what the topology declares: %s — run backbone-migrator",
+			strings.Join(broken, "; "))
 	}
 	return drift, nil
 }
@@ -335,6 +400,11 @@ func converge(ctx context.Context, admin *kadm.Client, topic Topic) ([]string, e
 		return nil, err
 	}
 
+	changed := make([]string, 0, len(diverged))
+	for _, one := range diverged {
+		changed = append(changed, one.String())
+	}
+
 	alters := make([]kadm.AlterConfig, 0, len(topic.settings()))
 	for _, entry := range topic.settings() {
 		alters = append(alters, kadm.AlterConfig{Op: kadm.SetConfig, Name: entry.key, Value: kadm.StringPtr(entry.value)})
@@ -351,10 +421,10 @@ func converge(ctx context.Context, admin *kadm.Client, topic Topic) ([]string, e
 	if response.Err != nil {
 		return nil, fmt.Errorf("configure %s: %w", topic.Name, response.Err)
 	}
-	return diverged, nil
+	return changed, nil
 }
 
-func diverging(ctx context.Context, admin *kadm.Client, topic Topic) ([]string, error) {
+func diverging(ctx context.Context, admin *kadm.Client, topic Topic) ([]difference, error) {
 	described, err := admin.DescribeTopicConfigs(ctx, topic.Name)
 	if err != nil {
 		return nil, fmt.Errorf("read the configuration of %s: %w", topic.Name, err)
@@ -374,14 +444,15 @@ func diverging(ctx context.Context, admin *kadm.Client, topic Topic) ([]string, 
 		}
 	}
 
-	var diverged []string
+	var diverged []difference
 	for _, entry := range topic.settings() {
 		held, known := current[entry.key]
 		if !known || held == entry.value {
 			continue
 		}
-		diverged = append(diverged, fmt.Sprintf("%s %s is %q and the topology declares %q",
-			topic.Name, entry.key, held, entry.value))
+		diverged = append(diverged, difference{
+			topic: topic.Name, key: entry.key, held: held, declared: entry.value, contract: entry.contract,
+		})
 	}
 	return diverged, nil
 }

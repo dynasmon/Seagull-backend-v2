@@ -96,13 +96,17 @@ func shapeOf(t *testing.T, addresses []string, name string) (int32, map[string]s
 
 func createTopic(t *testing.T, addresses []string, name string, partitions int32, retention string) {
 	t.Helper()
+	createConfiguredTopic(t, addresses, name, partitions, map[string]*string{"retention.ms": kadm.StringPtr(retention)})
+}
+
+func createConfiguredTopic(t *testing.T, addresses []string, name string, partitions int32, declared map[string]*string) {
+	t.Helper()
 
 	admin := administrator(t, addresses)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if _, err := admin.CreateTopics(ctx, partitions, 1,
-		map[string]*string{"retention.ms": kadm.StringPtr(retention)}, name); err != nil {
+	if _, err := admin.CreateTopics(ctx, partitions, 1, declared, name); err != nil {
 		t.Fatalf("create %s: %v", name, err)
 	}
 }
@@ -247,5 +251,46 @@ func TestVerificationReportsRetentionDriftWithoutRefusingToServe(t *testing.T) {
 		return strings.Contains(entry, "retention.ms") && strings.Contains(entry, "3600000")
 	}) {
 		t.Fatalf("the drift was reported as %v", drift)
+	}
+}
+
+// A cleanup policy is not a window somebody can wait out: a compacted topic
+// serving as a deleted one loses every record but the last of each key, and a
+// deleted one serving as a compacted one keeps one record per key of a stream
+// that was never keyed for it. A process that started anyway would read a
+// registry with holes in it and report itself healthy.
+func TestVerificationRefusesToServeOnACleanupPolicyThatDisagrees(t *testing.T) {
+	addresses := brokers(t)
+	topic := declaredTopic(t, addresses, 2, 48*time.Hour)
+	createConfiguredTopic(t, addresses, topic.Name, 2, map[string]*string{
+		"retention.ms":   kadm.StringPtr("172800000"),
+		"cleanup.policy": kadm.StringPtr("compact"),
+	})
+
+	publisher, err := broker.NewPublisher(broker.Config{
+		Brokers: addresses, Topic: topic.Name, ClientID: "integration-test",
+	})
+	if err != nil {
+		t.Fatalf("build publisher: %v", err)
+	}
+	t.Cleanup(publisher.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	_, err = publisher.VerifyTopics(ctx, topic)
+	if err == nil {
+		t.Fatal("a topic compacting a stream the topology declares deleted passed verification")
+	}
+	if !strings.Contains(err.Error(), "cleanup.policy") || !strings.Contains(err.Error(), "backbone-migrator") {
+		t.Errorf("the refusal does not say what is wrong or how to fix it: %v", err)
+	}
+
+	// The migrator is what fixes it, so it converges rather than refusing.
+	if _, err := provisioner(t, addresses).Apply(ctx, []broker.Topic{topic}); err != nil {
+		t.Fatalf("apply the topology over a disagreeing cleanup policy: %v", err)
+	}
+	if _, err := publisher.VerifyTopics(ctx, topic); err != nil {
+		t.Fatalf("a converged topic still failed verification: %v", err)
 	}
 }

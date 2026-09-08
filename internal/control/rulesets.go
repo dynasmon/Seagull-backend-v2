@@ -94,7 +94,7 @@ func (s *Server) publishRuleset() http.Handler {
 		published, err := s.rulesets.Publish(r.Context(), &asked, caller.Subject, s.now())
 		if err != nil {
 			s.metrics.rulesetPublished("refused")
-			Refuse(w, http.StatusServiceUnavailable, CodePublishFailed, err.Error())
+			s.unavailable(w, CodePublishFailed, err)
 			return
 		}
 		if !published.GetPublished() {
@@ -148,7 +148,7 @@ func (s *Server) activateRuleset() http.Handler {
 			return
 		case err != nil:
 			s.metrics.rulesetActivated("refused")
-			Refuse(w, http.StatusServiceUnavailable, CodeActivationFailed, err.Error())
+			s.unavailable(w, CodeActivationFailed, err)
 			return
 		}
 

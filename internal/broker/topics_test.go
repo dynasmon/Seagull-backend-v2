@@ -259,3 +259,74 @@ func TestATopicThatDeletesStillNeedsARetention(t *testing.T) {
 		t.Error("a compacted topic was accepted with a retention that will never apply")
 	}
 }
+
+// Retention and compression cost a window or some disk, and a process that
+// refused to serve over one would trade the stream for the setting.
+func TestOperationalDifferencesAreReportedAndNotFatal(t *testing.T) {
+	for _, held := range []difference{
+		{key: retentionKey, held: "3600000", declared: "172800000", contract: operational},
+		{key: compressionKey, held: "producer", declared: compressionZstd, contract: operational},
+	} {
+		if held.breaks() {
+			t.Errorf("%s stopped a process from serving", held.key)
+		}
+	}
+}
+
+// A compacted topic turned to delete drops the registry every reader replays,
+// and a deleted one turned to compact keeps one record per key of a stream that
+// was never keyed for it. Neither is a window somebody can wait out.
+func TestACleanupPolicyThatDisagreesBreaksTheTopology(t *testing.T) {
+	held := difference{key: cleanupKey, held: cleanupDelete, declared: cleanupCompact, contract: exact}
+	if !held.breaks() {
+		t.Error("a compacted topic serving as a deleted one was reported as drift")
+	}
+}
+
+// Fewer in-sync replicas than were declared makes `acks=all` acknowledge a write
+// that is not durable, which is a wrong answer rather than a degraded one.
+func TestFewerInSyncReplicasThanDeclaredBreaksTheTopology(t *testing.T) {
+	held := difference{key: minInSyncKey, held: "1", declared: "2", contract: atLeast}
+	if !held.breaks() {
+		t.Error("a reduced durability floor was reported as drift")
+	}
+
+	stricter := difference{key: minInSyncKey, held: "3", declared: "2", contract: atLeast}
+	if stricter.breaks() {
+		t.Error("a stricter durability floor stopped a process from serving")
+	}
+}
+
+func TestAnUnboundedValueIsNeverShortOfWhatWasDeclared(t *testing.T) {
+	if shortOf("-1", "172800000") {
+		t.Error("unbounded retention was read as shorter than two days")
+	}
+	if !shortOf("172800000", "-1") {
+		t.Error("two days was read as long as unbounded retention")
+	}
+	if shortOf("producer", cleanupCompact) {
+		t.Error("two words that are not numbers were compared as numbers")
+	}
+}
+
+// Every setting the topology declares is classified, so a setting added
+// tomorrow is judged deliberately rather than by whichever value iota gave it.
+func TestEverySettingDeclaresWhatADifferenceMeans(t *testing.T) {
+	wanted := map[string]agreement{
+		retentionKey:   operational,
+		cleanupKey:     exact,
+		compressionKey: operational,
+		minInSyncKey:   atLeast,
+	}
+
+	topic := Topic{Name: "t", Partitions: 1, Replicas: 1, Retention: 0, Cleanup: cleanupCompact, Compression: compressionZstd, MinInSync: 1}
+	held := topic.settings()
+	if len(held) != len(wanted) {
+		t.Fatalf("a topic declares %d settings and %d are classified", len(held), len(wanted))
+	}
+	for _, entry := range held {
+		if entry.contract != wanted[entry.key] {
+			t.Errorf("%s is classified %d", entry.key, entry.contract)
+		}
+	}
+}

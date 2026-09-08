@@ -38,6 +38,7 @@ const (
 	CodeIllegalMove       = "illegal_move"
 	CodeHeldByAnother     = "alert_held_by_another"
 	CodeBadCursor         = "invalid_cursor"
+	CodeUnknownFilter     = "unknown_filter"
 	CodeUnknownAgent      = "unknown_agent"
 	CodeAgentRegistered   = "agent_already_registered"
 	CodeAgentMoved        = "agent_moved"

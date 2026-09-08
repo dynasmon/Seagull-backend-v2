@@ -29,7 +29,9 @@ func NewRoster() *Roster { return &Roster{known: map[string]decided{}} }
 
 // A record older than the one already applied is stepped over, so two control
 // planes publishing about the same agent at once cannot leave the gateway
-// holding the earlier answer for ever.
+// holding the earlier answer for ever. Two of them deciding one revision
+// differently leave it holding neither: the platform cannot say which decision
+// it made, and an agent it cannot decide about is one it stops admitting.
 func (r *Roster) Apply(record *agentv1.Admission) error {
 	if record.GetAgentId() == "" {
 		return fmt.Errorf("%w: the admission record names no agent", ErrMalformed)
@@ -42,11 +44,35 @@ func (r *Roster) Apply(record *agentv1.Admission) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if held, seen := r.known[record.GetAgentId()]; seen && record.GetRevision() < held.revision {
+	held, seen := r.known[record.GetAgentId()]
+	switch {
+	case seen && record.GetRevision() < held.revision:
 		return nil
+	case seen && record.GetRevision() == held.revision && held.admits != state.Admits():
+		r.known[record.GetAgentId()] = decided{revision: held.revision}
+		return fmt.Errorf("%w: revision %d of agent %q decides both ways",
+			ErrConflict, record.GetRevision(), record.GetAgentId())
 	}
 	r.known[record.GetAgentId()] = decided{admits: state.Admits(), revision: record.GetRevision()}
 	return nil
+}
+
+// What the platform holds about an agent whose record it could not read. The log
+// is compacted and keyed by the agent, so that record is the whole of what was
+// decided about it: forgetting it would re-admit a certificate somebody revoked,
+// and the only safe reading of a decision nothing can read is that the agent is
+// no longer admitted. The revision is kept so a later record still replaces it.
+func (r *Roster) Refuse(agentID string) {
+	if agentID == "" {
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	held := r.known[agentID]
+	held.admits = false
+	r.known[agentID] = held
 }
 
 // An agent the registry has never named is admitted: identity comes from the

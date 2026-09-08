@@ -111,3 +111,76 @@ func TestTheRosterIsReadWhileItIsWritten(t *testing.T) {
 		t.Fatal("a disabled agent is admitted after concurrent use")
 	}
 }
+
+// The log is compacted and keyed by the agent, so the record a reader could not
+// read is the whole of what the platform decided about it. Forgetting it would
+// re-admit the certificate the record revoked.
+func TestAnAgentWhoseRecordCouldNotBeReadIsNoLongerAdmitted(t *testing.T) {
+	roster := agent.NewRoster()
+
+	roster.Refuse("web-01")
+	if roster.Admits("web-01") {
+		t.Error("an agent whose record could not be read is still admitted")
+	}
+	if roster.Known() != 1 || roster.Refused() != 1 {
+		t.Errorf("the roster holds %d agents and refuses %d", roster.Known(), roster.Refused())
+	}
+	if !roster.Admits("web-02") {
+		t.Error("refusing one agent refused another")
+	}
+}
+
+// The revision is kept, so the control plane can still say something readable
+// about the agent afterwards and be believed.
+func TestAReadableRecordReplacesARefusalItFollows(t *testing.T) {
+	roster := agent.NewRoster()
+
+	if err := roster.Apply(admission("web-01", agent.Active, 3)); err != nil {
+		t.Fatalf("apply an admission: %v", err)
+	}
+	roster.Refuse("web-01")
+	if roster.Admits("web-01") {
+		t.Fatal("the refusal did not take effect")
+	}
+
+	if err := roster.Apply(admission("web-01", agent.Active, 4)); err != nil {
+		t.Fatalf("apply a later admission: %v", err)
+	}
+	if !roster.Admits("web-01") {
+		t.Error("a later readable record did not replace the refusal")
+	}
+}
+
+// A revocation that arrives twice at one revision is the same decision, and
+// applying it again is not a disagreement.
+func TestOneRevisionRepublishedUnchangedIsApplied(t *testing.T) {
+	roster := agent.NewRoster()
+	record := admission("web-01", agent.Revoked, 7)
+
+	for range 2 {
+		if err := roster.Apply(record); err != nil {
+			t.Fatalf("republish one revocation: %v", err)
+		}
+	}
+	if roster.Admits("web-01") {
+		t.Error("republishing a revocation re-admitted the agent")
+	}
+}
+
+// Two control planes deciding one revision differently leave the platform unable
+// to say what it decided, and an agent it cannot decide about is one it stops
+// admitting rather than one it guesses about.
+func TestOneRevisionDecidedBothWaysStopsAdmittingTheAgent(t *testing.T) {
+	roster := agent.NewRoster()
+
+	if err := roster.Apply(admission("web-01", agent.Revoked, 7)); err != nil {
+		t.Fatalf("apply a revocation: %v", err)
+	}
+	err := roster.Apply(admission("web-01", agent.Active, 7))
+	if !errors.Is(err, agent.ErrConflict) {
+		t.Fatalf("the conflicting record was applied: %v", err)
+	}
+	if roster.Admits("web-01") {
+		t.Error("a conflicting revision re-admitted a revoked agent")
+	}
+}

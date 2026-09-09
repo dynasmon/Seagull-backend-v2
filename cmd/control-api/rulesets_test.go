@@ -30,6 +30,17 @@ func (l *log) Publish(_ context.Context, record *rulesetv1.Record) error {
 	return nil
 }
 
+// The broker writes an activation twice; what a test reads back is what one
+// activation put on the log, so it is kept the way the log keeps it.
+func (l *log) Activate(_ context.Context, _ string, active *rulesetv1.Active) error {
+	if l.refuse != nil {
+		return l.refuse
+	}
+	record := &rulesetv1.Record{Record: &rulesetv1.Record_Active{Active: active}}
+	l.records = append(l.records, record, record)
+	return nil
+}
+
 func administer(t *testing.T) (rulesets, *log) {
 	t.Helper()
 

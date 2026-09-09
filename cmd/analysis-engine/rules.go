@@ -99,7 +99,7 @@ func publishedRulesets(ctx context.Context, settings configuration, platform *se
 func (l rulesetLog) applying(logger *slog.Logger, registry *ruleset.Registry, engine runtime, held stream) broker.Deliver {
 	return func(_ context.Context, records []broker.Record) error {
 		for _, record := range records {
-			if err := l.catalogue.Read(record.Value); err != nil {
+			if err := l.catalogue.Read(record.Value, broker.Desired(record.Key)); err != nil {
 				logger.Warn("ruleset_record_refused",
 					slog.Int64("offset", record.Offset),
 					slog.String("key", string(record.Key)),

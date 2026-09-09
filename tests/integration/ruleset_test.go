@@ -11,6 +11,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
@@ -114,7 +115,7 @@ func replayed(t *testing.T, addresses []string, topic string) *ruleset.Catalogue
 
 	err = reader.Replay(ctx, func(_ context.Context, records []broker.Record) error {
 		for _, record := range records {
-			if err := catalogue.Read(record.Value); err != nil {
+			if err := catalogue.Read(record.Value, broker.Desired(record.Key)); err != nil {
 				return err
 			}
 		}
@@ -150,9 +151,7 @@ func TestAPublishedRulesetReachesAProcessThatWasNotRunning(t *testing.T) {
 			t.Fatalf("publish %s: %v", version.ID(), err)
 		}
 	}
-	if err := publisher.Publish(ctx, activated(string(second.ID()), "dev-admin")); err != nil {
-		t.Fatalf("activate: %v", err)
-	}
+	activate(t, ctx, publisher, string(second.ID()), "dev-admin")
 
 	catalogue := replayed(t, addresses, topic)
 	if catalogue.Count() != 2 {
@@ -191,16 +190,13 @@ func TestRollingBackReachesTheRulesetThatRanBefore(t *testing.T) {
 
 	first := publishedFrom(t, failedRule, "dev-engineer")
 	second := publishedFrom(t, succeededRule, "dev-engineer")
-	for _, record := range []*rulesetv1.Record{
-		first.Record(),
-		second.Record(),
-		activated(string(second.ID()), "dev-engineer"),
-		activated(string(first.ID()), "dev-admin"),
-	} {
-		if err := publisher.Publish(ctx, record); err != nil {
-			t.Fatalf("publish: %v", err)
+	for _, version := range []*ruleset.Version{first, second} {
+		if err := publisher.Publish(ctx, version.Record()); err != nil {
+			t.Fatalf("publish %s: %v", version.ID(), err)
 		}
 	}
+	activate(t, ctx, publisher, string(second.ID()), "dev-engineer")
+	activate(t, ctx, publisher, string(first.ID()), "dev-admin")
 
 	catalogue := replayed(t, addresses, topic)
 	active, running := catalogue.Active()
@@ -244,9 +240,7 @@ func TestAFollowerSeesARulesetPublishedAfterItStarted(t *testing.T) {
 	if err := publisher.Publish(ctx, version.Record()); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	if err := publisher.Publish(ctx, activated(string(version.ID()), "dev-engineer")); err != nil {
-		t.Fatalf("activate: %v", err)
-	}
+	activate(t, ctx, publisher, string(version.ID()), "dev-engineer")
 
 	catalogue := ruleset.NewCatalogue()
 	pinned := make(chan struct{})
@@ -256,7 +250,7 @@ func TestAFollowerSeesARulesetPublishedAfterItStarted(t *testing.T) {
 	go func() {
 		_ = reader.Follow(follow, func(_ context.Context, records []broker.Record) error {
 			for _, record := range records {
-				if err := catalogue.Read(record.Value); err != nil {
+				if err := catalogue.Read(record.Value, broker.Desired(record.Key)); err != nil {
 					return err
 				}
 			}
@@ -282,10 +276,13 @@ func TestAFollowerSeesARulesetPublishedAfterItStarted(t *testing.T) {
 	}
 }
 
-func activated(id, by string) *rulesetv1.Record {
-	return &rulesetv1.Record{Record: &rulesetv1.Record_Active{
-		Active: &rulesetv1.Active{RulesetId: id, ActivatedBy: by},
-	}}
+func activate(t *testing.T, ctx context.Context, publisher *broker.Rulesets, id, by string) {
+	t.Helper()
+
+	active := &rulesetv1.Active{RulesetId: id, ActivatedBy: by, ActivatedAt: timestamppb.New(time.Now().UTC())}
+	if err := publisher.Activate(ctx, ruleset.ActivationKey(active), active); err != nil {
+		t.Fatalf("activate %s: %v", id, err)
+	}
 }
 
 const rewrittenRule = `schema_version: 1
@@ -331,12 +328,7 @@ func TestARevisionRepublishedAskingSomethingElseIsRefusedByEveryReader(t *testin
 			t.Fatalf("publish %s: %v", version.ID(), err)
 		}
 	}
-	activation := &rulesetv1.Record{Record: &rulesetv1.Record_Active{
-		Active: &rulesetv1.Active{RulesetId: string(rewritten.ID()), ActivatedBy: "dev-engineer"},
-	}}
-	if err := publisher.Publish(ctx, activation); err != nil {
-		t.Fatalf("activate the rewritten version: %v", err)
-	}
+	activate(t, ctx, publisher, string(rewritten.ID()), "dev-engineer")
 
 	catalogue := ruleset.NewCatalogue()
 	reader, err := broker.NewStateLog(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"}, 64)
@@ -350,7 +342,7 @@ func TestARevisionRepublishedAskingSomethingElseIsRefusedByEveryReader(t *testin
 	defer stop()
 	err = reader.Replay(replayCtx, func(_ context.Context, records []broker.Record) error {
 		for _, record := range records {
-			if err := catalogue.Read(record.Value); err != nil {
+			if err := catalogue.Read(record.Value, broker.Desired(record.Key)); err != nil {
 				refused = append(refused, err)
 			}
 		}
@@ -376,5 +368,112 @@ func TestARevisionRepublishedAskingSomethingElseIsRefusedByEveryReader(t *testin
 	}
 	if _, running := catalogue.Active(); running {
 		t.Error("a pointer at a refused version named something to run")
+	}
+}
+
+// The topic keeps one pointer and one line per activation, and compaction is
+// what makes that true: the key the pointer is written under is written again on
+// every activation, and no line of the trail is ever written twice. A reader
+// that replays the log holds the ruleset to run now and every activation that
+// led to it, including the ones whose pointers compaction has already dropped.
+func TestTheActivationTrailOutlivesThePointersItReplaced(t *testing.T) {
+	addresses := brokers(t)
+	topic := compactedTopic(t, addresses)
+
+	publisher, err := broker.NewRulesets(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	if err != nil {
+		t.Fatalf("build a ruleset publisher: %v", err)
+	}
+	defer publisher.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	first := publishedFrom(t, failedRule, "dev-engineer")
+	second := publishedFrom(t, succeededRule, "dev-engineer")
+	for _, version := range []*ruleset.Version{first, second} {
+		if err := publisher.Publish(ctx, version.Record()); err != nil {
+			t.Fatalf("publish %s: %v", version.ID(), err)
+		}
+	}
+
+	rollout := []struct{ id, by, note string }{
+		{string(first.ID()), "dev-engineer", "first rollout"},
+		{string(second.ID()), "dev-admin", "second rollout"},
+		{string(first.ID()), "dev-admin", "rolled back"},
+	}
+	for _, rolled := range rollout {
+		active := &rulesetv1.Active{
+			RulesetId:   rolled.id,
+			ActivatedBy: rolled.by,
+			ActivatedAt: timestamppb.New(time.Now().UTC()),
+			Note:        rolled.note,
+		}
+		if err := publisher.Activate(ctx, ruleset.ActivationKey(active), active); err != nil {
+			t.Fatalf("activate %s: %v", rolled.id, err)
+		}
+	}
+
+	catalogue := replayed(t, addresses, topic)
+
+	active, running := catalogue.Active()
+	if !running || active.ID() != first.ID() {
+		t.Fatalf("the pointer names %v and the last activation named %s", active, first.ID())
+	}
+
+	trail := catalogue.Activations()
+	if len(trail) != len(rollout) {
+		t.Fatalf("the trail holds %d activations and %d happened", len(trail), len(rollout))
+	}
+	for index, rolled := range rollout {
+		if trail[index].GetRulesetId() != rolled.id ||
+			trail[index].GetActivatedBy() != rolled.by ||
+			trail[index].GetNote() != rolled.note {
+			t.Errorf("line %d of the trail reads %v", index, trail[index])
+		}
+		if trail[index].GetActivatedAt().AsTime().IsZero() {
+			t.Errorf("line %d of the trail says nothing about when it happened", index)
+		}
+	}
+}
+
+// An activation republished by a retry is one thing that happened, so it is one
+// line of the trail rather than two.
+func TestAnActivationPublishedTwiceIsOneLineOfTheTrail(t *testing.T) {
+	addresses := brokers(t)
+	topic := compactedTopic(t, addresses)
+
+	publisher, err := broker.NewRulesets(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	if err != nil {
+		t.Fatalf("build a ruleset publisher: %v", err)
+	}
+	defer publisher.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	version := publishedFrom(t, failedRule, "dev-engineer")
+	if err := publisher.Publish(ctx, version.Record()); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	active := &rulesetv1.Active{
+		RulesetId:   string(version.ID()),
+		ActivatedBy: "dev-engineer",
+		ActivatedAt: timestamppb.New(time.Now().UTC()),
+		Note:        "published twice by a retry",
+	}
+	for range 2 {
+		if err := publisher.Activate(ctx, ruleset.ActivationKey(active), active); err != nil {
+			t.Fatalf("activate: %v", err)
+		}
+	}
+
+	catalogue := replayed(t, addresses, topic)
+	if trail := catalogue.Activations(); len(trail) != 1 {
+		t.Fatalf("one activation published twice left %d lines of the trail", len(trail))
+	}
+	if _, running := catalogue.Active(); !running {
+		t.Error("the pointer was lost")
 	}
 }

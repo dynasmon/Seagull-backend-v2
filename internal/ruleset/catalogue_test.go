@@ -100,7 +100,7 @@ func TestARecordACatalogueCannotReadLeavesItAsItWas(t *testing.T) {
 	held := version(t, nil, compiled(t, rule("ssh.session_opened")))
 	apply(t, catalogue, held.Record())
 
-	if err := catalogue.Read([]byte{0xff, 0xfe, 0xfd}); err == nil {
+	if err := catalogue.Read([]byte{0xff, 0xfe, 0xfd}, true); err == nil {
 		t.Error("bytes that are not a record were applied")
 	}
 	if err := catalogue.Apply(&rulesetv1.Record{}); err == nil {
@@ -122,7 +122,7 @@ func TestACatalogueReadsWhatWasWrittenToTheLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	if err := catalogue.Read(encoded); err != nil {
+	if err := catalogue.Read(encoded, true); err != nil {
 		t.Fatalf("read a record off the log: %v", err)
 	}
 	if !catalogue.Published(held.ID()) {
@@ -219,5 +219,93 @@ func TestARewrittenRuleRefusesTheWholeVersion(t *testing.T) {
 	}
 	if catalogue.Count() != 1 {
 		t.Errorf("the catalogue holds %d versions", catalogue.Count())
+	}
+}
+
+// The topic keeps the desired state under one key and a line per activation
+// under keys nothing writes twice, so what a reader holds is both: the ruleset
+// to run now, and every activation that led to it in order.
+func TestTheCatalogueKeepsEveryActivationBesideThePointer(t *testing.T) {
+	catalogue := ruleset.NewCatalogue()
+	first := version(t, nil, compiled(t, rule("ssh.session_opened")))
+	second := version(t, nil, compiled(t, rule("ssh.invalid_user")))
+
+	apply(t, catalogue, first.Record())
+	apply(t, catalogue, second.Record())
+
+	for _, rolled := range []struct{ id, by, note string }{
+		{string(first.ID()), "dev-engineer", "first rollout"},
+		{string(second.ID()), "dev-admin", "second rollout"},
+		{string(first.ID()), "dev-admin", "rolled back"},
+	} {
+		active := &rulesetv1.Active{RulesetId: rolled.id, ActivatedBy: rolled.by, Note: rolled.note}
+		if err := catalogue.Trailed(active); err != nil {
+			t.Fatalf("record an activation: %v", err)
+		}
+		apply(t, catalogue, &rulesetv1.Record{Record: &rulesetv1.Record_Active{Active: active}})
+	}
+
+	active, running := catalogue.Active()
+	if !running || active.ID() != first.ID() {
+		t.Fatalf("the pointer names %v", active)
+	}
+
+	trail := catalogue.Activations()
+	if len(trail) != 3 {
+		t.Fatalf("the trail holds %d activations", len(trail))
+	}
+	for index, wanted := range []string{"first rollout", "second rollout", "rolled back"} {
+		if trail[index].GetNote() != wanted {
+			t.Errorf("line %d of the trail reads %q", index, trail[index].GetNote())
+		}
+	}
+	if trail[2].GetRulesetId() != trail[0].GetRulesetId() {
+		t.Error("the rollback does not name the ruleset the first rollout named")
+	}
+	if trail[1].GetRulesetId() != string(second.ID()) {
+		t.Error("the replaced ruleset is not readable from the line before the rollback")
+	}
+}
+
+// A line of the trail replayed after the pointer would otherwise activate a
+// ruleset somebody had already rolled back.
+func TestALineOfTheTrailNeverMovesThePointer(t *testing.T) {
+	catalogue := ruleset.NewCatalogue()
+	first := version(t, nil, compiled(t, rule("ssh.session_opened")))
+	second := version(t, nil, compiled(t, rule("ssh.invalid_user")))
+	apply(t, catalogue, first.Record())
+	apply(t, catalogue, second.Record())
+
+	apply(t, catalogue, activation(string(first.ID()), "dev-engineer"))
+	encoded, err := proto.Marshal(activation(string(second.ID()), "dev-admin"))
+	if err != nil {
+		t.Fatalf("encode an activation: %v", err)
+	}
+	if err := catalogue.Read(encoded, false); err != nil {
+		t.Fatalf("read a line of the trail: %v", err)
+	}
+
+	active, running := catalogue.Active()
+	if !running || active.ID() != first.ID() {
+		t.Fatalf("a line of the trail moved the pointer to %v", active)
+	}
+	if len(catalogue.Activations()) != 1 {
+		t.Errorf("the trail holds %d activations", len(catalogue.Activations()))
+	}
+}
+
+// The trail is what the catalogue holds, not what a caller may write into.
+func TestTheActivationTrailIsHandedOutAsACopy(t *testing.T) {
+	catalogue := ruleset.NewCatalogue()
+	if err := catalogue.Trailed(&rulesetv1.Active{RulesetId: "abcd", ActivatedBy: "dev-engineer"}); err != nil {
+		t.Fatalf("record an activation: %v", err)
+	}
+
+	catalogue.Activations()[0].ActivatedBy = "somebody-else"
+	if catalogue.Activations()[0].GetActivatedBy() != "dev-engineer" {
+		t.Error("a reader wrote into the trail every other reader sees")
+	}
+	if err := catalogue.Trailed(&rulesetv1.Active{}); err == nil {
+		t.Error("an activation naming no ruleset was recorded")
 	}
 }

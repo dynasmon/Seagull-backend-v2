@@ -34,7 +34,7 @@ func TestASessionComesBackSayingWhatItSaid(t *testing.T) {
 	minted := issuer(t, 15*time.Minute)
 	binding := fingerprint("alice's certificate")
 
-	session, token, err := minted.Issue("alice", binding, when)
+	session, token, err := minted.Issue("alice", binding, when, 0)
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -64,11 +64,11 @@ func TestTwoSessionsForOneSubjectAreDifferentSessions(t *testing.T) {
 	minted := issuer(t, time.Hour)
 	binding := fingerprint("alice's certificate")
 
-	first, firstToken, err := minted.Issue("alice", binding, when)
+	first, firstToken, err := minted.Issue("alice", binding, when, 0)
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
-	second, secondToken, err := minted.Issue("alice", binding, when)
+	second, secondToken, err := minted.Issue("alice", binding, when, 0)
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestATokenThisProcessDidNotMintIsRefused(t *testing.T) {
 	minted := issuer(t, time.Hour)
 	binding := fingerprint("alice's certificate")
 
-	_, token, err := minted.Issue("alice", binding, when)
+	_, token, err := minted.Issue("alice", binding, when, 0)
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestATokenThisProcessDidNotMintIsRefused(t *testing.T) {
 
 	for name, offered := range map[string]string{
 		"a token from another process": func() string {
-			_, other, err := issuer(t, time.Hour).Issue("alice", binding, when)
+			_, other, err := issuer(t, time.Hour).Issue("alice", binding, when, 0)
 			if err != nil {
 				t.Fatalf("issue: %v", err)
 			}
@@ -129,7 +129,7 @@ func TestASessionStopsBeingSpendableWhenItSaysItDoes(t *testing.T) {
 	minted := issuer(t, 15*time.Minute)
 	binding := fingerprint("alice's certificate")
 
-	session, token, err := minted.Issue("alice", binding, when)
+	session, token, err := minted.Issue("alice", binding, when, 0)
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestASessionStopsBeingSpendableWhenItSaysItDoes(t *testing.T) {
 func TestATokenIsWorthlessOnAnotherConnection(t *testing.T) {
 	minted := issuer(t, time.Hour)
 
-	_, token, err := minted.Issue("alice", fingerprint("alice's certificate"), when)
+	_, token, err := minted.Issue("alice", fingerprint("alice's certificate"), when, 0)
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -210,15 +210,15 @@ func TestASessionIsMintedForSomebodyOnSomething(t *testing.T) {
 
 	for name, build := range map[string]func() error{
 		"no subject": func() error {
-			_, _, err := minted.Issue("", fingerprint("a certificate"), when)
+			_, _, err := minted.Issue("", fingerprint("a certificate"), when, 0)
 			return err
 		},
 		"a subject nobody could name": func() error {
-			_, _, err := minted.Issue("alice smith", fingerprint("a certificate"), when)
+			_, _, err := minted.Issue("alice smith", fingerprint("a certificate"), when, 0)
 			return err
 		},
 		"no certificate": func() error {
-			_, _, err := minted.Issue("alice", [sha256.Size]byte{}, when)
+			_, _, err := minted.Issue("alice", [sha256.Size]byte{}, when, 0)
 			return err
 		},
 	} {
@@ -232,7 +232,7 @@ func TestATokenCarriesNoAuthority(t *testing.T) {
 	minted := issuer(t, time.Hour)
 	binding := fingerprint("bob's certificate")
 
-	_, token, err := minted.Issue("bob", binding, when)
+	_, token, err := minted.Issue("bob", binding, when, 0)
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -255,5 +255,31 @@ func TestATokenCarriesNoAuthority(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "bob") {
 		t.Error("the token does not say who it is for")
+	}
+}
+
+// A caller may narrow their own exposure and may not widen it: what they ask for
+// is granted up to the process ceiling and held to it above, and a session
+// nobody could spend is raised to the floor.
+func TestASessionIsIssuedForNoLongerThanTheProcessGrants(t *testing.T) {
+	minted := issuer(t, time.Hour)
+	binding := fingerprint("a certificate")
+	when := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+
+	for name, held := range map[string]struct{ asked, lasts time.Duration }{
+		"nothing asked":     {0, time.Hour},
+		"under the ceiling": {15 * time.Minute, 15 * time.Minute},
+		"over the ceiling":  {8 * time.Hour, time.Hour},
+		"under the floor":   {time.Second, authz.MinLifetime},
+	} {
+		t.Run(name, func(t *testing.T) {
+			session, _, err := minted.Issue("alice", binding, when, held.asked)
+			if err != nil {
+				t.Fatalf("issue a session: %v", err)
+			}
+			if lasted := session.ExpiresAt().Sub(session.IssuedAt()); lasted != held.lasts {
+				t.Errorf("the session lasts %s and should last %s", lasted, held.lasts)
+			}
+		})
 	}
 }

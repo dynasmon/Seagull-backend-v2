@@ -262,7 +262,7 @@ func TestACallerEndsTheirOwnSessionAndNobodyElsesWithoutThePermission(t *testing
 	handler := routes(t, h)
 
 	analyst := open(t, h, "dev-analyst")
-	victim, _, err := h.sessions.Open("dev-admin", authz.Fingerprint(certificate("dev-admin")), now)
+	victim, _, err := h.sessions.Open("dev-admin", authz.Fingerprint(certificate("dev-admin")), now, 0)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestAnAdministratorEndsAnotherCallersSession(t *testing.T) {
 	handler := routes(t, h)
 
 	admin := open(t, h, "dev-admin")
-	victim, victimToken, err := h.sessions.Open("dev-analyst", authz.Fingerprint(certificate("dev-analyst")), now)
+	victim, victimToken, err := h.sessions.Open("dev-analyst", authz.Fingerprint(certificate("dev-analyst")), now, 0)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

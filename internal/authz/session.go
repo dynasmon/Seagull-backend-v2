@@ -18,6 +18,8 @@ import (
 // yesterday's tokens rather than reading them as something else.
 const tokenVersion byte = 1
 
+const MinLifetime = time.Minute
+
 const (
 	sessionIDBytes = 16
 	fixedBytes     = 1 + sessionIDBytes + 8 + 8 + sha256.Size
@@ -83,7 +85,23 @@ func NewIssuer(key []byte, lifetime time.Duration) (*Issuer, error) {
 
 func (i *Issuer) Lifetime() time.Duration { return i.lifetime }
 
-func (i *Issuer) Issue(subject string, binding [sha256.Size]byte, now time.Time) (Session, string, error) {
+// What a caller asking for a shorter session gets. Narrowing their own exposure
+// is theirs to choose and the ceiling is the process's, so a request above it is
+// held to it rather than refused and a request for nothing takes it whole. A
+// session measured in seconds is one nobody could spend, so MinLifetime is the
+// floor rather than whatever arithmetic a caller sent.
+func (i *Issuer) Within(asked time.Duration) time.Duration {
+	switch {
+	case asked <= 0:
+		return i.lifetime
+	case asked < MinLifetime:
+		return min(MinLifetime, i.lifetime)
+	default:
+		return min(asked, i.lifetime)
+	}
+}
+
+func (i *Issuer) Issue(subject string, binding [sha256.Size]byte, now time.Time, asked time.Duration) (Session, string, error) {
 	if !ValidSubject(subject) {
 		return Session{}, "", fmt.Errorf("%q is not a subject", subject)
 	}
@@ -100,7 +118,7 @@ func (i *Issuer) Issue(subject string, binding [sha256.Size]byte, now time.Time)
 		id:        hex.EncodeToString(raw),
 		subject:   subject,
 		issuedAt:  now.UTC().Truncate(time.Millisecond),
-		expiresAt: now.UTC().Add(i.lifetime).Truncate(time.Millisecond),
+		expiresAt: now.UTC().Add(i.Within(asked)).Truncate(time.Millisecond),
 		binding:   binding,
 	}
 	return session, i.encode(session, raw), nil

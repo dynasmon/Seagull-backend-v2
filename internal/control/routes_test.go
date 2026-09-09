@@ -13,6 +13,8 @@ import (
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/authz"
 	"github.com/dynasmon/Seagull-backend-v2/internal/control"
+	"github.com/dynasmon/Seagull-backend-v2/internal/devpki"
+	"github.com/dynasmon/Seagull-backend-v2/internal/pki"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/httpx"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 	controlv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/control/v1"
@@ -27,6 +29,25 @@ func routes(t *testing.T, h *harness) http.Handler {
 func routesWith(t *testing.T, h *harness, store control.Rulesets) http.Handler {
 	t.Helper()
 	return listener(t, h, store, newStubAlerts())
+}
+
+const authoritySubject = "Seagull Test Agent CA"
+
+// The control plane signs the identities it binds, so a listener without an
+// authority serves nothing: every harness here holds one.
+func testAuthority(t *testing.T) (*pki.Authority, func() ([]byte, error)) {
+	t.Helper()
+
+	development, err := devpki.NewAuthority(authoritySubject, 30*24*time.Hour)
+	if err != nil {
+		t.Fatalf("build a development authority: %v", err)
+	}
+	material := development.Material()
+	signing, err := pki.NewAuthority(material.CertificatePEM, material.PrivateKeyPEM)
+	if err != nil {
+		t.Fatalf("read the authority: %v", err)
+	}
+	return signing, func() ([]byte, error) { return material.CertificatePEM, nil }
 }
 
 func listener(t *testing.T, h *harness, store control.Rulesets, raised control.Alerts) http.Handler {
@@ -51,6 +72,7 @@ func listenerRegistering(
 ) http.Handler {
 	t.Helper()
 
+	signing, bundle := testAuthority(t)
 	handler, err := control.NewHandler(control.ServerOptions{
 		Guard:           h.guard,
 		Sessions:        h.sessions,
@@ -61,6 +83,9 @@ func listenerRegistering(
 		Agents:          registered,
 		Admissions:      admissions,
 		Liveness:        seen,
+		Authority:       signing,
+		TrustBundle:     bundle,
+		CertificateLife: 24 * time.Hour,
 		Metrics:         h.metrics,
 		Logger:          slog.New(slog.DiscardHandler),
 		Instrumentation: httpx.NewInstrumentation(metrics.New("control-api-routes")),

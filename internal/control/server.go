@@ -104,12 +104,26 @@ func newServer(options ServerOptions) (*Server, error) {
 	switch {
 	case options.Agents == nil:
 		return nil, errors.New("the control listener administers agents and needs a registry to keep them in")
+	case options.Authority == nil:
+		return nil, errors.New("the control listener issues the identities it binds and needs an authority to sign with")
+	case options.CertificateLife <= 0:
+		return nil, errors.New("the control listener needs to know how long an agent certificate is valid for")
 	case options.Logger == nil:
 		return nil, errors.New("the control listener needs a logger")
 	case options.Metrics == nil:
 		return nil, errors.New("the control listener needs metrics")
 	case options.Instrumentation == nil:
 		return nil, errors.New("the control listener shares the process http instrumentation")
+	}
+	if options.TrustBundle == nil {
+		return nil, errors.New("the control listener tells an agent what to trust and needs a bundle to read")
+	}
+	bundle, err := options.TrustBundle()
+	if err != nil {
+		return nil, err
+	}
+	if err := pki.Trusts(bundle, options.Authority); err != nil {
+		return nil, err
 	}
 	if options.Now == nil {
 		options.Now = time.Now
@@ -178,7 +192,7 @@ func (s *Server) routes() []route {
 		{http.MethodGet, SessionPath, "session_describe", Session(), s.describeSession()},
 		{http.MethodDelete, SessionPath, "session_revoke", Session(), s.revokeSession()},
 		{http.MethodGet, SessionsPath, "session_list", Session(), s.listSessions()},
-	}, slices.Concat(rulesetRoutes(s), alertRoutes(s), incidentRoutes(s), agentRoutes(s))...)
+	}, slices.Concat(rulesetRoutes(s), alertRoutes(s), incidentRoutes(s), agentRoutes(s), certificateRoutes(s))...)
 }
 
 func (s *Server) descriptor() http.Handler {

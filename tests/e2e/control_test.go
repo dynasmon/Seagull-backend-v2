@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/authz"
 	"github.com/dynasmon/Seagull-backend-v2/internal/control"
 	"github.com/dynasmon/Seagull-backend-v2/internal/devpki"
+	"github.com/dynasmon/Seagull-backend-v2/internal/pki"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/ratelimit"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/tlsx"
@@ -96,12 +98,15 @@ bindings:
 `
 
 type controlPlane struct {
-	address   string
-	authority *devpki.Authority
-	sessions  *control.Sessions
-	agents    *registeredAgents
-	told      *announcedAdmissions
-	stopped   chan error
+	address        string
+	renewalAddress string
+	authority      *devpki.Authority
+	agentAuthority *devpki.Authority
+	bundleFile     string
+	sessions       *control.Sessions
+	agents         *registeredAgents
+	told           *announcedAdmissions
+	stopped        chan error
 }
 
 func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
@@ -181,8 +186,9 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 	}
 
 	registered, told := newRegisteredAgents(), &announcedAdmissions{}
+	agentAuthority, signing, renewalMutual, bundleFile := agentDomain(t, directory)
 
-	listener, err := control.NewServer(control.ServerOptions{
+	options := control.ServerOptions{
 		Address:         "127.0.0.1:0",
 		TLS:             mutual,
 		Guard:           guard,
@@ -193,6 +199,11 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 		Incidents:       newOpenedIncidents(),
 		Agents:          registered,
 		Admissions:      told,
+		Authority:       signing,
+		TrustBundle:     func() ([]byte, error) { return os.ReadFile(bundleFile) },
+		CertificateLife: time.Hour,
+		RenewalAddress:  "127.0.0.1:0",
+		RenewalTLS:      renewalMutual,
 		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
@@ -200,20 +211,30 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 		WriteTimeout:    10 * time.Second,
 		IdleTimeout:     30 * time.Second,
 		ShutdownTimeout: platform.ShutdownTimeout(),
-	})
+	}
+
+	listener, err := control.NewServer(options)
 	if err != nil {
 		t.Fatalf("build listener: %v", err)
 	}
+	renewals, err := control.NewRenewalServer(options)
+	if err != nil {
+		t.Fatalf("build the renewal listener: %v", err)
+	}
 	platform.Add(listener)
+	platform.Add(renewals)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	running := &controlPlane{
-		address:   listener.Address(),
-		authority: authority,
-		sessions:  sessions,
-		agents:    registered,
-		told:      told,
-		stopped:   make(chan error, 1),
+		address:        listener.Address(),
+		renewalAddress: renewals.Address(),
+		authority:      authority,
+		agentAuthority: agentAuthority,
+		bundleFile:     bundleFile,
+		sessions:       sessions,
+		agents:         registered,
+		told:           told,
+		stopped:        make(chan error, 1),
 	}
 	go func() { running.stopped <- platform.Run(ctx) }()
 
@@ -495,4 +516,42 @@ func TestOnlyAnEngineerPublishesARulesetOverRealMutualTLS(t *testing.T) {
 	if activated.GetActive().GetActivatedBy() != "e2e-engineer" {
 		t.Errorf("the activation was attributed to %q", activated.GetActive().GetActivatedBy())
 	}
+}
+
+// The renewal listener terminates the agent trust domain: the authority that
+// signs an agent's certificate is the same one its client certificate is
+// verified against, which is what makes a renewed certificate usable.
+func agentDomain(t *testing.T, directory string) (*devpki.Authority, *pki.Authority, *tls.Config, string) {
+	t.Helper()
+
+	authority, err := devpki.NewAuthority("Seagull Agent Test CA", time.Hour)
+	if err != nil {
+		t.Fatalf("create the agent authority: %v", err)
+	}
+	server, err := authority.IssueServer("control-api", []string{"localhost", "127.0.0.1"}, time.Hour)
+	if err != nil {
+		t.Fatalf("issue the renewal server certificate: %v", err)
+	}
+
+	certificateFile := filepath.Join(directory, "renewal.pem")
+	keyFile := filepath.Join(directory, "renewal-key.pem")
+	bundleFile := filepath.Join(directory, "agent-ca.pem")
+	write(t, certificateFile, server.CertificatePEM)
+	write(t, keyFile, server.PrivateKeyPEM)
+	write(t, bundleFile, authority.Material().CertificatePEM)
+
+	material, err := tlsx.NewMaterial(certificateFile, keyFile, bundleFile)
+	if err != nil {
+		t.Fatalf("load the renewal tls material: %v", err)
+	}
+	mutual, err := material.MutualServerConfig()
+	if err != nil {
+		t.Fatalf("build the renewal mutual tls: %v", err)
+	}
+
+	signing, err := pki.NewAuthority(authority.Material().CertificatePEM, authority.Material().PrivateKeyPEM)
+	if err != nil {
+		t.Fatalf("read the signing authority: %v", err)
+	}
+	return authority, signing, mutual, bundleFile
 }

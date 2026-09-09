@@ -18,17 +18,19 @@ import (
 )
 
 type registeredAgents struct {
-	mutex     sync.Mutex
-	held      map[string]*agentv1.Agent
-	trail     map[string][]*agentv1.Transition
-	announced map[string]uint64
+	mutex        sync.Mutex
+	held         map[string]*agentv1.Agent
+	trail        map[string][]*agentv1.Transition
+	certificates map[string][]*agentv1.CertificateRecord
+	announced    map[string]uint64
 }
 
 func newRegisteredAgents() *registeredAgents {
 	return &registeredAgents{
-		held:      map[string]*agentv1.Agent{},
-		trail:     map[string][]*agentv1.Transition{},
-		announced: map[string]uint64{},
+		held:         map[string]*agentv1.Agent{},
+		trail:        map[string][]*agentv1.Transition{},
+		certificates: map[string][]*agentv1.CertificateRecord{},
+		announced:    map[string]uint64{},
 	}
 }
 
@@ -98,13 +100,43 @@ func (r *registeredAgents) Move(_ context.Context, id string, tenants []string, 
 	if err != nil {
 		return nil, err
 	}
+	return r.apply(held, asked)
+}
+
+func (r *registeredAgents) Renew(_ context.Context, id string, asked agent.Move) (*agentv1.Agent, error) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	held, known := r.held[id]
+	if !known {
+		return nil, agent.ErrUnknown
+	}
+	asked.Renewal = true
+	return r.apply(held, asked)
+}
+
+func (r *registeredAgents) apply(held *agentv1.Agent, asked agent.Move) (*agentv1.Agent, error) {
 	moved, line, err := agent.Apply(held, asked)
 	if err != nil {
 		return nil, err
 	}
+	id := moved.GetAgentId()
 	r.held[id] = moved
 	r.trail[id] = append(r.trail[id], line)
+	if signed := agent.Certificate(moved, asked); signed != nil {
+		r.certificates[id] = append([]*agentv1.CertificateRecord{signed}, r.certificates[id]...)
+	}
 	return moved, nil
+}
+
+func (r *registeredAgents) Certificates(_ context.Context, id string, tenants []string) (*agentv1.CertificateHistory, error) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	if _, err := r.lookup(id, tenants); err != nil {
+		return nil, err
+	}
+	return &agentv1.CertificateHistory{AgentId: id, Certificates: r.certificates[id]}, nil
 }
 
 func (r *registeredAgents) Outstanding(_ context.Context, _ int) ([]*agentv1.Admission, error) {

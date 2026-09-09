@@ -11,7 +11,9 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/pki"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/httpx"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/ratelimit"
 	"github.com/dynasmon/Seagull-backend-v2/internal/protocol"
 )
 
@@ -29,6 +31,12 @@ type ServerOptions struct {
 	Agents          Agents
 	Admissions      Admissions
 	Liveness        Liveness
+	Authority       *pki.Authority
+	TrustBundle     func() ([]byte, error)
+	CertificateLife time.Duration
+	RenewalAddress  string
+	RenewalTLS      *tls.Config
+	RenewalLimiter  *ratelimit.Limiter
 	Metrics         *Metrics
 	Instrumentation *httpx.Instrumentation
 	Logger          *slog.Logger
@@ -51,6 +59,11 @@ type Server struct {
 	metrics    *Metrics
 	logger     *slog.Logger
 	now        func() time.Time
+
+	authority       *pki.Authority
+	trustBundle     func() ([]byte, error)
+	certificateLife time.Duration
+	renewals        *ratelimit.Limiter
 }
 
 type route struct {
@@ -85,6 +98,43 @@ func NewServer(options ServerOptions) (*httpx.Server, error) {
 	})
 }
 
+// What both listeners need, whichever trust domain they terminate: the registry,
+// the authority that signs for it, and the bundle an agent is told to trust.
+func newServer(options ServerOptions) (*Server, error) {
+	switch {
+	case options.Agents == nil:
+		return nil, errors.New("the control listener administers agents and needs a registry to keep them in")
+	case options.Logger == nil:
+		return nil, errors.New("the control listener needs a logger")
+	case options.Metrics == nil:
+		return nil, errors.New("the control listener needs metrics")
+	case options.Instrumentation == nil:
+		return nil, errors.New("the control listener shares the process http instrumentation")
+	}
+	if options.Now == nil {
+		options.Now = time.Now
+	}
+
+	return &Server{
+		sessions:   options.Sessions,
+		registry:   options.Registry,
+		rulesets:   options.Rulesets,
+		alerts:     options.Alerts,
+		incidents:  options.Incidents,
+		agents:     options.Agents,
+		admissions: options.Admissions,
+		liveness:   options.Liveness,
+		metrics:    options.Metrics,
+		logger:     options.Logger,
+		now:        options.Now,
+
+		authority:       options.Authority,
+		trustBundle:     options.TrustBundle,
+		certificateLife: options.CertificateLife,
+		renewals:        options.RenewalLimiter,
+	}, nil
+}
+
 func NewHandler(options ServerOptions) (http.Handler, error) {
 	switch {
 	case options.Guard == nil:
@@ -99,33 +149,13 @@ func NewHandler(options ServerOptions) (http.Handler, error) {
 		return nil, errors.New("the control listener works alerts and needs somewhere to read and move them")
 	case options.Incidents == nil:
 		return nil, errors.New("the control listener works incidents and needs somewhere to read and move them")
-	case options.Agents == nil:
-		return nil, errors.New("the control listener administers agents and needs a registry to keep them in")
 	case options.Admissions == nil:
 		return nil, errors.New("the control listener decides what a gateway admits and needs somewhere to say so")
-	case options.Logger == nil:
-		return nil, errors.New("the control listener needs a logger")
-	case options.Metrics == nil:
-		return nil, errors.New("the control listener needs metrics")
-	case options.Instrumentation == nil:
-		return nil, errors.New("the control listener shares the process http instrumentation")
-	}
-	if options.Now == nil {
-		options.Now = time.Now
 	}
 
-	server := &Server{
-		sessions:   options.Sessions,
-		registry:   options.Registry,
-		rulesets:   options.Rulesets,
-		alerts:     options.Alerts,
-		incidents:  options.Incidents,
-		agents:     options.Agents,
-		admissions: options.Admissions,
-		liveness:   options.Liveness,
-		metrics:    options.Metrics,
-		logger:     options.Logger,
-		now:        options.Now,
+	server, err := newServer(options)
+	if err != nil {
+		return nil, err
 	}
 
 	mux := http.NewServeMux()

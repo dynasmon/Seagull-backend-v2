@@ -1,9 +1,12 @@
 package postgres
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -14,6 +17,8 @@ import (
 
 const insertOccurrence = `INSERT INTO alert_occurrences (alert_id, detection_id, event_time, folded_at)
 VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`
+
+const holdKey = `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`
 
 const openWithKey = `SELECT alert_id, last_seen FROM alerts
 WHERE tenant_id = $1 AND correlation_key = $2 AND state NOT IN ('resolved','false_positive')
@@ -42,6 +47,10 @@ func (s *Store) Record(ctx context.Context, candidates []alert.Candidate) ([]ale
 		return nil, fmt.Errorf("begin recording %d detections: %w", len(candidates), err)
 	}
 	defer func() { _ = transaction.Rollback(ctx) }()
+
+	if err := hold(ctx, transaction, candidates); err != nil {
+		return nil, err
+	}
 
 	for index, candidate := range candidates {
 		outcome, err := record(ctx, transaction, candidate)
@@ -95,6 +104,31 @@ func record(ctx context.Context, transaction pgx.Tx, candidate alert.Candidate) 
 	}
 	return alert.OutcomeRaised, nil
 }
+
+// Detections are partitioned by agent and a correlation key need not name one,
+// so two writers can reach one logical alert at once. `FOR UPDATE` holds a row
+// that exists and locks nothing where the first occurrence under a key is still
+// being raised, which is exactly when both would raise it. Held to the end of
+// the transaction and taken in one order for every batch, so two batches sharing
+// a key queue behind each other rather than deadlock.
+func hold(ctx context.Context, transaction pgx.Tx, candidates []alert.Candidate) error {
+	keys := make([]keyed, 0, len(candidates))
+	for _, candidate := range candidates {
+		keys = append(keys, keyed{tenant: candidate.Alert.GetTenantId(), correlation: candidate.Key})
+	}
+	slices.SortFunc(keys, func(one, other keyed) int {
+		return cmp.Or(strings.Compare(one.tenant, other.tenant), strings.Compare(one.correlation, other.correlation))
+	})
+
+	for _, key := range slices.Compact(keys) {
+		if _, err := transaction.Exec(ctx, holdKey, key.tenant, key.correlation); err != nil {
+			return fmt.Errorf("take the lock on alerts keyed %s: %w", key.correlation, err)
+		}
+	}
+	return nil
+}
+
+type keyed struct{ tenant, correlation string }
 
 func alreadyFolded(ctx context.Context, transaction pgx.Tx, detection string) (bool, error) {
 	var into string

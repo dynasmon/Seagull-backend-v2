@@ -3,6 +3,7 @@ package control
 import (
 	"crypto/x509"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 
@@ -73,6 +74,19 @@ func readWithin(w http.ResponseWriter, r *http.Request, into proto.Message, ceil
 	return true
 }
 
+// What a caller is told when a store or the backbone would not answer. The
+// failure is recorded whole where an operator reads it and named generically
+// where a caller does: a driver's message carries table names, statements and
+// addresses, and a caller who cannot reach any of them learns nothing from it
+// that helps them retry.
+func (s *Server) unavailable(w http.ResponseWriter, code string, err error) {
+	s.logger.Error("request_not_answered",
+		slog.String("code", code),
+		slog.String("error", err.Error()),
+	)
+	Refuse(w, http.StatusServiceUnavailable, code, "the platform could not answer this request; it has been recorded")
+}
+
 func (s *Server) openSession() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		caller, known := CallerFrom(r.Context())
@@ -88,7 +102,7 @@ func (s *Server) openSession() http.Handler {
 
 		session, token, err := s.sessions.Open(caller.Subject, caller.Binding, s.now(), asked.GetRequestedLifetime().AsDuration())
 		if err != nil {
-			Refuse(w, http.StatusServiceUnavailable, "session_refused", err.Error())
+			s.unavailable(w, "session_refused", err)
 			return
 		}
 		s.metrics.sessionOpened(s.sessions.Live())

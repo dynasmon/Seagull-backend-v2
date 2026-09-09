@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -288,8 +289,15 @@ func TestAStoreThatDoesNotAnswerIsNotACallerMistake(t *testing.T) {
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("an unreachable store answered %d, wanted 503", recorder.Code)
 	}
-	if refusal := refusalOf(t, recorder); refusal.GetCode() != control.CodeAlertsUnavailable {
+	refusal := refusalOf(t, recorder)
+	if refusal.GetCode() != control.CodeAlertsUnavailable {
 		t.Errorf("it was refused %q", refusal.GetCode())
+	}
+	// What the store said is recorded where an operator reads it and never
+	// handed to a caller: a driver's message names tables, statements and
+	// addresses that a caller cannot reach and could not act on.
+	if strings.Contains(refusal.GetDetail(), "the alert store is not answering") {
+		t.Errorf("the store's own message reached the caller: %q", refusal.GetDetail())
 	}
 }
 

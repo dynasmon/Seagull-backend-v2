@@ -27,6 +27,8 @@ type Metrics struct {
 	correlated  *prometheus.CounterVec
 	registered  *prometheus.CounterVec
 	announced   *prometheus.CounterVec
+	signed      *prometheus.CounterVec
+	renewed     *prometheus.CounterVec
 	outstanding prometheus.Gauge
 }
 
@@ -134,6 +136,18 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "agent_admissions_total",
 			Help:      "Attempts to tell the data plane what was decided about an agent, by what came of them.",
 		}, []string{"outcome"}),
+		signed: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "agent_certificates_issued_total",
+			Help:      "Certificates an operator asked the platform to sign, by the state the agent reached or by refusal.",
+		}, []string{"outcome"}),
+		renewed: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "agent_certificates_renewed_total",
+			Help:      "Certificates an agent asked to replace with the one it held, by what came of them.",
+		}, []string{"outcome"}),
 		outstanding: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: "control",
@@ -148,6 +162,7 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 		instruments.sessions, instruments.opened, instruments.revoked, instruments.ratelimited,
 		instruments.published, instruments.activated, instruments.moved, instruments.correlated,
 		instruments.registered, instruments.announced, instruments.outstanding,
+		instruments.signed, instruments.renewed,
 	)
 	return instruments
 }
@@ -238,6 +253,18 @@ func (m *Metrics) incidentMoved(outcome string) {
 func (m *Metrics) agentMoved(outcome string) {
 	if m != nil {
 		m.registered.WithLabelValues(outcome).Inc()
+	}
+}
+
+func (m *Metrics) certificateIssued(outcome string) {
+	if m != nil {
+		m.signed.WithLabelValues(outcome).Inc()
+	}
+}
+
+func (m *Metrics) certificateRenewed(outcome string) {
+	if m != nil {
+		m.renewed.WithLabelValues(outcome).Inc()
 	}
 }
 

@@ -25,6 +25,11 @@ type configuration struct {
 	idleTimeout  time.Duration
 	maxBodyBytes int64
 
+	maxInflight    int
+	ratePerSecond  float64
+	rateBurst      int
+	trackedCallers int
+
 	limits    hunt.Limits
 	cursorKey config.Secret
 
@@ -48,6 +53,10 @@ func load(parser *config.Parser) (configuration, error) {
 		idleTimeout:  parser.Duration("SEAGULL_QUERY_API_IDLE_TIMEOUT", 60*time.Second, time.Second, 30*time.Minute),
 		maxBodyBytes: parser.Bytes("SEAGULL_QUERY_API_MAX_BODY", 256<<10, 4<<10, 1<<20),
 
+		maxInflight:    parser.Int("SEAGULL_QUERY_API_MAX_INFLIGHT", 32, 1, 10_000),
+		rateBurst:      parser.Int("SEAGULL_QUERY_API_RATE_BURST", 20, 1, 100_000),
+		trackedCallers: parser.Int("SEAGULL_QUERY_API_TRACKED_CALLERS", 4096, 1, 1_000_000),
+
 		limits: hunt.Limits{
 			Window:      parser.Duration("SEAGULL_QUERY_API_WINDOW", 720*time.Hour, time.Minute, 8760*time.Hour),
 			Page:        parser.Int("SEAGULL_QUERY_API_PAGE", 50, 1, 500),
@@ -59,6 +68,8 @@ func load(parser *config.Parser) (configuration, error) {
 
 		store: storeConfig(parser),
 	}
+
+	loaded.ratePerSecond = float64(parser.Int("SEAGULL_QUERY_API_RATE_PER_SECOND", 10, 0, 10_000))
 
 	if err := parser.Err(); err != nil {
 		return configuration{}, err

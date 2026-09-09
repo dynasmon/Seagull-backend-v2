@@ -10,6 +10,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/clickhouse"
 	"github.com/dynasmon/Seagull-backend-v2/internal/hunt"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/ratelimit"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/run"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/tlsx"
@@ -64,12 +65,18 @@ func queryAPI(ctx context.Context) error {
 		return err
 	}
 
+	instruments := hunt.NewMetrics(platform.Metrics())
 	hunter, err := hunt.NewHunter(hunt.HunterOptions{
 		Source:   store,
 		Compiler: compiler,
-		Metrics:  hunt.NewMetrics(platform.Metrics()),
+		Metrics:  instruments,
 		Logger:   platform.Logger(),
 	})
+	if err != nil {
+		return err
+	}
+
+	capacity, err := hunt.NewCapacity(settings.maxInflight)
 	if err != nil {
 		return err
 	}
@@ -83,6 +90,9 @@ func queryAPI(ctx context.Context) error {
 		Address:         settings.address,
 		TLS:             transport,
 		Hunter:          hunter,
+		Capacity:        capacity,
+		Limiter:         ratelimit.NewLimiter(settings.ratePerSecond, settings.rateBurst, settings.trackedCallers),
+		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
 		MaxBodyBytes:    settings.maxBodyBytes,
@@ -105,6 +115,9 @@ func queryAPI(ctx context.Context) error {
 		slog.Int("page", settings.limits.Page),
 		slog.Int("page_max", settings.limits.MaxPage),
 		slog.Duration("read_budget", settings.limits.Timeout),
+		slog.Int("max_inflight", settings.maxInflight),
+		slog.Float64("rate_per_second", settings.ratePerSecond),
+		slog.Int("rate_burst", settings.rateBurst),
 		slog.Bool("cursor_key_configured", !settings.cursorKey.Empty()),
 	)
 

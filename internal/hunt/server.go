@@ -8,12 +8,16 @@ import (
 	"time"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/httpx"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/ratelimit"
 )
 
 type ServerOptions struct {
 	Address         string
 	TLS             *tls.Config
 	Hunter          *Hunter
+	Capacity        *Capacity
+	Limiter         *ratelimit.Limiter
+	Metrics         *Metrics
 	Instrumentation *httpx.Instrumentation
 	Logger          *slog.Logger
 	MaxBodyBytes    int64
@@ -47,7 +51,13 @@ func NewServer(options ServerOptions) (*httpx.Server, error) {
 		DetectionsRoute: {Detections, DetectionsRoute, "hunt_detections"},
 	}
 	for _, entry := range routes {
-		handler, err := NewHandler(entry.route, HandlerOptions{Hunter: options.Hunter, MaxBodyBytes: options.MaxBodyBytes})
+		handler, err := NewHandler(entry.route, HandlerOptions{
+			Hunter:       options.Hunter,
+			Capacity:     options.Capacity,
+			Limiter:      options.Limiter,
+			Metrics:      options.Metrics,
+			MaxBodyBytes: options.MaxBodyBytes,
+		})
 		if err != nil {
 			return nil, err
 		}

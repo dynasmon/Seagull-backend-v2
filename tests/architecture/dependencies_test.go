@@ -48,6 +48,7 @@ var layers = map[string]layer{
 	"internal/hunt":           capability,
 	"internal/incident":       domain,
 	"internal/ingest":         capability,
+	"internal/pki":            domain,
 	"internal/platform":       platform,
 	"internal/policyfile":     adapter,
 	"internal/postgres":       adapter,

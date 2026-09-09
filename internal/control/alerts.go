@@ -42,6 +42,10 @@ func (s *Server) searchAlerts() http.Handler {
 		if !readWithin(w, r, &asked, MaxBodyBytes) {
 			return
 		}
+		if err := alertFilters(&asked); err != nil {
+			Refuse(w, http.StatusUnprocessableEntity, CodeUnknownFilter, err.Error())
+			return
+		}
 
 		page, err := s.alerts.Page(r.Context(), &asked, caller.Grant.Tenants())
 		if err != nil {

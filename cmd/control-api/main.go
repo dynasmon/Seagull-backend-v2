@@ -123,7 +123,7 @@ func controlAPI(ctx context.Context) error {
 		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
 	}
 
-	seen, err := clickhouse.NewLiveness(settings.telemetry, settings.livenessHorizon)
+	seen, err := clickhouse.NewLiveness(settings.telemetry, settings.livenessHorizon, settings.livenessBackdating)
 	if err != nil {
 		return err
 	}
@@ -184,6 +184,7 @@ func controlAPI(ctx context.Context) error {
 		slog.String("alert_store_database", settings.alerts.Database),
 		slog.String("agents_topic", settings.topology.Agents.Name),
 		slog.Duration("liveness_horizon", settings.livenessHorizon),
+		slog.Duration("liveness_backdating", settings.livenessBackdating),
 	)
 
 	platform.Health().Register("backbone", published.publisher.Ping)

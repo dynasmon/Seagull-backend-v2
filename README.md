@@ -188,7 +188,7 @@ Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 | `event-writer` | Makes admitted telemetry queryable, quarantining what it cannot store. |
 | `detection-writer` | Makes a detection queryable, on the same terms and as a consumer of its own. |
 | `alert-writer` | Opens the work a detection at or above a severity floor becomes: an alert for a finding about one event, folded on a declared key, or an incident for a story several events told. It inserts and never updates. |
-| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, and the agent registry. |
+| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry, and the authority that signs an agent's certificate. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates on a second one. |
 | `query-api` | The read plane, and the only reader of the analytical store. |
 | `backbone-migrator`, `store-migrator`, `control-migrator` | Apply the topic topology, the analytical schema and the relational schema, then exit. Nothing migrates on the way to serving traffic. |
 
@@ -294,9 +294,16 @@ go run ./tools/devprobe -endpoint https://127.0.0.1:8443
 go run ./tools/devprobe -hunt https://127.0.0.1:8444
 ```
 
+Register an agent, have the platform sign the certificate it will present, watch
+it renew that certificate itself, and revoke it:
+
+```bash
+go run ./tools/devprobe -agents https://127.0.0.1:8445 -renewals https://127.0.0.1:8446
+```
+
 Stop everything and drop its state with `make down`. If a port is taken, publish
-elsewhere with `SEAGULL_GATEWAY_PUBLISH`, `SEAGULL_QUERY_API_PUBLISH` or
-`SEAGULL_CONTROL_API_PUBLISH`.
+elsewhere with `SEAGULL_GATEWAY_PUBLISH`, `SEAGULL_QUERY_API_PUBLISH`,
+`SEAGULL_CONTROL_API_PUBLISH` or `SEAGULL_CONTROL_API_RENEWAL_PUBLISH`.
 
 ## Configuration
 
@@ -318,6 +325,10 @@ container without going through the environment. The settings that matter most:
 | `SEAGULL_BACKBONE_REPLICAS`, `SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS` | How many copies of a record the backbone keeps and how many must be in sync to acknowledge one. Acknowledging on every in-sync replica means nothing when one replica is in sync. |
 | `SEAGULL_EVENT_STORE_TLS`, `SEAGULL_EVENT_STORE_TLS_CA` | Encryption to the telemetry store. There is no option to skip verification. |
 | `SEAGULL_CONTROL_API_POLICY` | The policy document the control plane is pinned to. |
+| `SEAGULL_CONTROL_API_AGENT_AUTHORITY_CERT`, `SEAGULL_CONTROL_API_AGENT_AUTHORITY_KEY` | The authority the control plane signs agent certificates with. Read once at startup; a plane that cannot read it does not serve. |
+| `SEAGULL_CONTROL_API_AGENT_TRUST_BUNDLE` | Every authority an agent is told to trust, read at each issuance and sent with the certificate. Widening it is how a certificate authority is rotated without visiting a machine; an authority that signs and is not in it is refused. |
+| `SEAGULL_CONTROL_API_AGENT_CERT_LIFETIME` | How long an issued agent certificate is valid. Short is the answer to a stolen key nobody has revoked, and renewal is what makes short affordable. |
+| `SEAGULL_CONTROL_API_RENEWAL_ADDRESS`, `SEAGULL_CONTROL_API_RENEWAL_TLS_CERT`, `SEAGULL_CONTROL_API_RENEWAL_TLS_KEY`, `SEAGULL_CONTROL_API_AGENT_CA` | The agent-facing listener an agent renews on, in the agent trust domain rather than the operator one. |
 | `SEAGULL_BACKBONE_AGENTS_TOPIC` | Where the control plane says what it decided about an agent and the gateway reads it. Compacted, keyed by the agent. |
 | `SEAGULL_CONTROL_TELEMETRY_STORE_ADDRESS` | Where the control plane reads when an agent was last heard from. It writes nothing there. |
 | `SEAGULL_CONTROL_API_SESSION_KEY` | Key sessions are signed with; drawn at random when unset. |

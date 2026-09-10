@@ -14,6 +14,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/clickhouse"
 	"github.com/dynasmon/Seagull-backend-v2/internal/control"
+	"github.com/dynasmon/Seagull-backend-v2/internal/pki"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/ratelimit"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/run"
@@ -146,7 +147,17 @@ func controlAPI(ctx context.Context) error {
 		return err
 	}
 
-	listener, err := control.NewServer(control.ServerOptions{
+	authority, bundle, err := agentAuthority(settings)
+	if err != nil {
+		return err
+	}
+
+	renewalTransport, err := agentTransport(settings)
+	if err != nil {
+		return err
+	}
+
+	options := control.ServerOptions{
 		Address:         settings.address,
 		TLS:             transport,
 		Guard:           guard,
@@ -158,6 +169,13 @@ func controlAPI(ctx context.Context) error {
 		Agents:          raised.Agents(),
 		Admissions:      admissions,
 		Liveness:        seen,
+		Authority:       authority,
+		TrustBundle:     bundle,
+		CertificateLife: settings.certificateLife,
+		RenewalAddress:  settings.renewalAddress,
+		RenewalTLS:      renewalTransport,
+		RenewalLimiter: ratelimit.NewLimiter(
+			settings.renewalsPerSecond, settings.renewalBurst, settings.trackedRenewalAgent),
 		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
@@ -165,7 +183,13 @@ func controlAPI(ctx context.Context) error {
 		WriteTimeout:    settings.writeTimeout,
 		IdleTimeout:     settings.idleTimeout,
 		ShutdownTimeout: platform.ShutdownTimeout(),
-	})
+	}
+
+	listener, err := control.NewServer(options)
+	if err != nil {
+		return err
+	}
+	renewals, err := control.NewRenewalServer(options)
 	if err != nil {
 		return err
 	}
@@ -187,6 +211,10 @@ func controlAPI(ctx context.Context) error {
 		slog.Duration("liveness_horizon", settings.livenessHorizon),
 		slog.Duration("liveness_backdating", settings.livenessBackdating),
 		slog.Any("permissions_not_shown_to_callers", control.Unnamed()),
+		slog.String("renewal_address", renewals.Address()),
+		slog.String("agent_authority", authority.Subject()),
+		slog.Time("agent_authority_expires_at", authority.NotAfter()),
+		slog.Duration("agent_certificate_lifetime", settings.certificateLife),
 	)
 
 	platform.Health().Register("backbone", published.publisher.Ping)
@@ -194,6 +222,7 @@ func controlAPI(ctx context.Context) error {
 	platform.Health().Register("telemetry-store", seen.Ping)
 	platform.Add(published.follower(platform.Logger()))
 	platform.Add(listener)
+	platform.Add(renewals)
 	platform.Add(announcer)
 	platform.Add(sweeper{sessions: sessions, every: settings.sessionLife})
 
@@ -209,6 +238,51 @@ func mutualTransport(settings configuration) (*tls.Config, error) {
 		return nil, err
 	}
 	return material.MutualServerConfig()
+}
+
+// The renewal listener terminates the agent trust domain and the one above it
+// terminates the operator domain, so an agent key cannot reach the administrative
+// surface and an operator key cannot renew an agent's certificate.
+func agentTransport(settings configuration) (*tls.Config, error) {
+	material, err := tlsx.NewMaterial(settings.renewalCertFile, settings.renewalKeyFile, settings.agentCAFile)
+	if err != nil {
+		return nil, err
+	}
+	return material.MutualServerConfig()
+}
+
+// The private key is read once and kept in this process. A control plane that
+// cannot read the authority it signs with does not serve, because an estate whose
+// certificates silently stopped being renewable expires all at once.
+func agentAuthority(settings configuration) (*pki.Authority, func() ([]byte, error), error) {
+	certificatePEM, err := os.ReadFile(settings.authorityFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read the agent authority certificate: %w", err)
+	}
+	keyPEM, err := os.ReadFile(settings.authorityKeyFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read the agent authority key: %w", err)
+	}
+	authority, err := pki.NewAuthority(certificatePEM, keyPEM)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	bundle := func() ([]byte, error) {
+		read, err := os.ReadFile(settings.trustBundleFile)
+		if err != nil {
+			return nil, fmt.Errorf("read the agent trust bundle: %w", err)
+		}
+		return read, nil
+	}
+	held, err := bundle()
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := pki.Trusts(held, authority); err != nil {
+		return nil, nil, err
+	}
+	return authority, bundle, nil
 }
 
 func policySource(path string) control.Source {

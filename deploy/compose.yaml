@@ -317,12 +317,21 @@ services:
     networks: [backbone, agents]
     ports:
       - "${SEAGULL_CONTROL_API_PUBLISH:-127.0.0.1:8445}:8445"
+      - "${SEAGULL_CONTROL_API_RENEWAL_PUBLISH:-127.0.0.1:8446}:8446"
     environment:
       <<: [*backbone, *alertstore]
       SEAGULL_CONTROL_API_ADDRESS: 0.0.0.0:8445
       SEAGULL_CONTROL_API_TLS_CERT: /run/pki/control-api.pem
       SEAGULL_CONTROL_API_TLS_KEY: /run/pki/control-api-key.pem
       SEAGULL_CONTROL_API_CALLER_CA: /run/pki/operator-ca.pem
+      SEAGULL_CONTROL_API_RENEWAL_ADDRESS: 0.0.0.0:8446
+      SEAGULL_CONTROL_API_RENEWAL_TLS_CERT: /run/pki/control-api-renewal.pem
+      SEAGULL_CONTROL_API_RENEWAL_TLS_KEY: /run/pki/control-api-renewal-key.pem
+      SEAGULL_CONTROL_API_AGENT_CA: /run/pki/agent-ca.pem
+      SEAGULL_CONTROL_API_AGENT_AUTHORITY_CERT: /run/pki/agent-ca.pem
+      SEAGULL_CONTROL_API_AGENT_AUTHORITY_KEY: /run/pki/agent-ca-key.pem
+      SEAGULL_CONTROL_API_AGENT_TRUST_BUNDLE: /run/pki/agent-trust.pem
+      SEAGULL_CONTROL_API_AGENT_CERT_LIFETIME: ${SEAGULL_CONTROL_API_AGENT_CERT_LIFETIME:-168h}
       SEAGULL_CONTROL_API_POLICY: /etc/seagull/policy.yml
       SEAGULL_CONTROL_TELEMETRY_STORE_ADDRESS: clickhouse:9000
       SEAGULL_CONTROL_TELEMETRY_STORE_DATABASE: ${SEAGULL_EVENT_STORE_DATABASE:-seagull}

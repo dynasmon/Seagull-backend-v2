@@ -20,11 +20,12 @@ import (
 // ask, which tenant they may ask about, what it answers with and what it tells
 // the data plane afterwards.
 type stubAgents struct {
-	held      map[string]*agentv1.Agent
-	trail     map[string][]*agentv1.Transition
-	announced map[string]uint64
-	unreached error
-	clock     time.Time
+	held         map[string]*agentv1.Agent
+	trail        map[string][]*agentv1.Transition
+	certificates map[string][]*agentv1.CertificateRecord
+	announced    map[string]uint64
+	unreached    error
+	clock        time.Time
 }
 
 func newStubAgents() *stubAgents {
@@ -96,13 +97,43 @@ func (s *stubAgents) Move(ctx context.Context, id string, tenants []string, aske
 	if err != nil {
 		return nil, err
 	}
+	return s.apply(held, asked)
+}
+
+func (s *stubAgents) Renew(_ context.Context, id string, asked agent.Move) (*agentv1.Agent, error) {
+	if s.unreached != nil {
+		return nil, s.unreached
+	}
+	held, known := s.held[id]
+	if !known {
+		return nil, agent.ErrUnknown
+	}
+	asked.Renewal = true
+	return s.apply(held, asked)
+}
+
+func (s *stubAgents) apply(held *agentv1.Agent, asked agent.Move) (*agentv1.Agent, error) {
 	moved, line, err := agent.Apply(held, asked)
 	if err != nil {
 		return nil, err
 	}
+	id := moved.GetAgentId()
 	s.held[id] = moved
 	s.trail[id] = append(s.trail[id], line)
+	if signed := agent.Certificate(moved, asked); signed != nil {
+		if s.certificates == nil {
+			s.certificates = map[string][]*agentv1.CertificateRecord{}
+		}
+		s.certificates[id] = append([]*agentv1.CertificateRecord{signed}, s.certificates[id]...)
+	}
 	return moved, nil
+}
+
+func (s *stubAgents) Certificates(ctx context.Context, id string, tenants []string) (*agentv1.CertificateHistory, error) {
+	if _, err := s.Agent(ctx, id, tenants); err != nil {
+		return nil, err
+	}
+	return &agentv1.CertificateHistory{AgentId: id, Certificates: s.certificates[id]}, nil
 }
 
 func (s *stubAgents) Outstanding(_ context.Context, _ int) ([]*agentv1.Admission, error) {

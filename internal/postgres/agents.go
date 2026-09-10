@@ -184,14 +184,29 @@ func (a *Agents) Page(ctx context.Context, asked *agentv1.Query, tenants []strin
 // move was decided against is the state it is applied to. Without the lock two
 // operators could each read `active` and both be allowed to revoke it.
 func (a *Agents) Move(ctx context.Context, id string, tenants []string, asked agent.Move) (*agentv1.Agent, error) {
+	return a.move(ctx, id, asked,
+		"SELECT "+agentColumns+" FROM agents WHERE agent_id = $1 AND tenant_id = ANY($2) FOR UPDATE",
+		[]any{id, tenants})
+}
+
+// An agent renewing its own certificate is not a caller with a scope: the
+// connection proved which agent it is, and an agent belongs to one tenant it did
+// not choose. Whether the platform still signs for it is decided by agent.Apply
+// under the held row.
+func (a *Agents) Renew(ctx context.Context, id string, asked agent.Move) (*agentv1.Agent, error) {
+	asked.Renewal = true
+	return a.move(ctx, id, asked,
+		"SELECT "+agentColumns+" FROM agents WHERE agent_id = $1 FOR UPDATE", []any{id})
+}
+
+func (a *Agents) move(ctx context.Context, id string, asked agent.Move, query string, arguments []any) (*agentv1.Agent, error) {
 	transaction, err := a.store.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin moving agent %s: %w", id, err)
 	}
 	defer func() { _ = transaction.Rollback(ctx) }()
 
-	rows, err := transaction.Query(ctx,
-		"SELECT "+agentColumns+" FROM agents WHERE agent_id = $1 AND tenant_id = ANY($2) FOR UPDATE", id, tenants)
+	rows, err := transaction.Query(ctx, query, arguments...)
 	if err != nil {
 		return nil, fmt.Errorf("read agent %s: %w", id, err)
 	}
@@ -225,6 +240,11 @@ func (a *Agents) Move(ctx context.Context, id string, tenants []string, asked ag
 	}
 	if _, err := transaction.Exec(ctx, insertAgentTransition, agentTrail(line)...); err != nil {
 		return nil, fmt.Errorf("record the move of agent %s: %w", id, err)
+	}
+	if signed := agent.Certificate(moved, asked); signed != nil {
+		if err := recordCertificate(ctx, transaction, signed, asked.At); err != nil {
+			return nil, err
+		}
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit the move of agent %s: %w", id, err)

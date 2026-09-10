@@ -26,6 +26,7 @@ const (
 	incidentTransitionsTable = "incident_transitions"
 	agentsTable              = "agents"
 	agentTransitionsTable    = "agent_transitions"
+	agentCertificatesTable   = "agent_certificates"
 )
 
 type Config struct {
@@ -145,7 +146,7 @@ func (s *Store) VerifySchema(ctx context.Context) error {
 	for _, table := range []string{
 		alertsTable, transitionsTable,
 		incidentsTable, incidentTransitionsTable,
-		agentsTable, agentTransitionsTable,
+		agentsTable, agentTransitionsTable, agentCertificatesTable,
 	} {
 		var present bool
 		err := s.pool.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", table).Scan(&present)

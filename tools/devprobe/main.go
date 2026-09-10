@@ -2,10 +2,14 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha256"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/hex"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -38,7 +42,8 @@ func main() {
 	huntEndpoint := flag.String("hunt", "", "query plane base URL; asks what was stored instead of sending a batch")
 	alertEndpoint := flag.String("alerts", "", "control plane base URL; works an alert through its lifecycle instead of sending a batch")
 	incidentEndpoint := flag.String("incidents", "", "control plane base URL; reads a correlated story back to its events and works it")
-	agentEndpoint := flag.String("agents", "", "control plane base URL; registers an agent, binds its certificate and revokes it")
+	agentEndpoint := flag.String("agents", "", "control plane base URL; registers an agent, has its certificate issued and renewed, and revokes it")
+	renewalEndpoint := flag.String("renewals", "https://127.0.0.1:8446", "agent-facing control plane base URL the registry probe renews against")
 	agentID := flag.String("agent-id", "probe-agent-01", "agent the registry probe registers")
 	window := flag.Duration("window", time.Hour, "how far back a hunt looks")
 	pki := flag.String("pki", ".local/pki", "directory holding the development material")
@@ -58,7 +63,7 @@ func main() {
 		run = func() error { return investigate(*incidentEndpoint, *pki) }
 	}
 	if *agentEndpoint != "" {
-		run = func() error { return enrol(*agentEndpoint, *pki, *agentID) }
+		run = func() error { return enrol(*agentEndpoint, *renewalEndpoint, *pki, *agentID) }
 	}
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "devprobe: %v\n", err)
@@ -66,7 +71,7 @@ func main() {
 	}
 }
 
-func enrol(endpoint, pki, agentID string) error {
+func enrol(endpoint, renewalEndpoint, pki, agentID string) error {
 	client, token, err := authenticate(endpoint, pki)
 	if err != nil {
 		return err
@@ -87,27 +92,27 @@ func enrol(endpoint, pki, agentID string) error {
 	}
 	fmt.Printf("register status %d\n", status)
 
-	now := time.Now().UTC()
-	digest := sha256.Sum256([]byte(agentID))
-	status, body, err = send(client, http.MethodPost, endpoint+"/v1/agents/"+agentID+"/identity", token,
-		&agentv1.BindingRequest{Identity: &agentv1.Identity{
-			Subject:           agentID,
-			Serial:            hex.EncodeToString(digest[:8]),
-			FingerprintSha256: hex.EncodeToString(digest[:]),
-			IssuedAt:          timestamppb.New(now),
-			ExpiresAt:         timestamppb.New(now.Add(90 * 24 * time.Hour)),
-		}})
+	key, requestPEM, err := keyAndRequest(agentID)
 	if err != nil {
 		return err
 	}
-	if status != http.StatusOK {
-		fmt.Printf("bind status %d\n", status)
-	} else {
-		var bound agentv1.Agent
-		if err := proto.Unmarshal(body, &bound); err != nil {
-			return err
-		}
-		fmt.Printf("bound %s state %s revision %d\n", bound.GetAgentId(), bound.GetState(), bound.GetRevision())
+	status, body, err = send(client, http.MethodPost, endpoint+"/v1/agents/"+agentID+"/certificate", token,
+		&agentv1.CertificateRequest{CsrPem: requestPEM, Note: "issued by devprobe"})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusCreated {
+		return refused("issue", status, body)
+	}
+	var issued agentv1.IssuedCertificate
+	if err := proto.Unmarshal(body, &issued); err != nil {
+		return err
+	}
+	fmt.Printf("issued %s serial %s expires %s\n", issued.GetIdentity().GetSubject(),
+		issued.GetIdentity().GetSerial(), issued.GetIdentity().GetExpiresAt().AsTime().Format(time.RFC3339))
+
+	if err := renew(renewalEndpoint, agentID, key, &issued); err != nil {
+		return err
 	}
 
 	status, body, err = send(client, http.MethodPost, endpoint+control.AgentSearch, token, &agentv1.Query{Limit: 10})
@@ -155,6 +160,27 @@ func enrol(endpoint, pki, agentID string) error {
 	if err := proto.Unmarshal(body, &history); err != nil {
 		return err
 	}
+	status, body, err = send(client, http.MethodGet, endpoint+"/v1/agents/"+agentID+"/certificates", token, nil)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return refused("certificates", status, body)
+	}
+	var signed agentv1.CertificateHistory
+	if err := proto.Unmarshal(body, &signed); err != nil {
+		return err
+	}
+	fmt.Printf("certificates %d\n", len(signed.GetCertificates()))
+	for _, one := range signed.GetCertificates() {
+		current := "current"
+		if one.GetSupersededAt() != nil {
+			current = "superseded " + one.GetSupersededAt().AsTime().Format(time.RFC3339)
+		}
+		fmt.Printf("  %s by %s from %s: %s\n", one.GetIdentity().GetSerial(), one.GetIssuedBy(),
+			one.GetAuthoritySubject(), current)
+	}
+
 	fmt.Printf("trail %d\n", len(history.GetTransitions()))
 	for _, line := range history.GetTransitions() {
 		fmt.Printf("  %d %s -> %s by %s: %s\n", line.GetRevision(), line.GetFrom(), line.GetTo(),
@@ -567,4 +593,64 @@ func sample(batchID, eventID, outcome string) *ingestv1.EventBatch {
 			}},
 		}},
 	}
+}
+
+func keyAndRequest(agentID string) (*ecdsa.PrivateKey, []byte, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate an agent key: %w", err)
+	}
+	der, err := x509.CreateCertificateRequest(rand.Reader,
+		&x509.CertificateRequest{Subject: pkix.Name{CommonName: agentID}}, key)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create a certificate request: %w", err)
+	}
+	return key, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der}), nil
+}
+
+// The agent half: the certificate that was just issued is what authenticates the
+// request for the next one, so no operator is involved and nothing but the wire
+// is used to prove who is asking.
+func renew(endpoint, agentID string, key *ecdsa.PrivateKey, issued *agentv1.IssuedCertificate) error {
+	der, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return fmt.Errorf("encode the agent key: %w", err)
+	}
+	keypair, err := tls.X509KeyPair(
+		append(append([]byte(nil), issued.GetCertificatePem()...), issued.GetChainPem()...),
+		pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}))
+	if err != nil {
+		return fmt.Errorf("load the issued keypair: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(issued.GetTrustBundlePem()) {
+		return errors.New("the bundle the agent was told to trust holds no authority")
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{
+		RootCAs:      pool,
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{keypair},
+	}}}
+	defer client.CloseIdleConnections()
+
+	_, requestPEM, err := keyAndRequest(agentID)
+	if err != nil {
+		return err
+	}
+	status, body, err := send(client, http.MethodPost, endpoint+control.RenewalPath, "",
+		&agentv1.RenewalRequest{CsrPem: requestPEM})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusCreated {
+		return refused("renew", status, body)
+	}
+	var renewed agentv1.IssuedCertificate
+	if err := proto.Unmarshal(body, &renewed); err != nil {
+		return err
+	}
+	fmt.Printf("renewed %s serial %s expires %s\n", renewed.GetIdentity().GetSubject(),
+		renewed.GetIdentity().GetSerial(), renewed.GetIdentity().GetExpiresAt().AsTime().Format(time.RFC3339))
+	return nil
 }

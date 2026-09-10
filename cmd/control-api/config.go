@@ -5,6 +5,7 @@ import (
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/clickhouse"
+	"github.com/dynasmon/Seagull-backend-v2/internal/pki"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 	"github.com/dynasmon/Seagull-backend-v2/internal/postgres"
@@ -19,6 +20,18 @@ type configuration struct {
 	certificateFile string
 	keyFile         string
 	callerCAFile    string
+
+	authorityFile       string
+	authorityKeyFile    string
+	trustBundleFile     string
+	certificateLife     time.Duration
+	renewalAddress      string
+	renewalCertFile     string
+	renewalKeyFile      string
+	agentCAFile         string
+	renewalsPerSecond   float64
+	renewalBurst        int
+	trackedRenewalAgent int
 
 	brokers      []string
 	topology     broker.Topology
@@ -57,6 +70,18 @@ func load(parser *config.Parser) (configuration, error) {
 		keyFile:         parser.RequiredFilePath("SEAGULL_CONTROL_API_TLS_KEY"),
 		callerCAFile:    parser.RequiredFilePath("SEAGULL_CONTROL_API_CALLER_CA"),
 
+		authorityFile:    parser.RequiredFilePath("SEAGULL_CONTROL_API_AGENT_AUTHORITY_CERT"),
+		authorityKeyFile: parser.RequiredFilePath("SEAGULL_CONTROL_API_AGENT_AUTHORITY_KEY"),
+		trustBundleFile:  parser.RequiredFilePath("SEAGULL_CONTROL_API_AGENT_TRUST_BUNDLE"),
+		certificateLife: parser.Duration("SEAGULL_CONTROL_API_AGENT_CERT_LIFETIME",
+			7*24*time.Hour, pki.MinValidity, pki.MaxValidity),
+		renewalAddress:      parser.String("SEAGULL_CONTROL_API_RENEWAL_ADDRESS", "127.0.0.1:8446"),
+		renewalCertFile:     parser.RequiredFilePath("SEAGULL_CONTROL_API_RENEWAL_TLS_CERT"),
+		renewalKeyFile:      parser.RequiredFilePath("SEAGULL_CONTROL_API_RENEWAL_TLS_KEY"),
+		agentCAFile:         parser.RequiredFilePath("SEAGULL_CONTROL_API_AGENT_CA"),
+		renewalBurst:        parser.Int("SEAGULL_CONTROL_API_RENEWAL_BURST", 4, 1, 1_000),
+		trackedRenewalAgent: parser.Int("SEAGULL_CONTROL_API_TRACKED_RENEWING_AGENTS", 8192, 1, 1_000_000),
+
 		brokers:      parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
 		topology:     broker.LoadTopology(parser),
 		security:     broker.LoadSecurity(parser),
@@ -87,6 +112,8 @@ func load(parser *config.Parser) (configuration, error) {
 	}
 
 	loaded.ratePerSecond = float64(parser.Int("SEAGULL_CONTROL_API_RATE_PER_SECOND", 20, 0, 10_000))
+	loaded.renewalsPerSecond = 1 / parser.Duration("SEAGULL_CONTROL_API_RENEWAL_INTERVAL",
+		time.Minute, time.Second, 24*time.Hour).Seconds()
 
 	if err := parser.Err(); err != nil {
 		return configuration{}, err

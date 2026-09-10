@@ -13,8 +13,12 @@ import (
 // application check would be involved in stopping it.
 type Bundle struct {
 	AgentAuthority     string
+	AgentAuthorityKey  string
+	AgentTrustBundle   string
 	GatewayCertificate string
 	GatewayKey         string
+	RenewalCertificate string
+	RenewalKey         string
 	AgentCertificate   string
 	AgentKey           string
 
@@ -46,8 +50,12 @@ func Write(directory string, agents, operators Domain) (Bundle, error) {
 	at := func(name string) string { return filepath.Join(directory, name) }
 	bundle := Bundle{
 		AgentAuthority:     at("agent-ca.pem"),
+		AgentAuthorityKey:  at("agent-ca-key.pem"),
+		AgentTrustBundle:   at("agent-trust.pem"),
 		GatewayCertificate: at("gateway.pem"),
 		GatewayKey:         at("gateway-key.pem"),
+		RenewalCertificate: at("control-api-renewal.pem"),
+		RenewalKey:         at("control-api-renewal-key.pem"),
 		AgentCertificate:   at("agent.pem"),
 		AgentKey:           at("agent-key.pem"),
 
@@ -68,8 +76,12 @@ func Write(directory string, agents, operators Domain) (Bundle, error) {
 		mode    os.FileMode
 	}{
 		{bundle.AgentAuthority, agents.Authority.CertificatePEM, 0o644},
+		{bundle.AgentAuthorityKey, agents.Authority.PrivateKeyPEM, 0o600},
+		{bundle.AgentTrustBundle, agents.Authority.CertificatePEM, 0o644},
 		{bundle.GatewayCertificate, agents.Servers["gateway"].CertificatePEM, 0o644},
 		{bundle.GatewayKey, agents.Servers["gateway"].PrivateKeyPEM, 0o600},
+		{bundle.RenewalCertificate, agents.Servers["renewal"].CertificatePEM, 0o644},
+		{bundle.RenewalKey, agents.Servers["renewal"].PrivateKeyPEM, 0o600},
 		{bundle.AgentCertificate, agents.Clients["agent"].CertificatePEM, 0o644},
 		{bundle.AgentKey, agents.Clients["agent"].PrivateKeyPEM, 0o600},
 

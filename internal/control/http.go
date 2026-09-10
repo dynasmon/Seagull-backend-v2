@@ -198,6 +198,7 @@ var resources = map[authz.Resource]controlv1.Resource{
 	authz.Rulesets:   controlv1.Resource_RESOURCE_RULESETS,
 	authz.Alerts:     controlv1.Resource_RESOURCE_ALERTS,
 	authz.Agents:     controlv1.Resource_RESOURCE_AGENTS,
+	authz.Incidents:  controlv1.Resource_RESOURCE_INCIDENTS,
 	authz.Policies:   controlv1.Resource_RESOURCE_POLICIES,
 	authz.Sessions:   controlv1.Resource_RESOURCE_SESSIONS,
 }
@@ -209,7 +210,7 @@ var resources = map[authz.Resource]controlv1.Resource{
 // a grant says out loud that it cannot show it. It empties as the contract
 // catches up, and a resource in neither the map nor the list fails the test that
 // reads both.
-var unnamed = []authz.Resource{authz.Incidents}
+var unnamed []authz.Resource
 
 func Unnamed() []authz.Resource { return slices.Clone(unnamed) }
 

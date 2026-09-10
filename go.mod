@@ -6,7 +6,7 @@ toolchain go1.25.13
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.40.3
-	github.com/dynasmon/Seagull-contracts v0.11.0
+	github.com/dynasmon/Seagull-contracts v0.12.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/prometheus/client_golang v1.20.5
 	github.com/twmb/franz-go v1.18.0

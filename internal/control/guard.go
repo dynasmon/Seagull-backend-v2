@@ -45,6 +45,9 @@ const (
 	CodeAgentsUnavailable = "agent_registry_unavailable"
 	CodeAlertsUnavailable = "alerts_unavailable"
 
+	CodeMalformedRequest = "malformed_certificate_request"
+	CodeSigningRefused   = "certificate_not_signed"
+
 	CodeUnknownIncident      = "unknown_incident"
 	CodeIncidentMoved        = "incident_moved"
 	CodeStoryHeldByAnother   = "incident_held_by_another"

@@ -37,6 +37,16 @@ type Move struct {
 	Actor    string
 	At       time.Time
 
+	// The subject of the certificate authority that signed the identity being
+	// bound, so rotating one is visible in the certificate trail rather than
+	// only in the configuration of the process that signed.
+	Authority string
+
+	// Set when the agent asked for this itself rather than an operator. A
+	// platform that stopped listening to a machine stops signing for it too, so
+	// a renewal is refused wherever telemetry would be.
+	Renewal bool
+
 	// The revision the caller believed it was acting on. Zero acts on whatever
 	// the agent currently is; anything else is refused when the agent has moved,
 	// so two operators acting at once means the second is told rather than
@@ -72,6 +82,9 @@ func Apply(current *agentv1.Agent, move Move) (*agentv1.Agent, *agentv1.Transiti
 	case binding && from.Final():
 		return nil, nil, fmt.Errorf("%w: an agent that is %s takes no further identity",
 			ErrMalformedIdentity, from)
+	case binding && move.Renewal && !from.Admits():
+		return nil, nil, fmt.Errorf("%w: an agent that is %s does not renew its own certificate",
+			ErrIllegalMove, from)
 	case changing && !Legal(from, move.To):
 		return nil, nil, Illegal(from, move.To)
 	case changing && move.Note == "":

@@ -31,7 +31,6 @@ SEAGULL_GATEWAY_TLS_KEY: is required
 | `SEAGULL_SHUTDOWN_TIMEOUT` | `20s` | how long a graceful stop may take |
 | `SEAGULL_READINESS_CACHE` | `5s` | how long a readiness verdict is reused |
 | `SEAGULL_READINESS_TIMEOUT` | `2s` | budget for a single readiness check |
-| `SEAGULL_TENANT_ID` | `default` | tenant stamped on admitted events |
 
 The operational listener binds to loopback unless a deployment says otherwise.
 A container that needs to be scraped sets `SEAGULL_OPS_ADDRESS` explicitly, so
@@ -403,7 +402,7 @@ other answer means the agent keeps the batch and retries:
 |---|---|
 | `200` | the backbone owns the batch; drop the local copy |
 | `400` | the payload is not a valid batch; do not retry unchanged |
-| `403` | the connection carries no usable agent identity |
+| `403` | the platform takes nothing from this connection: no usable agent identity, no registration placing the agent in a tenant (`agent_not_registered`), or a registration it stopped honouring (`agent_not_admitted`); keep the batch |
 | `413` | the body is above the gateway ceiling; send smaller batches |
 | `415` | the batch was not sent as protobuf |
 | `422` | an event failed admission; the answer names the index and the field |
@@ -426,7 +425,11 @@ Three timestamps are distinct and never collapsed:
 
 The gateway replaces the whole `reception` message and the identity fields in
 `origin`, so a producer cannot choose its own identity, tenant, or place in the
-platform's timeline.
+platform's timeline. `origin.agent_id` is the common name of the verified client
+certificate and `origin.tenant_id` is the tenant the registry recorded that agent
+in, read from the admission record on `security.agents` rather than from the
+gateway's configuration; an agent with no registration is refused with `403`
+before its body is read.
 
 ## The backbone topology
 

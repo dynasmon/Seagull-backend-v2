@@ -78,7 +78,6 @@ func TestAdmittedBatchBecomesDurableOnTheBackbone(t *testing.T) {
 
 	admitter, err := ingest.NewAdmitter(publisher, ingest.Policy{
 		Gateway:           "gateway-integration",
-		TenantID:          "acme",
 		MaxEventsPerBatch: 100,
 		Event:             event.Policy{MaxClockSkew: 5 * time.Minute, MaxAge: 168 * time.Hour},
 	}, ingest.NewMetrics(metrics.New("integration")))
@@ -93,7 +92,7 @@ func TestAdmittedBatchBecomesDurableOnTheBackbone(t *testing.T) {
 		fixtures.SSHAuthentication{EventID: "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa", Username: "root"}.Event(),
 		fixtures.SSHAuthentication{EventID: "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb", Username: "deploy"}.Event(),
 	)
-	acknowledgement, err := admitter.Admit(ctx, agentidentity.Identity{AgentID: "web-01"}, batch)
+	acknowledgement, err := admitter.Admit(ctx, agentidentity.Identity{AgentID: "web-01"}, "acme", batch)
 	if err != nil {
 		t.Fatalf("admit batch: %v", err)
 	}

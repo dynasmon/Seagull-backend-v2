@@ -34,6 +34,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/tlsx"
 	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
+	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
 )
@@ -119,6 +120,7 @@ func (c *controlledBackbone) holds(id string) bool {
 type gateway struct {
 	address   string
 	authority *devpki.Authority
+	roster    *agent.Roster
 	stopped   chan error
 	stop      context.CancelFunc
 	once      sync.Once
@@ -215,7 +217,6 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	instruments := ingest.NewMetrics(platform.Metrics())
 	admitter, err := ingest.NewAdmitter(options.backbone, ingest.Policy{
 		Gateway:           "gateway-load",
-		TenantID:          "acme",
 		MaxEventsPerBatch: options.maxEventsPerBatch,
 		Event:             event.Policy{MaxClockSkew: 5 * time.Minute, MaxAge: 168 * time.Hour},
 	}, instruments)
@@ -233,9 +234,10 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		t.Fatalf("bound what the gateway holds at once: %v", err)
 	}
 
+	roster := agent.NewRoster()
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{
 		Admitter:       admitter,
-		Roster:         agent.NewRoster(),
+		Roster:         roster,
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        instruments,
@@ -266,6 +268,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	running := &gateway{
 		address:   listener.Address(),
 		authority: authority,
+		roster:    roster,
 		stopped:   make(chan error, 1),
 		stop:      cancel,
 	}
@@ -283,6 +286,14 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 func (g *gateway) client(t *testing.T, agentID string) *http.Client {
 	t.Helper()
 
+	if err := g.roster.Apply(&agentv1.Admission{
+		AgentId:  agentID,
+		TenantId: "acme",
+		State:    agent.Active.Wire(),
+		Revision: 1,
+	}); err != nil {
+		t.Fatalf("register %s: %v", agentID, err)
+	}
 	client, err := g.authority.IssueClient(agentID, time.Hour)
 	if err != nil {
 		t.Fatalf("issue client certificate: %v", err)

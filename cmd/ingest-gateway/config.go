@@ -75,7 +75,6 @@ func load(parser *config.Parser) (configuration, error) {
 	loaded.ratePerSecond = float64(parser.Int("SEAGULL_GATEWAY_RATE_PER_SECOND", 200, 0, 1_000_000))
 	loaded.admissionRules = ingest.Policy{
 		Gateway:           parser.String("SEAGULL_GATEWAY_ID", serviceName),
-		TenantID:          parser.String("SEAGULL_TENANT_ID", "default"),
 		MaxEventsPerBatch: parser.Int("SEAGULL_GATEWAY_MAX_EVENTS_PER_BATCH", 1_000, 1, 100_000),
 		Event: event.Policy{
 			MaxClockSkew: parser.Duration("SEAGULL_EVENT_MAX_CLOCK_SKEW", 5*time.Minute, time.Second, time.Hour),

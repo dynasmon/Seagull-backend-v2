@@ -28,11 +28,11 @@ const (
 	CodeNotAdmitted = "agent_not_admitted"
 )
 
-// Whether the platform still honours an agent's identity. The gateway is told
-// the answer rather than looking it up: the registry is a control-plane store
-// and the ingest path reads no store per batch.
+// Which tenant an agent's telemetry belongs to, if the platform admits it at
+// all. The gateway is told the answer rather than looking it up: the registry is
+// a control-plane store and the ingest path reads no store per batch.
 type Roster interface {
-	Admits(agentID string) bool
+	Tenant(agentID string) (string, bool)
 }
 
 type HandlerOptions struct {
@@ -98,10 +98,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx := log.With(r.Context(), slog.String("agent_id", identity.AgentID))
 
-	// A certificate says who an agent is and the registry says whether the
-	// platform still listens to it. The answer is held in memory from a
-	// compacted topic, so refusing costs a map lookup and no round trip.
-	if !h.roster.Admits(identity.AgentID) {
+	// A certificate says who an agent is, and the registry says whose estate its
+	// telemetry belongs to and whether the platform still listens to it. The
+	// answer is held in memory from a compacted topic, so it costs a map lookup
+	// and no round trip, and an agent it names no tenant for is never placed in one.
+	tenant, admitted := h.roster.Tenant(identity.AgentID)
+	if !admitted {
 		h.metrics.batchRejected(CodeNotAdmitted)
 		refuse(w, http.StatusForbidden, CodeNotAdmitted,
 			"the platform no longer admits telemetry from this agent", "", -1)
@@ -149,7 +151,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	publishCtx, cancel := context.WithTimeout(ctx, h.publishTimeout)
 	defer cancel()
 
-	acknowledgement, err := h.admitter.Admit(publishCtx, identity, &batch)
+	acknowledgement, err := h.admitter.Admit(publishCtx, identity, tenant, &batch)
 	if err != nil {
 		h.refuseAdmission(ctx, w, &batch, err)
 		return

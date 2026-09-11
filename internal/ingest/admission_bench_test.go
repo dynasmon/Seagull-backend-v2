@@ -34,7 +34,6 @@ func benchAdmitter(b *testing.B) *ingest.Admitter {
 		discardingBackbone{},
 		ingest.Policy{
 			Gateway:           "bench-gateway",
-			TenantID:          "bench",
 			MaxEventsPerBatch: 10_000,
 			Event:             event.Policy{MaxClockSkew: 5 * time.Minute, MaxAge: 168 * time.Hour},
 		},
@@ -92,7 +91,7 @@ func BenchmarkAdmitBatch(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for range b.N {
-				if _, err := admitter.Admit(ctx, benchIdentity, batch); err != nil {
+				if _, err := admitter.Admit(ctx, benchIdentity, "bench", batch); err != nil {
 					b.Fatalf("admit: %v", err)
 				}
 			}

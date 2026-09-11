@@ -46,7 +46,6 @@ func newAdmitter(t *testing.T, backbone ingest.Backbone) *ingest.Admitter {
 		backbone,
 		ingest.Policy{
 			Gateway:           "gateway-a",
-			TenantID:          "acme",
 			MaxEventsPerBatch: 10,
 			Event:             event.Policy{MaxClockSkew: 5 * time.Minute, MaxAge: 168 * time.Hour},
 		},
@@ -80,7 +79,7 @@ func TestAdmittedBatchIsAcknowledgedAsDurable(t *testing.T) {
 	backbone := &recordingBackbone{}
 	admitter := newAdmitter(t, backbone)
 
-	acknowledgement, err := admitter.Admit(context.Background(), identity(), fixtures.Batch("batch-1", sample(), sample()))
+	acknowledgement, err := admitter.Admit(context.Background(), identity(), "acme", fixtures.Batch("batch-1", sample(), sample()))
 	if err != nil {
 		t.Fatalf("unexpected refusal: %v", err)
 	}
@@ -104,7 +103,7 @@ func TestClaimedAgentIdentityIsReplacedByTheVerifiedOne(t *testing.T) {
 	impersonating.Origin.AgentId = "domain-controller"
 	impersonating.Origin.TenantId = "someone-else"
 
-	if _, err := admitter.Admit(context.Background(), identity(), fixtures.Batch("batch-1", impersonating)); err != nil {
+	if _, err := admitter.Admit(context.Background(), identity(), "acme", fixtures.Batch("batch-1", impersonating)); err != nil {
 		t.Fatalf("unexpected refusal: %v", err)
 	}
 
@@ -128,7 +127,7 @@ func TestReceptionIsWrittenByThePlatform(t *testing.T) {
 		BatchId:    "not-this-batch",
 	}
 
-	if _, err := admitter.Admit(context.Background(), identity(), fixtures.Batch("batch-7", forged)); err != nil {
+	if _, err := admitter.Admit(context.Background(), identity(), "acme", fixtures.Batch("batch-7", forged)); err != nil {
 		t.Fatalf("unexpected refusal: %v", err)
 	}
 
@@ -146,7 +145,7 @@ func TestProducerTimestampsSurviveAdmission(t *testing.T) {
 	admitter := newAdmitter(t, backbone)
 
 	delayed := fixtures.SSHAuthentication{At: admissionClock.Add(-36 * time.Hour)}.Event()
-	if _, err := admitter.Admit(context.Background(), identity(), fixtures.Batch("batch-1", delayed)); err != nil {
+	if _, err := admitter.Admit(context.Background(), identity(), "acme", fixtures.Batch("batch-1", delayed)); err != nil {
 		t.Fatalf("unexpected refusal: %v", err)
 	}
 
@@ -160,7 +159,7 @@ func TestBatchThatTheBackboneRefusedIsNeverAcknowledged(t *testing.T) {
 	backbone := &recordingBackbone{failure: errors.New("no leader for partition")}
 	admitter := newAdmitter(t, backbone)
 
-	acknowledgement, err := admitter.Admit(context.Background(), identity(), fixtures.Batch("batch-1", sample()))
+	acknowledgement, err := admitter.Admit(context.Background(), identity(), "acme", fixtures.Batch("batch-1", sample()))
 
 	if acknowledgement != nil {
 		t.Fatalf("a batch that was not made durable must not be acknowledged: %+v", acknowledgement)
@@ -176,7 +175,7 @@ func TestBatchThatTheBackboneRefusedIsNeverAcknowledged(t *testing.T) {
 func TestEmptyBatchIsRefused(t *testing.T) {
 	admitter := newAdmitter(t, &recordingBackbone{})
 
-	_, err := admitter.Admit(context.Background(), identity(), fixtures.Batch("batch-1"))
+	_, err := admitter.Admit(context.Background(), identity(), "acme", fixtures.Batch("batch-1"))
 
 	if code := rejectionOf(t, err).Code; code != ingest.CodeEmptyBatch {
 		t.Fatalf("unexpected code %q", code)
@@ -192,7 +191,7 @@ func TestBatchAboveTheCeilingIsRefusedBeforePublishing(t *testing.T) {
 		events[index] = sample()
 	}
 
-	_, err := admitter.Admit(context.Background(), identity(), fixtures.Batch("batch-1", events...))
+	_, err := admitter.Admit(context.Background(), identity(), "acme", fixtures.Batch("batch-1", events...))
 
 	if code := rejectionOf(t, err).Code; code != ingest.CodeBatchTooLarge {
 		t.Fatalf("unexpected code %q", code)
@@ -208,7 +207,7 @@ func TestUnsupportedProtocolVersionIsRefused(t *testing.T) {
 	batch := fixtures.Batch("batch-1", sample())
 	batch.ProtocolVersion = 99
 
-	_, err := admitter.Admit(context.Background(), identity(), batch)
+	_, err := admitter.Admit(context.Background(), identity(), "acme", batch)
 
 	if code := rejectionOf(t, err).Code; code != ingest.CodeUnsupportedProtocol {
 		t.Fatalf("unexpected code %q", code)
@@ -225,7 +224,7 @@ func TestBatchIdentifierIsRequiredAndBounded(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			batch := fixtures.Batch(id, sample())
-			_, err := admitter.Admit(context.Background(), identity(), batch)
+			_, err := admitter.Admit(context.Background(), identity(), "acme", batch)
 			if code := rejectionOf(t, err).Code; code != ingest.CodeMalformedBatchID {
 				t.Fatalf("unexpected code %q", code)
 			}
@@ -240,7 +239,7 @@ func TestInvalidEventNamesItsPositionAndField(t *testing.T) {
 	broken := sample()
 	broken.GetAuthentication().Network.Source.Ip = "definitely-not-an-ip"
 
-	_, err := admitter.Admit(context.Background(), identity(), fixtures.Batch("batch-1", sample(), broken))
+	_, err := admitter.Admit(context.Background(), identity(), "acme", fixtures.Batch("batch-1", sample(), broken))
 
 	rejection := rejectionOf(t, err)
 	if rejection.Code != ingest.CodeInvalidEvent {
@@ -261,9 +260,8 @@ func TestAdmitterRefusesAnIncompletePolicy(t *testing.T) {
 	instruments := ingest.NewMetrics(metrics.New("test"))
 
 	cases := map[string]ingest.Policy{
-		"no gateway": {TenantID: "acme", MaxEventsPerBatch: 1},
-		"no tenant":  {Gateway: "gateway-a", MaxEventsPerBatch: 1},
-		"no ceiling": {Gateway: "gateway-a", TenantID: "acme"},
+		"no gateway": {MaxEventsPerBatch: 1},
+		"no ceiling": {Gateway: "gateway-a"},
 	}
 	for name, policy := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -278,7 +276,7 @@ func TestAcknowledgementCarriesTheCountTheAgentSent(t *testing.T) {
 	admitter := newAdmitter(t, &recordingBackbone{})
 
 	events := []*eventv1.Event{sample(), sample(), sample()}
-	acknowledgement, err := admitter.Admit(context.Background(), identity(), fixtures.Batch("batch-1", events...))
+	acknowledgement, err := admitter.Admit(context.Background(), identity(), "acme", fixtures.Batch("batch-1", events...))
 	if err != nil {
 		t.Fatalf("unexpected refusal: %v", err)
 	}

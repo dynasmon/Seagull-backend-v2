@@ -67,6 +67,23 @@ func TestCertificateIdentityOverridesTheClaimedAgent(t *testing.T) {
 	}
 }
 
+func TestAnAgentTheRegistryNeverNamedIsRefusedBeforeAnythingIsPublished(t *testing.T) {
+	gateway := startGateway(t, gatewayOptions{})
+	stranger := gateway.unregistered(t, "web-99")
+
+	response, payload := gateway.send(t, stranger, fixtures.Batch("batch-stranger", fixtures.SSHAuthentication{}.Event()))
+
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("an agent nobody registered answered %d: %s", response.StatusCode, payload)
+	}
+	if code := decodeRejection(t, payload).GetCode(); code != ingest.CodeNotRegistered {
+		t.Errorf("the refusal reads %q, so an operator cannot tell a missing registration from a revocation", code)
+	}
+	if len(gateway.backbone.published) != 0 {
+		t.Fatal("telemetry from an agent that belongs to no tenant reached the backbone")
+	}
+}
+
 func TestConnectionWithoutAClientCertificateIsRefused(t *testing.T) {
 	gateway := startGateway(t, gatewayOptions{})
 

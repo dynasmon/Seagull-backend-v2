@@ -104,17 +104,47 @@ func TestARevokedAgentIsRefusedByAGatewayThatWasNotRunning(t *testing.T) {
 	}
 
 	held := rosterFrom(t, addresses, topic)
-	if !held.Admits("it-web-01") {
+	if _, admits := held.Tenant("it-web-01"); !admits {
 		t.Fatal("an active agent is refused")
 	}
-	if held.Admits("it-db-07") {
+	if _, admits := held.Tenant("it-db-07"); admits {
 		t.Fatal("a revoked agent is admitted")
 	}
-	if !held.Admits("it-never-registered") {
-		t.Fatal("an agent the registry never named is refused")
+	if tenant, admits := held.Tenant("it-never-registered"); admits {
+		t.Fatalf("an agent the registry never named is admitted into %q", tenant)
 	}
 	if held.Refused() != 1 {
 		t.Fatalf("the roster refuses %d agents", held.Refused())
+	}
+}
+
+func TestAGatewayThatWasNotRunningPlacesEachAgentInTheTenantTheRegistryRecorded(t *testing.T) {
+	addresses := brokers(t)
+	topic := compactedAgentTopic(t, addresses)
+
+	publisher, err := broker.NewAgents(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	if err != nil {
+		t.Fatalf("build an admission publisher: %v", err)
+	}
+	defer publisher.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	for _, record := range []*agentv1.Admission{
+		{AgentId: "it-web-03", TenantId: "acme", State: agent.Active.Wire(), Revision: 2},
+		{AgentId: "it-db-04", TenantId: "globex", State: agent.Pending.Wire(), Revision: 1},
+	} {
+		if err := publisher.Publish(ctx, record); err != nil {
+			t.Fatalf("publish %s: %v", record.GetAgentId(), err)
+		}
+	}
+
+	held := rosterFrom(t, addresses, topic)
+	for agentID, want := range map[string]string{"it-web-03": "acme", "it-db-04": "globex"} {
+		if tenant, admits := held.Tenant(agentID); !admits || tenant != want {
+			t.Errorf("%s is admitted %t into %q, and the registry recorded it in %q", agentID, admits, tenant, want)
+		}
 	}
 }
 
@@ -140,7 +170,7 @@ func TestAnAgentLetInAgainIsAdmittedByAGatewayThatStartsAfterwards(t *testing.T)
 		}
 	}
 
-	if held := rosterFrom(t, addresses, topic); !held.Admits("it-web-02") {
+	if _, admits := rosterFrom(t, addresses, topic).Tenant("it-web-02"); !admits {
 		t.Fatal("a re-enabled agent is still refused")
 	}
 

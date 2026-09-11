@@ -1,5 +1,10 @@
 # 24. An agent is registered by the control plane, and the gateway is told when to stop honouring it
 
+> Amended by [ADR 26](0026-an-agent-sends-into-the-tenant-it-was-registered-in.md).
+> An agent the roster has never heard of is no longer admitted: the roster now
+> also says which tenant an agent's telemetry belongs to, and an agent the
+> registry never named has none. Registering still takes nothing away.
+
 ## Context
 
 [ADR 2](0002-identity-comes-from-the-certificate.md) settled where an agent's

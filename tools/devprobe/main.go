@@ -39,6 +39,7 @@ import (
 
 func main() {
 	endpoint := flag.String("endpoint", "https://127.0.0.1:8443", "gateway base URL")
+	registry := flag.String("register", "https://127.0.0.1:8445", "control plane base URL the development agent is registered with before a batch is sent; empty skips it")
 	huntEndpoint := flag.String("hunt", "", "query plane base URL; asks what was stored instead of sending a batch")
 	alertEndpoint := flag.String("alerts", "", "control plane base URL; works an alert through its lifecycle instead of sending a batch")
 	incidentEndpoint := flag.String("incidents", "", "control plane base URL; reads a correlated story back to its events and works it")
@@ -52,7 +53,7 @@ func main() {
 	outcome := flag.String("outcome", "failure", "authentication outcome the sample event carries: failure or success")
 	flag.Parse()
 
-	run := func() error { return probe(*endpoint, *pki, *batchID, *eventID, *outcome) }
+	run := func() error { return probe(*endpoint, *registry, *pki, *batchID, *eventID, *outcome) }
 	if *huntEndpoint != "" {
 		run = func() error { return ask(*huntEndpoint, *pki, *window) }
 	}
@@ -513,35 +514,32 @@ func speaker(pki, name string) (*http.Client, error) {
 	}, nil
 }
 
-func probe(endpoint, pki, batchID, eventID, outcome string) error {
+func probe(endpoint, registry, pki, batchID, eventID, outcome string) error {
 	client, err := speaker(pki, "agent")
 	if err != nil {
 		return err
+	}
+	if registry != "" {
+		if err := register(registry, pki); err != nil {
+			return err
+		}
 	}
 
 	encoded, err := proto.Marshal(sample(batchID, eventID, outcome))
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequest(http.MethodPost, endpoint+ingest.EventsPath, bytes.NewReader(encoded))
-	if err != nil {
-		return err
+	status, body, err := deliver(client, endpoint, encoded)
+	for attempt := 1; registry != "" && err == nil && attempt < 40 && unregistered(status, body); attempt++ {
+		time.Sleep(250 * time.Millisecond)
+		status, body, err = deliver(client, endpoint, encoded)
 	}
-	request.Header.Set("Content-Type", ingest.ContentType)
-
-	response, err := client.Do(request)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-
-	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("status %d\n", response.StatusCode)
-	if response.StatusCode == http.StatusOK {
+	fmt.Printf("status %d\n", status)
+	if status == http.StatusOK {
 		var acknowledgement ingestv1.BatchAck
 		if err := proto.Unmarshal(body, &acknowledgement); err != nil {
 			return err
@@ -556,6 +554,76 @@ func probe(endpoint, pki, batchID, eventID, outcome string) error {
 	}
 	fmt.Printf("rejection %s", prototext.Format(&rejection))
 	return nil
+}
+
+func deliver(client *http.Client, endpoint string, encoded []byte) (int, []byte, error) {
+	request, err := http.NewRequest(http.MethodPost, endpoint+ingest.EventsPath, bytes.NewReader(encoded))
+	if err != nil {
+		return 0, nil, err
+	}
+	request.Header.Set("Content-Type", ingest.ContentType)
+
+	response, err := client.Do(request)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer response.Body.Close()
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return 0, nil, err
+	}
+	return response.StatusCode, body, nil
+}
+
+func unregistered(status int, body []byte) bool {
+	if status != http.StatusForbidden {
+		return false
+	}
+	var rejection ingestv1.Rejection
+	return proto.Unmarshal(body, &rejection) == nil && rejection.GetCode() == ingest.CodeNotRegistered
+}
+
+func register(endpoint, pki string) error {
+	agentID, err := subjectOf(filepath.Join(pki, "agent.pem"))
+	if err != nil {
+		return err
+	}
+	client, token, err := authenticate(endpoint, pki)
+	if err != nil {
+		return err
+	}
+
+	status, body, err := send(client, http.MethodPost, endpoint+control.AgentsPath, token, &agentv1.Registration{
+		AgentId:  agentID,
+		TenantId: "default",
+		Platform: &agentv1.Platform{Os: "linux", Architecture: "amd64", Hostname: "probe-host"},
+		Note:     "registered by devprobe",
+	})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusCreated && status != http.StatusConflict {
+		return refused("register", status, body)
+	}
+	fmt.Printf("register %s status %d\n", agentID, status)
+	return nil
+}
+
+func subjectOf(path string) (string, error) {
+	encoded, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	block, _ := pem.Decode(encoded)
+	if block == nil {
+		return "", fmt.Errorf("%s holds no certificate", path)
+	}
+	certificate, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	return certificate.Subject.CommonName, nil
 }
 
 func sample(batchID, eventID, outcome string) *ingestv1.EventBatch {

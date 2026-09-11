@@ -95,24 +95,45 @@ func TestAdmittedBatchIsAcknowledgedAsDurable(t *testing.T) {
 	}
 }
 
-func TestClaimedAgentIdentityIsReplacedByTheVerifiedOne(t *testing.T) {
+func TestClaimedIdentityAndTenantAreReplacedOnEveryEventOfTheBatch(t *testing.T) {
 	backbone := &recordingBackbone{}
 	admitter := newAdmitter(t, backbone)
 
 	impersonating := sample()
 	impersonating.Origin.AgentId = "domain-controller"
 	impersonating.Origin.TenantId = "someone-else"
+	claimingItsOwn := sample()
+	claimingItsOwn.Origin.TenantId = "acme"
+	claimingNothing := sample()
+	claimingNothing.Origin = nil
 
-	if _, err := admitter.Admit(context.Background(), identity(), "acme", fixtures.Batch("batch-1", impersonating)); err != nil {
+	batch := fixtures.Batch("batch-1", impersonating, claimingItsOwn, claimingNothing)
+	if _, err := admitter.Admit(context.Background(), identity(), "globex", batch); err != nil {
 		t.Fatalf("unexpected refusal: %v", err)
 	}
 
-	published := backbone.last()[0]
-	if published.GetOrigin().GetAgentId() != "web-01" {
-		t.Fatalf("the claimed agent identity survived: %q", published.GetOrigin().GetAgentId())
+	for index, published := range backbone.last() {
+		if published.GetOrigin().GetAgentId() != "web-01" {
+			t.Errorf("event %d kept the claimed agent %q", index, published.GetOrigin().GetAgentId())
+		}
+		if published.GetOrigin().GetTenantId() != "globex" {
+			t.Errorf("event %d is in tenant %q and the registry placed the agent in globex", index, published.GetOrigin().GetTenantId())
+		}
 	}
-	if published.GetOrigin().GetTenantId() != "acme" {
-		t.Fatalf("the claimed tenant survived: %q", published.GetOrigin().GetTenantId())
+}
+
+func TestABatchWithNoTenantToStampIsNeverPublished(t *testing.T) {
+	backbone := &recordingBackbone{}
+	admitter := newAdmitter(t, backbone)
+
+	claimed := sample()
+	claimed.Origin.TenantId = "acme"
+
+	if _, err := admitter.Admit(context.Background(), identity(), "", fixtures.Batch("batch-1", claimed)); err == nil {
+		t.Fatal("a batch was admitted with no tenant decided for its agent")
+	}
+	if len(backbone.published) != 0 {
+		t.Fatal("an event whose tenant nobody decided reached the backbone")
 	}
 }
 

@@ -274,12 +274,12 @@ func TestAnAnalystReadsTheRegistryAndCannotChangeIt(t *testing.T) {
 func TestTheGatewayRefusesAnAgentTheRegistryRevoked(t *testing.T) {
 	roster := agent.NewRoster()
 	running := startGateway(t, gatewayOptions{roster: roster})
-	client := running.client(t, "e2e-agent-42")
+	client := running.clientIn(t, "e2e-agent-42", "default")
 
 	first := fixtures.Batch("roster-batch-1",
 		fixtures.SSHAuthentication{EventID: "cccccccc-1111-4111-8111-cccccccccccc", Username: "root"}.Event())
 	if response, body := running.send(t, client, first); response.StatusCode != http.StatusOK {
-		t.Fatalf("an agent nobody decided anything about was refused: %d %s", response.StatusCode, body)
+		t.Fatalf("a registered agent was refused: %d %s", response.StatusCode, body)
 	}
 
 	if err := roster.Apply(&agentv1.Admission{

@@ -67,6 +67,33 @@ func TestCertificateIdentityOverridesTheClaimedAgent(t *testing.T) {
 	}
 }
 
+func TestEachAgentIsAdmittedIntoTheTenantTheRegistryPlacedIt(t *testing.T) {
+	gateway := startGateway(t, gatewayOptions{})
+
+	for index, sent := range []struct {
+		client  *http.Client
+		claimed string
+	}{
+		{client: gateway.clientIn(t, "web-01", "acme"), claimed: "globex"},
+		{client: gateway.clientIn(t, "db-07", "globex"), claimed: "acme"},
+	} {
+		claiming := fixtures.SSHAuthentication{EventID: paddedID(index)}.Event()
+		claiming.Origin.TenantId = sent.claimed
+		response, payload := gateway.send(t, sent.client, fixtures.Batch(fmt.Sprintf("batch-tenant-%d", index), claiming))
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("a registered agent was refused: %d %s", response.StatusCode, payload)
+		}
+	}
+
+	placed := map[string]string{}
+	for _, published := range gateway.backbone.published {
+		placed[published.GetOrigin().GetAgentId()] = published.GetOrigin().GetTenantId()
+	}
+	if len(placed) != 2 || placed["web-01"] != "acme" || placed["db-07"] != "globex" {
+		t.Fatalf("one gateway placed its agents in %v", placed)
+	}
+}
+
 func TestAnAgentTheRegistryNeverNamedIsRefusedBeforeAnythingIsPublished(t *testing.T) {
 	gateway := startGateway(t, gatewayOptions{})
 	stranger := gateway.unregistered(t, "web-99")

@@ -158,7 +158,6 @@ func admitFrom(t *testing.T, addresses []string, topic, owner, agent string, fro
 
 	admitter, err := ingest.NewAdmitter(publisher, ingest.Policy{
 		Gateway:           "gateway-integration",
-		TenantID:          owner,
 		MaxEventsPerBatch: 1000,
 		Event:             event.Policy{MaxClockSkew: 5 * time.Minute, MaxAge: 168 * time.Hour},
 	}, ingest.NewMetrics(metrics.New("integration")))
@@ -178,7 +177,7 @@ func admitFrom(t *testing.T, addresses []string, topic, owner, agent string, fro
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if _, err := admitter.Admit(ctx, agentidentity.Identity{AgentID: agent}, batch); err != nil {
+	if _, err := admitter.Admit(ctx, agentidentity.Identity{AgentID: agent}, owner, batch); err != nil {
 		t.Fatalf("admit a batch from %s: %v", agent, err)
 	}
 }

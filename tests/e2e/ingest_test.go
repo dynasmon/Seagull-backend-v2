@@ -67,6 +67,50 @@ func TestCertificateIdentityOverridesTheClaimedAgent(t *testing.T) {
 	}
 }
 
+func TestEachAgentIsAdmittedIntoTheTenantTheRegistryPlacedIt(t *testing.T) {
+	gateway := startGateway(t, gatewayOptions{})
+
+	for index, sent := range []struct {
+		client  *http.Client
+		claimed string
+	}{
+		{client: gateway.clientIn(t, "web-01", "acme"), claimed: "globex"},
+		{client: gateway.clientIn(t, "db-07", "globex"), claimed: "acme"},
+	} {
+		claiming := fixtures.SSHAuthentication{EventID: paddedID(index)}.Event()
+		claiming.Origin.TenantId = sent.claimed
+		response, payload := gateway.send(t, sent.client, fixtures.Batch(fmt.Sprintf("batch-tenant-%d", index), claiming))
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("a registered agent was refused: %d %s", response.StatusCode, payload)
+		}
+	}
+
+	placed := map[string]string{}
+	for _, published := range gateway.backbone.published {
+		placed[published.GetOrigin().GetAgentId()] = published.GetOrigin().GetTenantId()
+	}
+	if len(placed) != 2 || placed["web-01"] != "acme" || placed["db-07"] != "globex" {
+		t.Fatalf("one gateway placed its agents in %v", placed)
+	}
+}
+
+func TestAnAgentTheRegistryNeverNamedIsRefusedBeforeAnythingIsPublished(t *testing.T) {
+	gateway := startGateway(t, gatewayOptions{})
+	stranger := gateway.unregistered(t, "web-99")
+
+	response, payload := gateway.send(t, stranger, fixtures.Batch("batch-stranger", fixtures.SSHAuthentication{}.Event()))
+
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("an agent nobody registered answered %d: %s", response.StatusCode, payload)
+	}
+	if code := decodeRejection(t, payload).GetCode(); code != ingest.CodeNotRegistered {
+		t.Errorf("the refusal reads %q, so an operator cannot tell a missing registration from a revocation", code)
+	}
+	if len(gateway.backbone.published) != 0 {
+		t.Fatal("telemetry from an agent that belongs to no tenant reached the backbone")
+	}
+}
+
 func TestConnectionWithoutAClientCertificateIsRefused(t *testing.T) {
 	gateway := startGateway(t, gatewayOptions{})
 

@@ -23,6 +23,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/ratelimit"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/tlsx"
+	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
 )
@@ -58,6 +59,7 @@ type gateway struct {
 	opsAddress string
 	authority  *devpki.Authority
 	backbone   *backbone
+	roster     *agent.Roster
 	stopped    chan error
 	stop       context.CancelFunc
 }
@@ -137,7 +139,6 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	instruments := ingest.NewMetrics(platform.Metrics())
 	admitter, err := ingest.NewAdmitter(options.backbone, ingest.Policy{
 		Gateway:           "gateway-test",
-		TenantID:          "acme",
 		MaxEventsPerBatch: options.maxEventsPerBatch,
 		Event:             event.Policy{MaxClockSkew: 5 * time.Minute, MaxAge: 168 * time.Hour},
 	}, instruments)
@@ -190,6 +191,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		opsAddress: platform.OperationalAddress(),
 		authority:  authority,
 		backbone:   options.backbone,
+		roster:     options.roster,
 		stopped:    make(chan error, 1),
 		stop:       cancel,
 	}
@@ -225,7 +227,28 @@ func write(t *testing.T, path string, content []byte) {
 	}
 }
 
+// The platform signs a certificate only for an agent it registered, so the
+// client a test holds is one the roster places in a tenant unless the test asks
+// for a certificate nobody registered.
 func (g *gateway) client(t *testing.T, agentID string) *http.Client {
+	t.Helper()
+	return g.clientIn(t, agentID, "acme")
+}
+
+func (g *gateway) clientIn(t *testing.T, agentID, tenant string) *http.Client {
+	t.Helper()
+	if err := g.roster.Apply(&agentv1.Admission{
+		AgentId:  agentID,
+		TenantId: tenant,
+		State:    agent.Active.Wire(),
+		Revision: 1,
+	}); err != nil {
+		t.Fatalf("register %s in %s: %v", agentID, tenant, err)
+	}
+	return g.unregistered(t, agentID)
+}
+
+func (g *gateway) unregistered(t *testing.T, agentID string) *http.Client {
 	t.Helper()
 	client, err := g.authority.IssueClient(agentID, time.Hour)
 	if err != nil {

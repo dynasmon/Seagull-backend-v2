@@ -89,13 +89,6 @@ func (r *Roster) Refuse(agentID string) {
 	r.known[agentID] = held
 }
 
-func (r *Roster) Admits(agentID string) bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	held, seen := r.known[agentID]
-	return !seen || held.admits
-}
-
 // The tenant an agent's telemetry is admitted into: the one the registry
 // recorded it in, never one the agent or the gateway chose. An agent the
 // registry never named has no tenant anybody decided, so it is not admitted —

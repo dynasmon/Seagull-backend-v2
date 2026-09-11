@@ -24,15 +24,17 @@ const (
 
 	ContentType = "application/x-protobuf"
 
-	CodeAtCapacity  = "gateway_at_capacity"
-	CodeNotAdmitted = "agent_not_admitted"
+	CodeAtCapacity    = "gateway_at_capacity"
+	CodeNotAdmitted   = "agent_not_admitted"
+	CodeNotRegistered = "agent_not_registered"
 )
 
-// Whether the platform still honours an agent's identity. The gateway is told
-// the answer rather than looking it up: the registry is a control-plane store
-// and the ingest path reads no store per batch.
+// Which tenant an agent's telemetry belongs to, if the platform admits it at
+// all. The gateway is told the answer rather than looking it up: the registry is
+// a control-plane store and the ingest path reads no store per batch.
 type Roster interface {
-	Admits(agentID string) bool
+	Tenant(agentID string) (string, bool)
+	Knows(agentID string) bool
 }
 
 type HandlerOptions struct {
@@ -98,13 +100,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx := log.With(r.Context(), slog.String("agent_id", identity.AgentID))
 
-	// A certificate says who an agent is and the registry says whether the
-	// platform still listens to it. The answer is held in memory from a
-	// compacted topic, so refusing costs a map lookup and no round trip.
-	if !h.roster.Admits(identity.AgentID) {
-		h.metrics.batchRejected(CodeNotAdmitted)
-		refuse(w, http.StatusForbidden, CodeNotAdmitted,
-			"the platform no longer admits telemetry from this agent", "", -1)
+	// A certificate says who an agent is, and the registry says whose estate its
+	// telemetry belongs to and whether the platform still listens to it. The
+	// answer is held in memory from a compacted topic, so it costs a map lookup
+	// and no round trip, and an agent it names no tenant for is never placed in one.
+	tenant, admitted := h.roster.Tenant(identity.AgentID)
+	if !admitted {
+		h.refuseUnadmitted(w, identity.AgentID)
 		return
 	}
 
@@ -149,7 +151,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	publishCtx, cancel := context.WithTimeout(ctx, h.publishTimeout)
 	defer cancel()
 
-	acknowledgement, err := h.admitter.Admit(publishCtx, identity, &batch)
+	acknowledgement, err := h.admitter.Admit(publishCtx, identity, tenant, &batch)
 	if err != nil {
 		h.refuseAdmission(ctx, w, &batch, err)
 		return
@@ -160,6 +162,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Int("events", len(batch.GetEvents())),
 	)
 	respond(w, http.StatusOK, acknowledgement)
+}
+
+func (h *Handler) refuseUnadmitted(w http.ResponseWriter, agentID string) {
+	if !h.roster.Knows(agentID) {
+		h.metrics.batchRejected(CodeNotRegistered)
+		refuse(w, http.StatusForbidden, CodeNotRegistered,
+			"the platform has no registration for this agent, so its telemetry belongs to no tenant", "", -1)
+		return
+	}
+	h.metrics.batchRejected(CodeNotAdmitted)
+	refuse(w, http.StatusForbidden, CodeNotAdmitted,
+		"the platform no longer admits telemetry from this agent", "", -1)
 }
 
 func (h *Handler) refuseAdmission(ctx context.Context, w http.ResponseWriter, batch *ingestv1.EventBatch, err error) {

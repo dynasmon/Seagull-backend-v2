@@ -374,7 +374,6 @@ func admitStory(t *testing.T, addresses []string, topic string) {
 
 	admitter, err := ingest.NewAdmitter(publisher, ingest.Policy{
 		Gateway:           "gateway-integration",
-		TenantID:          tenant(t),
 		MaxEventsPerBatch: 100,
 		Event:             event.Policy{MaxClockSkew: 5 * time.Minute, MaxAge: 168 * time.Hour},
 	}, ingest.NewMetrics(metrics.New("integration")))
@@ -401,7 +400,7 @@ func admitStory(t *testing.T, addresses []string, topic string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if _, err := admitter.Admit(ctx, agentidentity.Identity{AgentID: "web-01"}, batch); err != nil {
+	if _, err := admitter.Admit(ctx, agentidentity.Identity{AgentID: "web-01"}, tenant(t), batch); err != nil {
 		t.Fatalf("admit the batch: %v", err)
 	}
 }
@@ -563,7 +562,6 @@ func admitEvents(t *testing.T, addresses []string, topic string, count int) {
 
 	admitter, err := ingest.NewAdmitter(publisher, ingest.Policy{
 		Gateway:           "gateway-integration",
-		TenantID:          tenant(t),
 		MaxEventsPerBatch: 100,
 		Event:             event.Policy{MaxClockSkew: 5 * time.Minute, MaxAge: 168 * time.Hour},
 	}, ingest.NewMetrics(metrics.New("integration")))
@@ -583,7 +581,7 @@ func admitEvents(t *testing.T, addresses []string, topic string, count int) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if _, err := admitter.Admit(ctx, agentidentity.Identity{AgentID: "web-01"}, batch); err != nil {
+	if _, err := admitter.Admit(ctx, agentidentity.Identity{AgentID: "web-01"}, tenant(t), batch); err != nil {
 		t.Fatalf("admit the batch: %v", err)
 	}
 }

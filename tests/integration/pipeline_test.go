@@ -42,7 +42,6 @@ func TestAnAdmittedBatchReachesTheStore(t *testing.T) {
 
 	admitter, err := ingest.NewAdmitter(publisher, ingest.Policy{
 		Gateway:           "gateway-integration",
-		TenantID:          owner,
 		MaxEventsPerBatch: 100,
 		Event:             event.Policy{MaxClockSkew: 5 * time.Minute, MaxAge: 168 * time.Hour},
 	}, ingest.NewMetrics(metrics.New("integration")))
@@ -58,7 +57,7 @@ func TestAnAdmittedBatchReachesTheStore(t *testing.T) {
 		fixtures.SSHAuthentication{EventID: "dddddddd-4444-4444-8444-dddddddddddd", At: at, Username: "root"}.Event(),
 		fixtures.SSHAuthentication{EventID: "eeeeeeee-5555-4555-8555-eeeeeeeeeeee", At: at, Username: "deploy"}.Event(),
 	)
-	acknowledgement, err := admitter.Admit(admitCtx, agentidentity.Identity{AgentID: "web-01"}, batch)
+	acknowledgement, err := admitter.Admit(admitCtx, agentidentity.Identity{AgentID: "web-01"}, owner, batch)
 	if err != nil {
 		t.Fatalf("admit the batch: %v", err)
 	}

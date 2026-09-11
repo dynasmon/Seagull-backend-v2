@@ -47,7 +47,6 @@ type Backbone interface {
 
 type Policy struct {
 	Gateway           string
-	TenantID          string
 	MaxEventsPerBatch int
 	Event             event.Policy
 }
@@ -72,8 +71,8 @@ func NewAdmitter(backbone Backbone, policy Policy, metrics *Metrics, options ...
 	if metrics == nil {
 		return nil, errors.New("admission needs metrics")
 	}
-	if policy.Gateway == "" || policy.TenantID == "" {
-		return nil, errors.New("admission needs a gateway and tenant identity")
+	if policy.Gateway == "" {
+		return nil, errors.New("admission needs a gateway identity")
 	}
 	if policy.MaxEventsPerBatch <= 0 {
 		return nil, errors.New("admission needs a positive batch ceiling")
@@ -86,7 +85,7 @@ func NewAdmitter(backbone Backbone, policy Policy, metrics *Metrics, options ...
 	return admitter, nil
 }
 
-func (a *Admitter) Admit(ctx context.Context, identity agentidentity.Identity, batch *ingestv1.EventBatch) (*ingestv1.BatchAck, error) {
+func (a *Admitter) Admit(ctx context.Context, identity agentidentity.Identity, tenant string, batch *ingestv1.EventBatch) (*ingestv1.BatchAck, error) {
 	events := batch.GetEvents()
 	if len(events) == 0 {
 		return nil, a.reject(&Rejection{Code: CodeEmptyBatch, Detail: "the batch carries no events", EventIndex: -1})
@@ -117,7 +116,7 @@ func (a *Admitter) Admit(ctx context.Context, identity agentidentity.Identity, b
 	}
 
 	for index, record := range events {
-		a.stamp(record, identity, reception)
+		a.stamp(record, identity, tenant, reception)
 		if err := event.Validate(record, received, a.policy.Event); err != nil {
 			return nil, a.reject(&Rejection{
 				Code:       CodeInvalidEvent,
@@ -138,14 +137,15 @@ func (a *Admitter) Admit(ctx context.Context, identity agentidentity.Identity, b
 	return &ingestv1.BatchAck{Accepted: true, Durable: true, Received: uint32(len(events))}, nil
 }
 
-// Identity and reception are assigned, never merged: whatever a producer put in
-// these fields is replaced by what the platform observed.
-func (a *Admitter) stamp(record *eventv1.Event, identity agentidentity.Identity, reception *eventv1.Reception) {
+// Identity, tenant and reception are assigned, never merged: whatever a producer
+// put in these fields is replaced by what the platform established — the agent
+// from the verified certificate, the tenant from the registry's record of it.
+func (a *Admitter) stamp(record *eventv1.Event, identity agentidentity.Identity, tenant string, reception *eventv1.Reception) {
 	if record.GetOrigin() == nil {
 		record.Origin = &eventv1.Origin{}
 	}
 	record.Origin.AgentId = identity.AgentID
-	record.Origin.TenantId = a.policy.TenantID
+	record.Origin.TenantId = tenant
 	record.Reception = reception
 }
 

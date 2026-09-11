@@ -1,5 +1,10 @@
 # 2. Agent identity comes from the certificate
 
+> Amended by [ADR 26](0026-an-agent-sends-into-the-tenant-it-was-registered-in.md).
+> Tenancy is no longer a gateway-wide setting: the tenant stamped on an event is
+> the one the registry recorded its agent in, read from the admission record the
+> gateway already holds, and never from the certificate.
+
 ## Context
 
 v1 terminates mutual TLS at the edge proxy and forwards the certificate common

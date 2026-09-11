@@ -30,19 +30,23 @@ func reading(t *testing.T) (roster, broker.Deliver) {
 	return held, held.applying(slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
 }
 
-// The compacted log keeps one record per agent, so the record a reader cannot
-// decode is the whole of what the platform decided about it: stepping over it
-// would re-admit the certificate that record revoked.
+// The record a reader cannot decode supersedes what it read about that agent
+// before, and once the log is compacted it is the whole of what the platform
+// decided: stepping over it would keep admitting a certificate it may revoke.
 func TestARecordTheGatewayCannotDecodeStopsTheAgentItIsKeyedBy(t *testing.T) {
 	held, apply := reading(t)
 
-	if err := apply(context.Background(), []broker.Record{{Key: []byte("web-01"), Value: []byte{0xff, 0xfe}}}); err != nil {
+	if err := apply(context.Background(), []broker.Record{
+		active(t, "web-01", 1),
+		active(t, "web-02", 1),
+		{Key: []byte("web-01"), Value: []byte{0xff, 0xfe}},
+	}); err != nil {
 		t.Fatalf("an unreadable record ended the replay: %v", err)
 	}
-	if held.held.Admits("web-01") {
+	if admitted(held, "web-01") {
 		t.Error("an agent whose record could not be decoded is still admitted")
 	}
-	if !held.held.Admits("web-02") {
+	if !admitted(held, "web-02") {
 		t.Error("refusing one agent refused another")
 	}
 }
@@ -52,11 +56,11 @@ func TestARecordTheGatewayCannotDecodeStopsTheAgentItIsKeyedBy(t *testing.T) {
 func TestARecordNamingAStateThisBuildCannotReadStopsTheAgent(t *testing.T) {
 	held, apply := reading(t)
 
-	unknown := admissionRecord(t, "web-01", &agentv1.Admission{AgentId: "web-01", State: agentv1.State(99), Revision: 4})
-	if err := apply(context.Background(), []broker.Record{unknown}); err != nil {
+	unknown := admissionRecord(t, "web-01", &agentv1.Admission{AgentId: "web-01", TenantId: "acme", State: agentv1.State(99), Revision: 4})
+	if err := apply(context.Background(), []broker.Record{active(t, "web-01", 3), unknown}); err != nil {
 		t.Fatalf("a record naming an unknown state ended the replay: %v", err)
 	}
-	if held.held.Admits("web-01") {
+	if admitted(held, "web-01") {
 		t.Error("an agent whose state this build cannot read is still admitted")
 	}
 }
@@ -71,7 +75,7 @@ func TestARecordWhoseKeyAndPayloadDisagreeStopsTheAgentItIsKeyedBy(t *testing.T)
 	if err := apply(context.Background(), []broker.Record{crossed}); err != nil {
 		t.Fatalf("a mismatched record ended the replay: %v", err)
 	}
-	if held.held.Admits("web-01") {
+	if admitted(held, "web-01") {
 		t.Error("the agent the record was keyed by is still admitted")
 	}
 	if held.held.Known() != 1 {
@@ -93,11 +97,38 @@ func TestARecordNamingNoAgentEndsTheReplay(t *testing.T) {
 func TestAReadableRecordIsApplied(t *testing.T) {
 	held, apply := reading(t)
 
-	revoked := admissionRecord(t, "web-01", &agentv1.Admission{AgentId: "web-01", State: agent.Revoked.Wire(), Revision: 9})
+	revoked := admissionRecord(t, "web-01", &agentv1.Admission{AgentId: "web-01", TenantId: "acme", State: agent.Revoked.Wire(), Revision: 9})
 	if err := apply(context.Background(), []broker.Record{revoked}); err != nil {
 		t.Fatalf("apply a readable record: %v", err)
 	}
-	if held.held.Admits("web-01") {
+	if admitted(held, "web-01") {
 		t.Error("a revoked agent is still admitted")
 	}
+}
+
+func TestARecordPlacingAnAgentInNoUsableTenantStopsTheAgent(t *testing.T) {
+	held, apply := reading(t)
+
+	unplaced := admissionRecord(t, "web-01", &agentv1.Admission{AgentId: "web-01", State: agent.Active.Wire(), Revision: 4})
+	if err := apply(context.Background(), []broker.Record{active(t, "web-01", 3), unplaced}); err != nil {
+		t.Fatalf("a record naming no tenant ended the replay: %v", err)
+	}
+	if tenant, admits := held.held.Tenant("web-01"); admits {
+		t.Errorf("an agent whose latest record names no tenant is still admitted into %q", tenant)
+	}
+}
+
+func active(t *testing.T, agentID string, revision uint64) broker.Record {
+	t.Helper()
+	return admissionRecord(t, agentID, &agentv1.Admission{
+		AgentId:  agentID,
+		TenantId: "acme",
+		State:    agent.Active.Wire(),
+		Revision: revision,
+	})
+}
+
+func admitted(held roster, agentID string) bool {
+	_, admits := held.held.Tenant(agentID)
+	return admits
 }

@@ -114,6 +114,14 @@ and no round trip. A decision the backbone did not take stays outstanding in the
 registry and is published again until it lands. See
 [ADR 24](docs/decisions/0024-an-agent-is-registered-by-the-control-plane-and-refused-by-the-gateway.md).
 
+The tenant an agent's telemetry belongs to travels on the same record. It is the
+one the agent was registered in by an operator holding that tenant, and the
+gateway stamps it on every event in place of whatever the agent wrote; no
+gateway-wide tenant exists. An agent the registry never named is refused rather
+than placed somewhere, so one gateway serves every tenant and a routing mistake
+cannot move an estate's telemetry into another's. See
+[ADR 26](docs/decisions/0026-an-agent-sends-into-the-tenant-it-was-registered-in.md).
+
 ### Storage and failure semantics
 
 Storage is owned per workload: ClickHouse holds telemetry and detections in
@@ -287,7 +295,9 @@ make verify     # the full gate: lint, module graph, tests, race detector
 it; the development material lands in `.local/pki`, which Git ignores.
 
 Send a batch through the running gateway, then ask the query plane what became
-of it:
+of it. The probe first registers the development agent in the `default` tenant as
+`dev-admin`, because the gateway admits only an agent the registry placed in a
+tenant; `-register ""` skips that step:
 
 ```bash
 go run ./tools/devprobe -endpoint https://127.0.0.1:8443
@@ -316,7 +326,6 @@ container without going through the environment. The settings that matter most:
 |---|---|
 | `SEAGULL_BACKBONE_BROKERS` | The event backbone every process depends on. |
 | `SEAGULL_GATEWAY_TLS_CERT`, `SEAGULL_GATEWAY_TLS_KEY`, `SEAGULL_GATEWAY_AGENT_CA` | The gateway's mutual TLS material; there is no plaintext mode. |
-| `SEAGULL_TENANT_ID` | The tenant the gateway stamps on everything it admits. |
 | `SEAGULL_DETECTION_RULES` | The rule tree the engine starts on and falls back to. |
 | `SEAGULL_DETECTION_STATE_WINDOW`, `SEAGULL_DETECTION_STATE_OBSERVATIONS`, `SEAGULL_DETECTION_STATE_KEYS` | What a counting or ordering rule may remember: the longest window, the events one key holds, and how many keys at once. The window is also what a restart re-reads. |
 | `SEAGULL_DETECTION_STATE_SOLE_READER` | Declares that this engine reads the whole stream, which is what makes a rule counting across agents answerable. Verified against the assignment; a broken claim stops the engine. |

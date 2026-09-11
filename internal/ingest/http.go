@@ -24,8 +24,9 @@ const (
 
 	ContentType = "application/x-protobuf"
 
-	CodeAtCapacity  = "gateway_at_capacity"
-	CodeNotAdmitted = "agent_not_admitted"
+	CodeAtCapacity    = "gateway_at_capacity"
+	CodeNotAdmitted   = "agent_not_admitted"
+	CodeNotRegistered = "agent_not_registered"
 )
 
 // Which tenant an agent's telemetry belongs to, if the platform admits it at
@@ -33,6 +34,7 @@ const (
 // a control-plane store and the ingest path reads no store per batch.
 type Roster interface {
 	Tenant(agentID string) (string, bool)
+	Knows(agentID string) bool
 }
 
 type HandlerOptions struct {
@@ -104,9 +106,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// and no round trip, and an agent it names no tenant for is never placed in one.
 	tenant, admitted := h.roster.Tenant(identity.AgentID)
 	if !admitted {
-		h.metrics.batchRejected(CodeNotAdmitted)
-		refuse(w, http.StatusForbidden, CodeNotAdmitted,
-			"the platform no longer admits telemetry from this agent", "", -1)
+		h.refuseUnadmitted(w, identity.AgentID)
 		return
 	}
 
@@ -162,6 +162,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Int("events", len(batch.GetEvents())),
 	)
 	respond(w, http.StatusOK, acknowledgement)
+}
+
+func (h *Handler) refuseUnadmitted(w http.ResponseWriter, agentID string) {
+	if !h.roster.Knows(agentID) {
+		h.metrics.batchRejected(CodeNotRegistered)
+		refuse(w, http.StatusForbidden, CodeNotRegistered,
+			"the platform has no registration for this agent, so its telemetry belongs to no tenant", "", -1)
+		return
+	}
+	h.metrics.batchRejected(CodeNotAdmitted)
+	refuse(w, http.StatusForbidden, CodeNotAdmitted,
+		"the platform no longer admits telemetry from this agent", "", -1)
 }
 
 func (h *Handler) refuseAdmission(ctx context.Context, w http.ResponseWriter, batch *ingestv1.EventBatch, err error) {

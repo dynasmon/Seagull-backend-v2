@@ -122,10 +122,29 @@ than placed somewhere, so one gateway serves every tenant and a routing mistake
 cannot move an estate's telemetry into another's. See
 [ADR 26](docs/decisions/0026-an-agent-sends-into-the-tenant-it-was-registered-in.md).
 
+### Asset inventory
+
+What an asset has is a record kind of its own, on a contract, a topic, a store
+and a process of its own, because it is not an event: an event is one observation
+and a scan is a set, and an estate reports orders of magnitude more package
+observations than logins. The platform derives an item's identity rather than
+reading one off the wire, so two collectors that spell a package differently
+cannot leave an asset holding it twice, and an upgrade replaces the row instead
+of adding one. **What an asset currently has is what its newest full scan
+named**: an item that scan stopped naming is no longer current and keeps the
+`last_seen` saying when it was last there, so nothing is deleted, nothing is
+tombstoned, and how stale the answer is falls out of the same line. A delta
+refreshes what it names and never moves that line, because it says nothing about
+what it omits — and an empty scan does move it, which is how a collector says the
+asset has none of that kind left. A record that reaches the store out of order
+loses to the newer one it arrived behind.
+[ADR 27](docs/decisions/0027-inventory-is-a-record-kind-of-its-own.md).
+
 ### Storage and failure semantics
 
 Storage is owned per workload: ClickHouse holds telemetry and detections in
-tables shaped for the questions asked of each. A consumer advances its position
+tables shaped for the questions asked of each, and the current state of every
+asset in two more. A consumer advances its position
 only after the work it did is durable, so a crash replays rather than skips. A
 record that can never be stored is quarantined with the reason and its position,
 so one poison record cannot hold up a partition.
@@ -184,7 +203,25 @@ Seagull Agent
          compiles, tests and publishes   compacted: every version,
          a ruleset; activates one        one pointer at the one to run
 
- query-api ──▶ both ClickHouse tables, read only, within a scope
+ query-api ──▶ security_events · security_detections, read only, within a scope
+```
+
+What an asset has travels beside that stream and never in it, because a
+fleet-wide package scan is orders of magnitude more records than the telemetry it
+arrives with, and neither may delay the other:
+
+```text
+Seagull Agent
+      │  mutual TLS · protobuf · POST /v1/inventory
+      ▼
+ ingest-gateway ─────▶ Redpanda  security.inventory.raw
+                           │  keyed by the asset, so one asset's scans stay ordered
+                           ▼
+                   inventory-projector
+                           │                    └──▶ security.inventory.quarantine
+                           ▼
+     ClickHouse asset_inventory · asset_inventory_scans
+                 one row per item      when that kind was last enumerated in full
 ```
 
 Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
@@ -196,6 +233,7 @@ Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 | `event-writer` | Makes admitted telemetry queryable, quarantining what it cannot store. |
 | `detection-writer` | Makes a detection queryable, on the same terms and as a consumer of its own. |
 | `alert-writer` | Opens the work a detection at or above a severity floor becomes: an alert for a finding about one event, folded on a declared key, or an incident for a story several events told. It inserts and never updates. |
+| `inventory-projector` | Folds what a collector saw into what an asset currently has, under a group and a quarantine of its own. An item the newest full scan stops naming is no longer current, and nothing is deleted to say so. |
 | `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry, and the authority that signs an agent's certificate. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates on a second one. |
 | `query-api` | The read plane, and the only reader of the analytical store. |
 | `backbone-migrator`, `store-migrator`, `control-migrator` | Apply the topic topology, the analytical schema and the relational schema, then exit. Nothing migrates on the way to serving traffic. |
@@ -304,6 +342,13 @@ go run ./tools/devprobe -endpoint https://127.0.0.1:8443
 go run ./tools/devprobe -hunt https://127.0.0.1:8444
 ```
 
+Send what an asset has — a distribution, a package list and a service — and watch
+it become the current state of that asset:
+
+```bash
+go run ./tools/devprobe -inventory
+```
+
 Register an agent, have the platform sign the certificate it will present, watch
 it renew that certificate itself, and revoke it:
 
@@ -378,11 +423,11 @@ drops a batch it had already answered for.
 | [Configuration reference](docs/configuration.md) | Every setting, the acknowledgement contract, the topology, the store. |
 | [Seagull-contracts](https://github.com/dynasmon/Seagull-contracts) | The messages agents, the platform and the portal exchange. |
 
-Agent enrollment and registry, inventory, vulnerability matching and response
-actions are not implemented, and Sigma import covers one class of event.
-Detection is stateless unless a rule asks otherwise: a rule that counts or
-orders its events reads a bounded window of the backbone in event time, which is
-what keeps both replayable.
+Vulnerability matching and response actions are not implemented, no collector
+sends inventory yet — `tools/devprobe -inventory` is the only producer — and
+Sigma import covers one class of event. Detection is stateless unless a rule asks
+otherwise: a rule that counts or orders its events reads a bounded window of the
+backbone in event time, which is what keeps both replayable.
 
 ## License
 

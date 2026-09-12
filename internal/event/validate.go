@@ -57,10 +57,10 @@ func ValidateContract(record *eventv1.Event) error {
 	if err := validateTimestamps(record.GetTime()); err != nil {
 		return err
 	}
-	if err := validateOrigin(record.GetOrigin()); err != nil {
+	if err := ValidateOrigin(record.GetOrigin()); err != nil {
 		return err
 	}
-	if err := validateCollection(record.GetCollection()); err != nil {
+	if err := ValidateCollection(record.GetCollection()); err != nil {
 		return err
 	}
 	return validateBody(record)
@@ -109,7 +109,10 @@ func withinWindow(field string, at, now time.Time, policy Policy) error {
 	return nil
 }
 
-func validateOrigin(origin *eventv1.Origin) error {
+// Exported because an inventory record carries the same envelope and is
+// admitted by the same gateway: whose estate a record belongs to and which
+// machine it came from are one rule, not one per kind of record.
+func ValidateOrigin(origin *eventv1.Origin) error {
 	if origin == nil {
 		return &Violation{Field: "origin", Reason: "is missing"}
 	}
@@ -135,7 +138,7 @@ func validateOrigin(origin *eventv1.Origin) error {
 	return text("origin.host.architecture", host.GetArchitecture(), MaxArchitectureLen, false)
 }
 
-func validateCollection(collection *eventv1.Collection) error {
+func ValidateCollection(collection *eventv1.Collection) error {
 	if collection == nil {
 		return &Violation{Field: "collection", Reason: "is missing"}
 	}

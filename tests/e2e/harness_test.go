@@ -26,10 +26,12 @@ import (
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
+	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 )
 
 type backbone struct {
 	published []*eventv1.Event
+	inventory []*inventoryv1.Record
 	failure   error
 	release   chan struct{}
 	entered   chan struct{}
@@ -54,6 +56,14 @@ func (b *backbone) PublishEvents(ctx context.Context, events []*eventv1.Event) e
 	return nil
 }
 
+func (b *backbone) PublishInventory(_ context.Context, records []*inventoryv1.Record) error {
+	if b.failure != nil {
+		return b.failure
+	}
+	b.inventory = append(b.inventory, records...)
+	return nil
+}
+
 type gateway struct {
 	address    string
 	opsAddress string
@@ -67,6 +77,7 @@ type gateway struct {
 type gatewayOptions struct {
 	maxBodyBytes        int64
 	maxEventsPerBatch   int
+	maxRecordsPerBatch  int
 	ratePerSecond       float64
 	rateBurst           int
 	maxInflightBytes    int64
@@ -83,6 +94,9 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	}
 	if options.maxEventsPerBatch == 0 {
 		options.maxEventsPerBatch = 100
+	}
+	if options.maxRecordsPerBatch == 0 {
+		options.maxRecordsPerBatch = 16
 	}
 	if options.maxInflightBytes == 0 {
 		options.maxInflightBytes = 64 << 20
@@ -169,10 +183,34 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		t.Fatalf("build handler: %v", err)
 	}
 
+	assets := ingest.NewInventoryMetrics(platform.Metrics())
+	collector, err := ingest.NewInventoryAdmitter(options.backbone, ingest.InventoryPolicy{
+		Gateway:            "gateway-test",
+		MaxRecordsPerBatch: options.maxRecordsPerBatch,
+		Record:             event.Policy{MaxClockSkew: 5 * time.Minute, MaxAge: 168 * time.Hour},
+	}, assets)
+	if err != nil {
+		t.Fatalf("build inventory admitter: %v", err)
+	}
+
+	inventory, err := ingest.NewInventoryHandler(ingest.InventoryHandlerOptions{
+		Admitter:       collector,
+		Roster:         options.roster,
+		Limiter:        limiter,
+		Capacity:       capacity,
+		Metrics:        assets,
+		MaxBodyBytes:   options.maxBodyBytes,
+		PublishTimeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("build inventory handler: %v", err)
+	}
+
 	listener, err := ingest.NewServer(ingest.ServerOptions{
 		Address:         "127.0.0.1:0",
 		TLS:             mutual,
 		Handler:         handler,
+		Inventory:       inventory,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
 		ReadTimeout:     10 * time.Second,
@@ -285,10 +323,17 @@ func (g *gateway) anonymousClient(t *testing.T) *http.Client {
 
 func (g *gateway) url() string { return "https://" + g.address + ingest.EventsPath }
 
+func (g *gateway) inventoryURL() string { return "https://" + g.address + ingest.InventoryPath }
+
 func (g *gateway) post(t *testing.T, client *http.Client, contentType string, body []byte) (*http.Response, []byte) {
 	t.Helper()
+	return g.postTo(t, client, g.url(), contentType, body)
+}
 
-	request, err := http.NewRequest(http.MethodPost, g.url(), bytes.NewReader(body))
+func (g *gateway) postTo(t *testing.T, client *http.Client, url, contentType string, body []byte) (*http.Response, []byte) {
+	t.Helper()
+
+	request, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -314,6 +359,15 @@ func (g *gateway) send(t *testing.T, client *http.Client, batch *ingestv1.EventB
 		t.Fatalf("encode batch: %v", err)
 	}
 	return g.post(t, client, ingest.ContentType, encoded)
+}
+
+func (g *gateway) sendInventory(t *testing.T, client *http.Client, batch *inventoryv1.RecordBatch) (*http.Response, []byte) {
+	t.Helper()
+	encoded, err := proto.Marshal(batch)
+	if err != nil {
+		t.Fatalf("encode inventory batch: %v", err)
+	}
+	return g.postTo(t, client, g.inventoryURL(), ingest.ContentType, encoded)
 }
 
 func decodeAck(t *testing.T, payload []byte) *ingestv1.BatchAck {

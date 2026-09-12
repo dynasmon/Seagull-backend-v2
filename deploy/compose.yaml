@@ -19,6 +19,9 @@ x-backbone: &backbone
   SEAGULL_BACKBONE_INVENTORY_TOPIC: security.inventory.raw
   SEAGULL_BACKBONE_INVENTORY_PARTITIONS: ${SEAGULL_BACKBONE_INVENTORY_PARTITIONS:-6}
   SEAGULL_BACKBONE_INVENTORY_RETENTION: ${SEAGULL_BACKBONE_INVENTORY_RETENTION:-720h}
+  SEAGULL_BACKBONE_INVENTORY_QUARANTINE_TOPIC: security.inventory.quarantine
+  SEAGULL_BACKBONE_INVENTORY_QUARANTINE_PARTITIONS: ${SEAGULL_BACKBONE_INVENTORY_QUARANTINE_PARTITIONS:-3}
+  SEAGULL_BACKBONE_INVENTORY_QUARANTINE_RETENTION: ${SEAGULL_BACKBONE_INVENTORY_QUARANTINE_RETENTION:-720h}
   SEAGULL_BACKBONE_RULESETS_TOPIC: security.rulesets
   SEAGULL_BACKBONE_REPLICAS: ${SEAGULL_BACKBONE_REPLICAS:-1}
   SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS: ${SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS:-1}
@@ -245,6 +248,32 @@ services:
       SEAGULL_DETECTION_STORE_DATABASE: ${SEAGULL_DETECTION_STORE_DATABASE:-seagull}
       SEAGULL_DETECTION_STORE_USER: ${SEAGULL_DETECTION_STORE_USER:-seagull}
       SEAGULL_DETECTION_STORE_PASSWORD: ${SEAGULL_DETECTION_STORE_PASSWORD:-}
+      SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
+      SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    <<: *hardening
+
+  # Folds what a collector saw into what an asset currently has. Its own process
+  # for its own failure domain: a fleet-wide package scan is orders of magnitude
+  # more records than the telemetry beside it, and neither may delay the other.
+  inventory-projector:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        COMPONENT: inventory-projector
+        VERSION: ${SEAGULL_VERSION:-dev}
+    depends_on:
+      backbone-migrator:
+        condition: service_completed_successfully
+      store-migrator:
+        condition: service_completed_successfully
+    networks: [backbone]
+    environment:
+      <<: *backbone
+      SEAGULL_INVENTORY_STORE_ADDRESS: clickhouse:9000
+      SEAGULL_INVENTORY_STORE_DATABASE: ${SEAGULL_INVENTORY_STORE_DATABASE:-seagull}
+      SEAGULL_INVENTORY_STORE_USER: ${SEAGULL_INVENTORY_STORE_USER:-seagull}
+      SEAGULL_INVENTORY_STORE_PASSWORD: ${SEAGULL_INVENTORY_STORE_PASSWORD:-}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
     <<: *hardening

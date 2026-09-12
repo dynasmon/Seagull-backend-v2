@@ -22,6 +22,9 @@ const (
 	EventsPath  = "/v1/events"
 	EventsRoute = "POST " + EventsPath
 
+	InventoryPath  = "/v1/inventory"
+	InventoryRoute = "POST " + InventoryPath
+
 	ContentType = "application/x-protobuf"
 
 	CodeAtCapacity    = "gateway_at_capacity"
@@ -47,48 +50,79 @@ type HandlerOptions struct {
 	PublishTimeout time.Duration
 }
 
-type Handler struct {
-	admitter       *Admitter
+type InventoryHandlerOptions struct {
+	Admitter       *InventoryAdmitter
+	Roster         Roster
+	Limiter        *ratelimit.Limiter
+	Capacity       *Capacity
+	Metrics        *InventoryMetrics
+	MaxBodyBytes   int64
+	PublishTimeout time.Duration
+}
+
+type gate struct {
 	roster         Roster
 	limiter        *ratelimit.Limiter
 	capacity       *Capacity
-	metrics        *Metrics
 	maxBodyBytes   int64
 	publishTimeout time.Duration
+}
+
+type Handler struct {
+	stream stream
+	gate
 }
 
 func NewHandler(options HandlerOptions) (*Handler, error) {
 	if options.Admitter == nil {
 		return nil, errors.New("the ingest handler needs an admitter")
 	}
-	if options.Roster == nil {
-		return nil, errors.New("the ingest handler needs to know which agents the platform still honours")
-	}
-	if options.MaxBodyBytes <= 0 {
-		return nil, errors.New("the ingest handler needs a positive body ceiling")
-	}
-	if options.PublishTimeout <= 0 {
-		return nil, errors.New("the ingest handler needs a positive publish budget")
-	}
-	if options.Capacity == nil {
-		return nil, errors.New("the ingest handler needs a ceiling on what the process holds at once")
-	}
-	if held, _ := options.Capacity.Bounds(); held < options.MaxBodyBytes {
-		return nil, fmt.Errorf("the gateway holds %d bytes at once and admits a body of %d, so no batch could ever be taken",
-			held, options.MaxBodyBytes)
-	}
 	if options.Metrics == nil {
 		return nil, errors.New("the ingest handler needs metrics")
 	}
-	return &Handler{
-		admitter:       options.Admitter,
+	return newHandler(eventStream{admitter: options.Admitter, metrics: options.Metrics}, gate{
 		roster:         options.Roster,
 		limiter:        options.Limiter,
 		capacity:       options.Capacity,
-		metrics:        options.Metrics,
 		maxBodyBytes:   options.MaxBodyBytes,
 		publishTimeout: options.PublishTimeout,
-	}, nil
+	})
+}
+
+func NewInventoryHandler(options InventoryHandlerOptions) (*Handler, error) {
+	if options.Admitter == nil {
+		return nil, errors.New("the inventory handler needs an admitter")
+	}
+	if options.Metrics == nil {
+		return nil, errors.New("the inventory handler needs metrics")
+	}
+	return newHandler(inventoryStream{admitter: options.Admitter, metrics: options.Metrics}, gate{
+		roster:         options.Roster,
+		limiter:        options.Limiter,
+		capacity:       options.Capacity,
+		maxBodyBytes:   options.MaxBodyBytes,
+		publishTimeout: options.PublishTimeout,
+	})
+}
+
+func newHandler(admitting stream, standing gate) (*Handler, error) {
+	if standing.roster == nil {
+		return nil, errors.New("the ingest handler needs to know which agents the platform still honours")
+	}
+	if standing.maxBodyBytes <= 0 {
+		return nil, errors.New("the ingest handler needs a positive body ceiling")
+	}
+	if standing.publishTimeout <= 0 {
+		return nil, errors.New("the ingest handler needs a positive publish budget")
+	}
+	if standing.capacity == nil {
+		return nil, errors.New("the ingest handler needs a ceiling on what the process holds at once")
+	}
+	if held, _ := standing.capacity.Bounds(); held < standing.maxBodyBytes {
+		return nil, fmt.Errorf("the gateway holds %d bytes at once and admits a body of %d, so no batch could ever be taken",
+			held, standing.maxBodyBytes)
+	}
+	return &Handler{stream: admitting, gate: standing}, nil
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -123,7 +157,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	release, admitted := h.capacity.Hold(h.reserving(r))
 	if !admitted {
-		h.metrics.batchRejected(CodeAtCapacity)
+		h.stream.rejected(CodeAtCapacity)
 		w.Header().Set("Retry-After", "1")
 		refuse(w, http.StatusServiceUnavailable, CodeAtCapacity,
 			"the gateway is holding as much work as it was bounded to", "", -1)
@@ -142,49 +176,48 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var batch ingestv1.EventBatch
-	if err := proto.Unmarshal(payload, &batch); err != nil {
-		refuse(w, http.StatusBadRequest, "malformed_payload", "the batch is not a valid protobuf message", "", -1)
-		return
-	}
-
 	publishCtx, cancel := context.WithTimeout(ctx, h.publishTimeout)
 	defer cancel()
 
-	acknowledgement, err := h.admitter.Admit(publishCtx, identity, tenant, &batch)
+	carried, err := h.stream.admit(publishCtx, identity, tenant, payload)
 	if err != nil {
-		h.refuseAdmission(ctx, w, &batch, err)
+		h.refuseAdmission(ctx, w, carried, err)
 		return
 	}
 
 	log.From(ctx).Info("batch_admitted",
-		slog.String("batch_id", batch.GetBatchId()),
-		slog.Int("events", len(batch.GetEvents())),
+		slog.String("stream", h.stream.name()),
+		slog.String("batch_id", carried.batchID),
+		slog.Int("records", carried.records),
 	)
-	respond(w, http.StatusOK, acknowledgement)
+	respond(w, http.StatusOK, carried.acknowledgement)
 }
 
 func (h *Handler) refuseUnadmitted(w http.ResponseWriter, agentID string) {
 	if !h.roster.Knows(agentID) {
-		h.metrics.batchRejected(CodeNotRegistered)
+		h.stream.rejected(CodeNotRegistered)
 		refuse(w, http.StatusForbidden, CodeNotRegistered,
 			"the platform has no registration for this agent, so its telemetry belongs to no tenant", "", -1)
 		return
 	}
-	h.metrics.batchRejected(CodeNotAdmitted)
+	h.stream.rejected(CodeNotAdmitted)
 	refuse(w, http.StatusForbidden, CodeNotAdmitted,
 		"the platform no longer admits telemetry from this agent", "", -1)
 }
 
-func (h *Handler) refuseAdmission(ctx context.Context, w http.ResponseWriter, batch *ingestv1.EventBatch, err error) {
+func (h *Handler) refuseAdmission(ctx context.Context, w http.ResponseWriter, carried outcome, err error) {
 	var rejection *Rejection
 	if errors.As(err, &rejection) {
 		status := http.StatusUnprocessableEntity
-		if rejection.Code == CodeUnsupportedProtocol {
+		switch rejection.Code {
+		case CodeUnsupportedProtocol:
 			status = http.StatusUpgradeRequired
+		case CodeMalformedPayload:
+			status = http.StatusBadRequest
 		}
 		log.From(ctx).Warn("batch_rejected",
-			slog.String("batch_id", batch.GetBatchId()),
+			slog.String("stream", h.stream.name()),
+			slog.String("batch_id", carried.batchID),
 			slog.String("code", string(rejection.Code)),
 			slog.String("field", rejection.Field),
 			slog.Int("event_index", rejection.EventIndex),
@@ -196,8 +229,9 @@ func (h *Handler) refuseAdmission(ctx context.Context, w http.ResponseWriter, ba
 	// A batch the backbone did not accept is never acknowledged: the agent keeps
 	// its copy and retries, which is the only reason its spool can be trusted.
 	log.From(ctx).Error("batch_not_durable",
-		slog.String("batch_id", batch.GetBatchId()),
-		slog.Int("events", len(batch.GetEvents())),
+		slog.String("stream", h.stream.name()),
+		slog.String("batch_id", carried.batchID),
+		slog.Int("records", carried.records),
 		slog.String("error", err.Error()),
 	)
 	w.Header().Set("Retry-After", "5")

@@ -33,6 +33,7 @@ type configuration struct {
 	rateBurst      int
 	trackedAgents  int
 	admissionRules ingest.Policy
+	inventoryRules ingest.InventoryPolicy
 
 	brokers       []string
 	topology      broker.Topology
@@ -73,12 +74,24 @@ func load(parser *config.Parser) (configuration, error) {
 	}
 
 	loaded.ratePerSecond = float64(parser.Int("SEAGULL_GATEWAY_RATE_PER_SECOND", 200, 0, 1_000_000))
+	gateway := parser.String("SEAGULL_GATEWAY_ID", serviceName)
 	loaded.admissionRules = ingest.Policy{
-		Gateway:           parser.String("SEAGULL_GATEWAY_ID", serviceName),
+		Gateway:           gateway,
 		MaxEventsPerBatch: parser.Int("SEAGULL_GATEWAY_MAX_EVENTS_PER_BATCH", 1_000, 1, 100_000),
 		Event: event.Policy{
 			MaxClockSkew: parser.Duration("SEAGULL_EVENT_MAX_CLOCK_SKEW", 5*time.Minute, time.Second, time.Hour),
 			MaxAge:       parser.Duration("SEAGULL_EVENT_MAX_AGE", 168*time.Hour, time.Minute, 8760*time.Hour),
+		},
+	}
+
+	// An asset that was offline for a fortnight sends what it saw while it was,
+	// so how old a scan may be is asked separately from how old an event may be.
+	loaded.inventoryRules = ingest.InventoryPolicy{
+		Gateway:            gateway,
+		MaxRecordsPerBatch: parser.Int("SEAGULL_GATEWAY_MAX_RECORDS_PER_BATCH", 64, 1, 10_000),
+		Record: event.Policy{
+			MaxClockSkew: parser.Duration("SEAGULL_INVENTORY_MAX_CLOCK_SKEW", 5*time.Minute, time.Second, time.Hour),
+			MaxAge:       parser.Duration("SEAGULL_INVENTORY_MAX_AGE", 720*time.Hour, time.Minute, 8760*time.Hour),
 		},
 	}
 

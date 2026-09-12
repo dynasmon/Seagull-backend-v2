@@ -387,3 +387,81 @@ func TestAGatewayAtItsCeilingRefusesWorkInsteadOfHoldingIt(t *testing.T) {
 		t.Fatalf("the gateway kept refusing after the work it was holding finished: %d", admitted.StatusCode)
 	}
 }
+
+func TestAnInventorySnapshotTravelsFromMutualTLSToTheBackbone(t *testing.T) {
+	gateway := startGateway(t, gatewayOptions{})
+	client := gateway.client(t, "web-01")
+
+	batch := fixtures.InventoryBatch("inventory-0001", fixtures.PackageScan{
+		RecordID: "inv-0000000042",
+		AgentID:  "domain-controller",
+		Packages: []fixtures.Installed{
+			{Name: "curl", Version: "8.5.0", Architecture: "amd64", Manager: "dpkg"},
+			{Name: "openssl", Version: "3.0.13", Architecture: "amd64", Manager: "dpkg"},
+		},
+	}.Record())
+
+	response, payload := gateway.sendInventory(t, client, batch)
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", response.StatusCode, payload)
+	}
+	acknowledgement := decodeAck(t, payload)
+	if !acknowledgement.GetAccepted() || !acknowledgement.GetDurable() || acknowledgement.GetReceived() != 1 {
+		t.Fatalf("the collector cannot commit on this acknowledgement: %+v", acknowledgement)
+	}
+	if len(gateway.backbone.inventory) != 1 {
+		t.Fatalf("expected 1 record on the backbone, got %d", len(gateway.backbone.inventory))
+	}
+	if len(gateway.backbone.published) != 0 {
+		t.Fatal("an inventory record reached the telemetry stream")
+	}
+
+	published := gateway.backbone.inventory[0]
+	if published.GetOrigin().GetAgentId() != "web-01" {
+		t.Fatalf("a collector chose its own identity: %q", published.GetOrigin().GetAgentId())
+	}
+	if published.GetOrigin().GetTenantId() != "acme" {
+		t.Fatalf("the tenant was not stamped: %q", published.GetOrigin().GetTenantId())
+	}
+	if published.GetReception().GetBatchId() != "inventory-0001" {
+		t.Fatalf("the batch was not recorded on the record: %+v", published.GetReception())
+	}
+	if len(published.GetItems()) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(published.GetItems()))
+	}
+}
+
+// The two routes stand behind one gate: an agent the registry does not name
+// belongs to no tenant, whatever it is sending.
+func TestTheInventoryRouteRefusesAnAgentTheRegistryDoesNotName(t *testing.T) {
+	gateway := startGateway(t, gatewayOptions{})
+	client := gateway.unregistered(t, "web-99")
+
+	batch := fixtures.InventoryBatch("inventory-0002", fixtures.PackageScan{}.Record())
+	response, payload := gateway.sendInventory(t, client, batch)
+
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("unexpected status %d: %s", response.StatusCode, payload)
+	}
+	if code := decodeRejection(t, payload).GetCode(); code != ingest.CodeNotRegistered {
+		t.Fatalf("unexpected code %q", code)
+	}
+	if len(gateway.backbone.inventory) != 0 {
+		t.Fatal("an unregistered collector reached the backbone")
+	}
+}
+
+func TestAnInventoryPayloadThatDoesNotDecodeIsRefused(t *testing.T) {
+	gateway := startGateway(t, gatewayOptions{})
+	client := gateway.client(t, "web-01")
+
+	response, payload := gateway.postTo(t, client, gateway.inventoryURL(), ingest.ContentType, []byte{0xff, 0xff, 0xff, 0xff})
+
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unexpected status %d: %s", response.StatusCode, payload)
+	}
+	if code := decodeRejection(t, payload).GetCode(); code != string(ingest.CodeMalformedPayload) {
+		t.Fatalf("unexpected code %q", code)
+	}
+}

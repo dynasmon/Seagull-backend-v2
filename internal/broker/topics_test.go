@@ -61,6 +61,13 @@ func TestTheDefaultTopologyIsTheOneTheBackboneNeeds(t *testing.T) {
 	if topology.Inventory.Name != "security.inventory.raw" {
 		t.Errorf("inventory topic is %q", topology.Inventory.Name)
 	}
+	if topology.InventoryQuarantine.Name != "security.inventory.quarantine" {
+		t.Errorf("the inventory quarantine topic is %q", topology.InventoryQuarantine.Name)
+	}
+	if topology.InventoryQuarantine.Name == topology.Quarantine.Name ||
+		topology.InventoryQuarantine.Name == topology.DetectionsQuarantine.Name {
+		t.Error("two streams quarantine to one topic, and a refused record's offset only means something alongside its own topic")
+	}
 	if topology.Inventory.Retention <= topology.Events.Retention {
 		t.Errorf("inventory is kept %s and telemetry %s: the current state of an asset is rebuilt by replaying this topic",
 			topology.Inventory.Retention, topology.Events.Retention)
@@ -89,6 +96,9 @@ func TestEveryTopicPropertyIsConfigurablePerEnvironment(t *testing.T) {
 		"SEAGULL_BACKBONE_INVENTORY_TOPIC":                  "tenant.inventory",
 		"SEAGULL_BACKBONE_INVENTORY_PARTITIONS":             "4",
 		"SEAGULL_BACKBONE_INVENTORY_RETENTION":              "240h",
+		"SEAGULL_BACKBONE_INVENTORY_QUARANTINE_TOPIC":       "tenant.inventory.refused",
+		"SEAGULL_BACKBONE_INVENTORY_QUARANTINE_PARTITIONS":  "5",
+		"SEAGULL_BACKBONE_INVENTORY_QUARANTINE_RETENTION":   "120h",
 		"SEAGULL_BACKBONE_REPLICAS":                         "3",
 	})
 
@@ -108,6 +118,10 @@ func TestEveryTopicPropertyIsConfigurablePerEnvironment(t *testing.T) {
 	if topology.Inventory.Name != "tenant.inventory" || topology.Inventory.Partitions != 4 || topology.Inventory.Retention != 240*time.Hour {
 		t.Errorf("inventory read back as %q over %d partitions and %s",
 			topology.Inventory.Name, topology.Inventory.Partitions, topology.Inventory.Retention)
+	}
+	if topology.InventoryQuarantine.Partitions != 5 || topology.InventoryQuarantine.Retention != 120*time.Hour {
+		t.Errorf("the inventory quarantine read back as %d partitions and %s",
+			topology.InventoryQuarantine.Partitions, topology.InventoryQuarantine.Retention)
 	}
 	for _, topic := range topology.Topics() {
 		if topic.Replicas != 3 {
@@ -357,7 +371,9 @@ func TestInventoryIsAStreamOfItsOwnAndTheMigratorCreatesIt(t *testing.T) {
 	if err := topology.Inventory.Validate(); err != nil {
 		t.Errorf("the shipped inventory topic is refused: %v", err)
 	}
-	if !slices.ContainsFunc(topology.Topics(), func(topic Topic) bool { return topic.Name == topology.Inventory.Name }) {
-		t.Error("the inventory topic is not in the topology the migrator applies, so the gateway would refuse to serve")
+	for _, topic := range []Topic{topology.Inventory, topology.InventoryQuarantine} {
+		if !slices.ContainsFunc(topology.Topics(), func(applied Topic) bool { return applied.Name == topic.Name }) {
+			t.Errorf("%s is not in the topology the migrator applies, so the processes that need it would refuse to serve", topic.Name)
+		}
 	}
 }

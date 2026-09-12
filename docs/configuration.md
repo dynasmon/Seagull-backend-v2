@@ -48,6 +48,7 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_GATEWAY_MAX_INFLIGHT_BYTES` | `128MiB` | request bytes held at once across every caller |
 | `SEAGULL_GATEWAY_MAX_INFLIGHT_REQUESTS` | `512` | requests held at once across every caller |
 | `SEAGULL_GATEWAY_MAX_EVENTS_PER_BATCH` | `1000` | ceiling on events in one batch |
+| `SEAGULL_GATEWAY_MAX_RECORDS_PER_BATCH` | `64` | ceiling on inventory records in one batch, alongside the contract's 20,000 items |
 | `SEAGULL_GATEWAY_PUBLISH_TIMEOUT` | `10s` | budget for making a batch durable |
 | `SEAGULL_GATEWAY_RATE_PER_SECOND` | `200` | per-agent batch budget, `0` disables it |
 | `SEAGULL_GATEWAY_RATE_BURST` | `400` | per-agent burst |
@@ -57,6 +58,8 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_GATEWAY_ROSTER_RECORDS` | `500` | admission records read per fetch |
 | `SEAGULL_EVENT_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock an event may be |
 | `SEAGULL_EVENT_MAX_AGE` | `168h` | how old an event may be and still be admitted |
+| `SEAGULL_INVENTORY_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock a scan may be |
+| `SEAGULL_INVENTORY_MAX_AGE` | `720h` | how old a scan may be and still be admitted |
 
 The batch ceiling is measured, not chosen. No event in a batch is published until
 every event in it has been decoded and validated, so a larger batch is a larger
@@ -64,6 +67,13 @@ body that must be fully materialised before one byte reaches the backbone. At a
 thousand the gateway sustains 727k events/s with a p99 of 139ms; at ten thousand
 it sustains 300k with a p99 of three seconds. `make test-load` is where those
 numbers come from.
+
+The gateway serves two routes on one listener: `POST /v1/events` and
+`POST /v1/inventory`. They stand behind the same certificate, the same registry
+answer, the same rate limiter and the same capacity bound, so a collector cannot
+buy a second budget by sending inventory. A scan may be older than an event may
+be, because an asset that was offline for a fortnight sends what it saw while it
+was.
 
 ### The backbone, shared by both halves of the data plane and the migrator
 
@@ -76,6 +86,10 @@ numbers come from.
 | `SEAGULL_BACKBONE_QUARANTINE_TOPIC` | `security.events.quarantine` | refused records |
 | `SEAGULL_BACKBONE_DETECTIONS_TOPIC` | `security.detections` | what the rules decided |
 | `SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_TOPIC` | `security.detections.quarantine` | records the detection writer refused |
+| `SEAGULL_BACKBONE_INVENTORY_TOPIC` | `security.inventory.raw` | what an asset was observed to have |
+| `SEAGULL_BACKBONE_INVENTORY_PARTITIONS` | `6` | how far per-asset ordering spreads |
+| `SEAGULL_BACKBONE_INVENTORY_RETENTION` | `720h` | how far back the projection can be rebuilt |
+| `SEAGULL_BACKBONE_INVENTORY_QUARANTINE_TOPIC` | `security.inventory.quarantine` | records the projector refused |
 | `SEAGULL_BACKBONE_RULESETS_TOPIC` | `security.rulesets` | published rulesets and the pointer at the one to run |
 | `SEAGULL_BACKBONE_QUARANTINE_PARTITIONS` | `3` | |
 | `SEAGULL_BACKBONE_QUARANTINE_RETENTION` | `720h` | |
@@ -249,6 +263,27 @@ telemetry they are made from, and waiting to fill five thousand of them would
 keep the first one out of the store for longer than anyone would accept. The
 store settings are the writer's own and point at the same server by default: two
 processes choosing the same adapter is not the same as sharing one.
+
+### inventory-projector
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEAGULL_INVENTORY_PROJECTOR_CONSUMER_GROUP` | `inventory-projector` | the consumer group that owns the offsets |
+| `SEAGULL_INVENTORY_PROJECTOR_BATCH_RECORDS` | `64` | records per poll, and per store batch |
+| `SEAGULL_INVENTORY_PROJECTOR_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
+| `SEAGULL_INVENTORY_PROJECTOR_RETRY_DELAY` | `1s` | first delay before a batch is retried |
+| `SEAGULL_INVENTORY_PROJECTOR_RETRY_DELAY_MAX` | `30s` | ceiling the delay backs off to |
+| `SEAGULL_INVENTORY_STORE_ADDRESS` | required | the store's native protocol address, `clickhouse:9000` |
+| `SEAGULL_INVENTORY_STORE_DATABASE` | `seagull` | the database holding `asset_inventory` |
+| `SEAGULL_INVENTORY_STORE_USER` | `seagull` | |
+| `SEAGULL_INVENTORY_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
+| `SEAGULL_INVENTORY_STORE_TIMEOUT` | `30s` | budget for one write attempt, and to dial |
+
+A batch is counted in records and not in items, and it is small because each
+record is a whole scan: sixty-four of them can be half a million packages. A
+record is folded whole or refused whole — one item the store cannot hold takes
+its scan with it, because a scan whose items never landed would retire
+everything the record was about to confirm.
 
 ### alert-writer
 
@@ -433,7 +468,7 @@ before its body is read.
 
 ## The backbone topology
 
-Six topics, declared once in `internal/broker` and applied by
+Eight topics, declared once in `internal/broker` and applied by
 `backbone-migrator`:
 
 | Topic | Partitions | Retention | Why |
@@ -442,6 +477,8 @@ Six topics, declared once in `internal/broker` and applied by
 | `security.events.quarantine` | 3 | 30 days | refused records, kept longer because they are the ones still waiting to be read |
 | `security.detections` | 6 | 30 days | what the rules decided, keyed by the agent it is about; narrower than the stream it is made from and kept as long as a refused record, for the same reason |
 | `security.detections.quarantine` | 3 | 30 days | records the detection writer could not store; one quarantine per stream, because a refused record's partition and offset only mean something alongside the topic they came from |
+| `security.inventory.raw` | 6 | 30 days | what an asset was observed to have, keyed by the asset so its scans are read in the order they were written, which is what decides whether an item is still installed; kept long enough that the projection can be rebuilt by replaying it |
+| `security.inventory.quarantine` | 3 | 30 days | records the inventory projector could not store, for the same reason the other two quarantines are apart |
 | `security.rulesets` | 1 | compacted, kept | every published ruleset under its own content id, plus one `active` key naming the one to run; one partition because a version and the record activating it are only meaningful in the order they were written |
 | `security.agents` | 1 | compacted, kept | the last thing the control plane decided about each agent, keyed by the agent; one partition because the last record about an agent has to be the last one every gateway sees |
 
@@ -514,3 +551,60 @@ the bytes that arrived, with `quarantine-reason`, `quarantine-detail`,
 construction, and wrapping an unparseable payload in a second schema — which
 would itself have to parse — is avoided. Payloads are never logged: a refused
 record can carry an attacker's input, and the position is enough to fetch it.
+
+## The inventory projection
+
+Two tables hold what an asset currently has, projected from the contract by
+`internal/inventorystore` and written by `inventory-projector`. The same rule
+holds as for telemetry: a field exists there because the contract carries it, and
+a test walks the protobuf descriptor so the contract cannot grow a field the
+store quietly stops keeping. Items are walked into rather than treated as a leaf,
+because the projection is one row per item.
+
+- **`asset_inventory`** — one row per `(tenant_id, agent_id, kind, item_id)`,
+  carrying the item's own fields and `last_seen`. The identity is derived by the
+  platform as a digest over the kind and the length of every identifying part,
+  never read off the wire, so a replay lands on the row it wrote the first time.
+- **`asset_inventory_scans`** — one row per `(tenant_id, agent_id, kind)`, holding
+  the `scanned_at` of the newest full enumeration.
+
+**What is current.** The items of a kind on an asset are those whose `last_seen`
+is at or after that asset's `scanned_at` for that kind:
+
+```sql
+SELECT item.package_name, item.package_version
+FROM asset_inventory AS item FINAL
+INNER JOIN (
+    SELECT tenant_id, agent_id, kind, max(scanned_at) AS scanned_at
+    FROM asset_inventory_scans
+    WHERE tenant_id = 'acme'
+    GROUP BY tenant_id, agent_id, kind
+) AS scan
+ON item.tenant_id = scan.tenant_id AND item.agent_id = scan.agent_id AND item.kind = scan.kind
+WHERE item.tenant_id = 'acme' AND item.last_seen >= scan.scanned_at;
+```
+
+A snapshot moves that line and a delta never does, so a delta refreshes what it
+names without retiring what it omits. An empty snapshot moves it too, which is
+how a collector says the asset has none of that kind left. **Nothing is deleted
+and nothing is tombstoned**: an item that went away leaves the row saying when it
+was last seen, and it is out of the answer because the line moved past it. Read
+the other way round, the same line is the staleness of the answer.
+
+**Out of order.** Both tables are `ReplacingMergeTree` versioned by the
+collector's clock — `last_seen` and `scanned_at` — so a record that reaches the
+store late loses to the newer one it arrived behind rather than overwriting it.
+As with telemetry, that collapse happens on merge, so a query that must not see a
+replaced row asks for `FINAL`.
+
+**No `PARTITION BY`.** A `ReplacingMergeTree` collapses rows of one key only
+within a partition, and every candidate to partition by here is a time that moves
+as the item is observed again, so partitioning would leave one installed package
+as a row per month that no merge ever reconciles. The tables are bounded by
+`TTL last_seen + INTERVAL 365 DAY` instead, which drops an item nobody has seen
+for a year.
+
+**Quarantine.** `security.inventory.quarantine`, on the same terms as the other
+two. A record is folded whole or refused whole: one item the store cannot hold
+takes its scan with it, because a scan whose items never landed would retire
+everything the record was about to confirm.

@@ -30,3 +30,4 @@ rediscovered by reading the code.
 - [24. An agent is registered by the control plane, and the gateway is told when to stop honouring it](0024-an-agent-is-registered-by-the-control-plane-and-refused-by-the-gateway.md)
 - [25. The platform signs the identity it binds, and an agent renews with the certificate it is replacing](0025-the-platform-signs-the-identity-it-binds.md)
 - [26. An agent sends into the tenant it was registered in, and an agent the registry never named is not admitted](0026-an-agent-sends-into-the-tenant-it-was-registered-in.md)
+- [27. Inventory is a record kind of its own, and what an asset currently has is what the newest full scan named](0027-inventory-is-a-record-kind-of-its-own.md)

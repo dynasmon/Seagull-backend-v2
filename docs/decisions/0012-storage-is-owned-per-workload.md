@@ -1,5 +1,8 @@
 # 12. Storage is owned per workload, and an alert is not a detection
 
+> Amended by [ADR 27](0027-inventory-is-a-record-kind-of-its-own.md): inventory
+> has a producer, so it is decided rather than left as a question.
+
 ## Context
 
 [ADR 11](0011-a-detection-is-not-an-alert.md) put detections on the backbone and

@@ -49,6 +49,7 @@ var layers = map[string]layer{
 	"internal/incident":       domain,
 	"internal/ingest":         capability,
 	"internal/inventory":      domain,
+	"internal/inventorystore": capability,
 	"internal/pki":            domain,
 	"internal/platform":       platform,
 	"internal/policyfile":     adapter,
@@ -172,6 +173,14 @@ var within = map[string]restriction{
 			modulePath + "/internal/platform/tlsx",
 		},
 		because: "what a stored event is has no transport of its own: this half is reached from the backbone",
+	},
+	"internal/inventorystore": {
+		prefixes: []string{
+			"net/http",
+			modulePath + "/internal/platform/httpx",
+			modulePath + "/internal/platform/tlsx",
+		},
+		because: "what an asset currently has has no transport of its own: this half is reached from the backbone",
 	},
 	"internal/alertfile": {
 		prefixes: []string{"net/http", "os", "database/sql"},

@@ -56,11 +56,22 @@ func gateway(ctx context.Context) error {
 	}
 	defer publisher.Close()
 
+	assets, err := broker.NewInventory(broker.Config{
+		Brokers:  settings.brokers,
+		Topic:    settings.topology.Inventory.Name,
+		ClientID: settings.inventoryRules.Gateway,
+		Security: settings.security,
+	})
+	if err != nil {
+		return err
+	}
+	defer assets.Close()
+
 	// The topology is applied by backbone-migrator, never here. This only refuses
-	// to serve agents when the topic it would publish to is missing or reshaped.
+	// to serve agents when a topic it would publish to is missing or reshaped.
 	topologyCtx, cancel := context.WithTimeout(ctx, settings.publishTimeout)
 	defer cancel()
-	drift, err := publisher.VerifyTopics(topologyCtx, settings.topology.Events)
+	drift, err := publisher.VerifyTopics(topologyCtx, settings.topology.Events, settings.topology.Inventory)
 	if err != nil {
 		return err
 	}
@@ -80,18 +91,43 @@ func gateway(ctx context.Context) error {
 		return err
 	}
 
+	inventoryInstruments := ingest.NewInventoryMetrics(platform.Metrics())
+	inventoryAdmitter, err := ingest.NewInventoryAdmitter(assets, settings.inventoryRules, inventoryInstruments)
+	if err != nil {
+		return err
+	}
+
 	capacity, err := ingest.NewCapacity(settings.maxInflightBytes, settings.maxInflightRequests)
 	if err != nil {
 		return err
 	}
 	ingest.ObserveCapacity(platform.Metrics(), capacity)
 
+	// One limiter and one capacity across both routes: what an agent may spend
+	// and what the process may hold are bounded per agent and per process, not
+	// per kind of record, or a collector would buy a second budget by sending an
+	// inventory batch.
+	limiter := ratelimit.NewLimiter(settings.ratePerSecond, settings.rateBurst, settings.trackedAgents)
+
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{
 		Admitter:       admitter,
 		Roster:         admitted.held,
-		Limiter:        ratelimit.NewLimiter(settings.ratePerSecond, settings.rateBurst, settings.trackedAgents),
+		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        instruments,
+		MaxBodyBytes:   settings.maxBodyBytes,
+		PublishTimeout: settings.publishTimeout,
+	})
+	if err != nil {
+		return err
+	}
+
+	inventoryHandler, err := ingest.NewInventoryHandler(ingest.InventoryHandlerOptions{
+		Admitter:       inventoryAdmitter,
+		Roster:         admitted.held,
+		Limiter:        limiter,
+		Capacity:       capacity,
+		Metrics:        inventoryInstruments,
 		MaxBodyBytes:   settings.maxBodyBytes,
 		PublishTimeout: settings.publishTimeout,
 	})
@@ -103,6 +139,7 @@ func gateway(ctx context.Context) error {
 		Address:         settings.address,
 		TLS:             mutual,
 		Handler:         handler,
+		Inventory:       inventoryHandler,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
 		ReadTimeout:     settings.readTimeout,
@@ -121,6 +158,7 @@ func gateway(ctx context.Context) error {
 	)
 
 	platform.Health().Register("backbone", publisher.Ping)
+	platform.Health().Register("inventory-backbone", assets.Ping)
 	platform.Add(admitted.follower(platform.Logger()))
 	platform.Add(listener)
 

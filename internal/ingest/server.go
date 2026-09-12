@@ -14,6 +14,7 @@ type ServerOptions struct {
 	Address         string
 	TLS             *tls.Config
 	Handler         *Handler
+	Inventory       *Handler
 	Instrumentation *httpx.Instrumentation
 	Logger          *slog.Logger
 	ReadTimeout     time.Duration
@@ -32,6 +33,9 @@ func NewServer(options ServerOptions) (*httpx.Server, error) {
 
 	mux := http.NewServeMux()
 	mux.Handle(EventsRoute, options.Instrumentation.Handle("ingest_events", options.Handler))
+	if options.Inventory != nil {
+		mux.Handle(InventoryRoute, options.Instrumentation.Handle("ingest_inventory", options.Inventory))
+	}
 
 	return httpx.NewServer(httpx.ServerOptions{
 		Name:              "ingest",

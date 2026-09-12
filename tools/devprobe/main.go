@@ -27,6 +27,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/hunt"
 	"github.com/dynasmon/Seagull-backend-v2/internal/incident"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
+	"github.com/dynasmon/Seagull-backend-v2/internal/inventory"
 	"github.com/dynasmon/Seagull-backend-v2/internal/protocol"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 	alertv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/alert/v1"
@@ -35,6 +36,7 @@ import (
 	huntv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/hunt/v1"
 	incidentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/incident/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
+	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 )
 
 func main() {
@@ -51,6 +53,7 @@ func main() {
 	batchID := flag.String("batch-id", "probe-0001", "batch identifier")
 	eventID := flag.String("event-id", "99999999-8888-4777-8666-555555555555", "event identifier")
 	outcome := flag.String("outcome", "failure", "authentication outcome the sample event carries: failure or success")
+	assets := flag.Bool("inventory", false, "send an asset inventory snapshot to the gateway instead of an event batch")
 	flag.Parse()
 
 	run := func() error { return probe(*endpoint, *registry, *pki, *batchID, *eventID, *outcome) }
@@ -65,6 +68,9 @@ func main() {
 	}
 	if *agentEndpoint != "" {
 		run = func() error { return enrol(*agentEndpoint, *renewalEndpoint, *pki, *agentID) }
+	}
+	if *assets {
+		run = func() error { return survey(*endpoint, *registry, *pki, *batchID) }
 	}
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "devprobe: %v\n", err)
@@ -525,14 +531,32 @@ func probe(endpoint, registry, pki, batchID, eventID, outcome string) error {
 		}
 	}
 
-	encoded, err := proto.Marshal(sample(batchID, eventID, outcome))
+	return offer(client, endpoint+ingest.EventsPath, sample(batchID, eventID, outcome), registry != "")
+}
+
+func survey(endpoint, registry, pki, batchID string) error {
+	client, err := speaker(pki, "agent")
 	if err != nil {
 		return err
 	}
-	status, body, err := deliver(client, endpoint, encoded)
-	for attempt := 1; registry != "" && err == nil && attempt < 40 && unregistered(status, body); attempt++ {
+	if registry != "" {
+		if err := register(registry, pki); err != nil {
+			return err
+		}
+	}
+	return offer(client, endpoint+ingest.InventoryPath, scanned(batchID), registry != "")
+}
+
+func offer(client *http.Client, url string, batch proto.Message, registered bool) error {
+	encoded, err := proto.Marshal(batch)
+	if err != nil {
+		return err
+	}
+
+	status, body, err := deliver(client, url, encoded)
+	for attempt := 1; registered && err == nil && attempt < 40 && unregistered(status, body); attempt++ {
 		time.Sleep(250 * time.Millisecond)
-		status, body, err = deliver(client, endpoint, encoded)
+		status, body, err = deliver(client, url, encoded)
 	}
 	if err != nil {
 		return err
@@ -556,8 +580,8 @@ func probe(endpoint, registry, pki, batchID, eventID, outcome string) error {
 	return nil
 }
 
-func deliver(client *http.Client, endpoint string, encoded []byte) (int, []byte, error) {
-	request, err := http.NewRequest(http.MethodPost, endpoint+ingest.EventsPath, bytes.NewReader(encoded))
+func deliver(client *http.Client, url string, encoded []byte) (int, []byte, error) {
+	request, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(encoded))
 	if err != nil {
 		return 0, nil, err
 	}
@@ -660,6 +684,51 @@ func sample(batchID, eventID, outcome string) *ingestv1.EventBatch {
 				RawRecord: fmt.Sprintf("%s password for root from 203.0.113.10 port 54321 ssh2", outcome),
 			}},
 		}},
+	}
+}
+
+func scanned(batchID string) *inventoryv1.RecordBatch {
+	now := timestamppb.New(time.Now().UTC())
+	origin := &eventv1.Origin{
+		AgentId: "ignored-by-the-gateway",
+		Host:    &eventv1.Host{Hostname: "probe-host", Os: "linux", Architecture: "amd64"},
+	}
+	collection := &eventv1.Collection{Collector: "syscollector", Source: "dpkg", Sequence: 1}
+
+	record := func(id string, kind inventoryv1.Kind, items ...*inventoryv1.Item) *inventoryv1.Record {
+		return &inventoryv1.Record{
+			RecordId:      id,
+			SchemaVersion: inventory.SchemaVersion,
+			Kind:          kind,
+			Mode:          inventoryv1.Mode_MODE_SNAPSHOT,
+			CollectedAt:   now,
+			Origin:        origin,
+			Collection:    collection,
+			Items:         items,
+		}
+	}
+	installed := func(name, version string) *inventoryv1.Item {
+		return &inventoryv1.Item{Body: &inventoryv1.Item_Package{Package: &inventoryv1.Package{
+			Name: name, Version: version, Architecture: "amd64", Manager: "dpkg", Vendor: "Debian",
+		}}}
+	}
+
+	return &inventoryv1.RecordBatch{
+		BatchId:         batchID,
+		ProtocolVersion: protocol.Version,
+		Records: []*inventoryv1.Record{
+			record(batchID+".os", inventoryv1.Kind_KIND_OPERATING_SYSTEM,
+				&inventoryv1.Item{Body: &inventoryv1.Item_OperatingSystem{OperatingSystem: &inventoryv1.OperatingSystem{
+					Name: "Debian GNU/Linux", Version: "12", Platform: "debian", Codename: "bookworm", Family: "debian",
+				}}}),
+			record(batchID+".packages", inventoryv1.Kind_KIND_PACKAGE,
+				installed("curl", "8.5.0"), installed("openssl", "3.0.13"), installed("openssh-server", "9.2p1")),
+			record(batchID+".services", inventoryv1.Kind_KIND_SERVICE,
+				&inventoryv1.Item{Body: &inventoryv1.Item_Service{Service: &inventoryv1.Service{
+					Name: "sshd", DisplayName: "OpenSSH", State: inventoryv1.Service_STATE_RUNNING,
+					StartMode: "enabled", Path: "/usr/sbin/sshd",
+				}}}),
+		},
 	}
 }
 

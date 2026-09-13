@@ -29,6 +29,7 @@ const (
 // rules below instead of by nothing. The longest matching prefix wins.
 var layers = map[string]layer{
 	"cmd":                     executable,
+	"internal/advisoryfeed":   capability,
 	"internal/agent":          domain,
 	"internal/agentidentity":  domain,
 	"internal/alert":          domain,
@@ -122,6 +123,15 @@ var outside = map[layer]restriction{
 // A rule that belongs to one package rather than to its layer, because ingest
 // is a transport and a rule about capabilities would refuse it too.
 var within = map[string]restriction{
+	"internal/advisoryfeed": {
+		prefixes: []string{
+			"net/http",
+			modulePath + "/internal/platform/httpx",
+			modulePath + "/internal/platform/tlsx",
+			modulePath + "/internal/inventory",
+		},
+		because: "following a feed has no transport of its own and no reach into what the platform knows about an asset, so a feed that fails or lies cannot touch the inventory",
+	},
 	"internal/osv": {
 		prefixes: []string{
 			"database/sql",

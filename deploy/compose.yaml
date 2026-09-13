@@ -61,6 +61,9 @@ networks:
   backbone:
     internal: true
   agents: {}
+  # A way out for the advisory importer alone, which reads its feeds from the
+  # internet; the backbone it publishes to stays internal.
+  feeds: {}
 
 services:
   redpanda:
@@ -278,6 +281,29 @@ services:
       SEAGULL_INVENTORY_STORE_DATABASE: ${SEAGULL_INVENTORY_STORE_DATABASE:-seagull}
       SEAGULL_INVENTORY_STORE_USER: ${SEAGULL_INVENTORY_STORE_USER:-seagull}
       SEAGULL_INVENTORY_STORE_PASSWORD: ${SEAGULL_INVENTORY_STORE_PASSWORD:-}
+      SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
+      SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    <<: *hardening
+
+  # Reads vulnerability advisories from their source and publishes them to the
+  # backbone. The one process that reaches the internet, so it holds no store
+  # and names no asset: a feed that fails or lies can stop nothing but this.
+  advisory-importer:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        COMPONENT: advisory-importer
+        VERSION: ${SEAGULL_VERSION:-dev}
+    depends_on:
+      backbone-migrator:
+        condition: service_completed_successfully
+    networks: [backbone, feeds]
+    environment:
+      <<: *backbone
+      SEAGULL_ADVISORY_FEEDS: ${SEAGULL_ADVISORY_FEEDS:-Debian}
+      SEAGULL_ADVISORY_OSV_EXPORT: ${SEAGULL_ADVISORY_OSV_EXPORT:-https://osv-vulnerabilities.storage.googleapis.com}
+      SEAGULL_ADVISORY_SYNC_INTERVAL: ${SEAGULL_ADVISORY_SYNC_INTERVAL:-1h}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
     <<: *hardening

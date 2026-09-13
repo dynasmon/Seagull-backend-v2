@@ -30,6 +30,7 @@ const (
 var layers = map[string]layer{
 	"cmd":                     executable,
 	"internal/advisoryfeed":   capability,
+	"internal/advisorystore":  capability,
 	"internal/agent":          domain,
 	"internal/agentidentity":  domain,
 	"internal/alert":          domain,
@@ -140,6 +141,14 @@ var within = map[string]restriction{
 			modulePath + "/internal/inventory",
 		},
 		because: "following a feed has no transport of its own and no reach into what the platform knows about an asset, so a feed that fails or lies cannot touch the inventory",
+	},
+	"internal/advisorystore": {
+		prefixes: []string{
+			"net/http",
+			modulePath + "/internal/platform/httpx",
+			modulePath + "/internal/platform/tlsx",
+		},
+		because: "what a stored advisory is has no transport of its own: this half is reached from the backbone",
 	},
 	"internal/osv": {
 		prefixes: []string{

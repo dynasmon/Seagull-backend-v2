@@ -140,11 +140,33 @@ asset has none of that kind left. A record that reaches the store out of order
 loses to the newer one it arrived behind.
 [ADR 27](docs/decisions/0027-inventory-is-a-record-kind-of-its-own.md).
 
+### Vulnerability intelligence
+
+What is known to be wrong with software is read from its source — OSV's export
+of the distributions' own advisories — by the one process that reaches the
+internet, which holds no store and names no asset: what a feed says reaches the
+platform as a validated advisory on the backbone and by no other way, so a feed
+that fails or lies can stop nothing but that process. Every advisory says which
+feed it came from, the version of that feed, the URL, when it was fetched and the
+SHA-256 of the bytes, and the platform writes all of that itself. Ecosystems are
+named with their release — `Debian:12`, `Ubuntu:22.04:LTS`, `Alpine:v3.19` — and an
+advisory entry and an installed package are keyed by the same function, the
+source package where the distribution's advisories name one, so a match is a
+lookup rather than a guess; an asset the platform cannot assess says why instead
+of reading as clean. **Nothing is concluded from what a feed did not say**: an
+attempt that failed changes nothing and says how old the platform's copy is, an
+advisory a feed stops listing is kept, and one is withdrawn only when its source
+withdraws it. Every version is kept, so what was concluded from one stays
+explicable. Debian, Ubuntu, Alpine, Rocky Linux and AlmaLinux are read; matching
+is not built yet.
+[ADR 28](docs/decisions/0028-vulnerability-intelligence-is-read-from-its-source.md).
+
 ### Storage and failure semantics
 
 Storage is owned per workload: ClickHouse holds telemetry and detections in
-tables shaped for the questions asked of each, and the current state of every
-asset in two more. A consumer advances its position
+tables shaped for the questions asked of each, the current state of every
+asset in two more, and every version of every advisory the platform has read in
+three more. A consumer advances its position
 only after the work it did is durable, so a crash replays rather than skips. A
 record that can never be stored is quarantined with the reason and its position,
 so one poison record cannot hold up a partition.
@@ -224,6 +246,22 @@ Seagull Agent
                  one row per item      when that kind was last enumerated in full
 ```
 
+What is known to be wrong with software comes from outside, through the one
+process allowed to reach it:
+
+```text
+ OSV export (https) ──▶ advisory-importer ──▶ Redpanda  security.advisories
+   index · records        translate · stamp        compacted: the newest version of
+                          provenance · publish     every advisory, and each feed's freshness
+                                                           │
+                                                           ▼
+                                                    advisory-writer ──▶ security.advisories.quarantine
+                                                           │
+                                                           ▼
+            ClickHouse vulnerability_advisories · vulnerability_affected · vulnerability_feed_syncs
+                        every version            by release and package      how fresh each feed is
+```
+
 Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 
 | Process | Role |
@@ -234,6 +272,8 @@ Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 | `detection-writer` | Makes a detection queryable, on the same terms and as a consumer of its own. |
 | `alert-writer` | Opens the work a detection at or above a severity floor becomes: an alert for a finding about one event, folded on a declared key, or an incident for a story several events told. It inserts and never updates. |
 | `inventory-projector` | Folds what a collector saw into what an asset currently has, under a group and a quarantine of its own. An item the newest full scan stops naming is no longer current, and nothing is deleted to say so. |
+| `advisory-importer` | Follows the vulnerability feeds a deployment names, translates each changed record into an advisory carrying its provenance, and publishes it with the freshness of the feed. The one process that reaches the internet; it holds no store and names no asset. |
+| `advisory-writer` | Keeps every version of every advisory and every attempt to follow a feed, under a group and a quarantine of its own. |
 | `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry, and the authority that signs an agent's certificate. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates on a second one. |
 | `query-api` | The read plane, and the only reader of the analytical store. |
 | `backbone-migrator`, `store-migrator`, `control-migrator` | Apply the topic topology, the analytical schema and the relational schema, then exit. Nothing migrates on the way to serving traffic. |
@@ -349,6 +389,16 @@ it become the current state of that asset:
 go run ./tools/devprobe -inventory
 ```
 
+The development stack follows Debian's advisories; another distribution is one
+variable away, `SEAGULL_ADVISORY_FEEDS=Alpine make up`. How fresh the platform's
+copy of each feed is, read from the store:
+
+```bash
+docker compose -f deploy/compose.yaml exec clickhouse clickhouse-client --user seagull -d seagull -q \
+  "SELECT feed, argMax(outcome, checked_at), argMax(synced_at, checked_at), argMax(held, checked_at)
+   FROM vulnerability_feed_syncs GROUP BY feed"
+```
+
 Register an agent, have the platform sign the certificate it will present, watch
 it renew that certificate itself, and revoke it:
 
@@ -387,6 +437,8 @@ container without going through the environment. The settings that matter most:
 | `SEAGULL_CONTROL_TELEMETRY_STORE_ADDRESS` | Where the control plane reads when an agent was last heard from. It writes nothing there. |
 | `SEAGULL_CONTROL_API_SESSION_KEY` | Key sessions are signed with; drawn at random when unset. |
 | `SEAGULL_EVENT_STORE_ADDRESS`, `SEAGULL_EVENT_STORE_PASSWORD` | The telemetry store and its credentials. |
+| `SEAGULL_ADVISORY_FEEDS` | The distributions whose advisories the platform reads — any of `Debian`, `Ubuntu`, `Alpine`, `Rocky Linux`, `AlmaLinux`. Required, because the first read of a feed is its whole index; the development stack names `Debian`. |
+| `SEAGULL_ADVISORY_OSV_EXPORT`, `SEAGULL_ADVISORY_OSV_CA` | Where the advisories are read from — OSV's public export, or a mirror laid out the same way — and the authority a mirror is signed by. https only; there is no plaintext mode. |
 
 [`docs/configuration.md`](docs/configuration.md) lists every setting each
 process reads, along with the acknowledgement contract, the topic topology and
@@ -423,8 +475,9 @@ drops a batch it had already answered for.
 | [Configuration reference](docs/configuration.md) | Every setting, the acknowledgement contract, the topology, the store. |
 | [Seagull-contracts](https://github.com/dynasmon/Seagull-contracts) | The messages agents, the platform and the portal exchange. |
 
-Vulnerability matching and response actions are not implemented, no collector
-sends inventory yet — `tools/devprobe -inventory` is the only producer — and
+Vulnerability matching and response actions are not implemented — advisories are
+read and kept, and nothing compares them with an asset yet — no collector sends
+inventory yet — `tools/devprobe -inventory` is the only producer — and
 Sigma import covers one class of event. Detection is stateless unless a rule asks
 otherwise: a rule that counts or orders its events reads a bounded window of the
 backbone in event time, which is what keeps both replayable.

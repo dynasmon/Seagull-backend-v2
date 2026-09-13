@@ -2,6 +2,9 @@
 
 > Amended by [ADR 27](0027-inventory-is-a-record-kind-of-its-own.md): inventory
 > has a producer, so it is decided rather than left as a question.
+> Amended by [ADR 28](0028-vulnerability-intelligence-is-read-from-its-source.md):
+> vulnerability intelligence is kept per version in ClickHouse, and its source of
+> truth is the feed it was read from rather than anything the platform produced.
 
 ## Context
 

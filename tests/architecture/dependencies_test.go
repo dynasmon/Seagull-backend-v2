@@ -29,6 +29,8 @@ const (
 // rules below instead of by nothing. The longest matching prefix wins.
 var layers = map[string]layer{
 	"cmd":                     executable,
+	"internal/advisoryfeed":   capability,
+	"internal/advisorystore":  capability,
 	"internal/agent":          domain,
 	"internal/agentidentity":  domain,
 	"internal/alert":          domain,
@@ -50,6 +52,7 @@ var layers = map[string]layer{
 	"internal/ingest":         capability,
 	"internal/inventory":      domain,
 	"internal/inventorystore": capability,
+	"internal/osv":            adapter,
 	"internal/pki":            domain,
 	"internal/platform":       platform,
 	"internal/policyfile":     adapter,
@@ -58,6 +61,7 @@ var layers = map[string]layer{
 	"internal/rulefile":       adapter,
 	"internal/ruleset":        capability,
 	"internal/sigma":          adapter,
+	"internal/vulnerability":  domain,
 	"tests":                   suite,
 	"tools":                   tool,
 }
@@ -120,6 +124,40 @@ var outside = map[layer]restriction{
 // A rule that belongs to one package rather than to its layer, because ingest
 // is a transport and a rule about capabilities would refuse it too.
 var within = map[string]restriction{
+	"cmd/advisory-importer": {
+		prefixes: []string{
+			modulePath + "/internal/clickhouse",
+			modulePath + "/internal/postgres",
+			modulePath + "/internal/inventory",
+			modulePath + "/internal/inventorystore",
+		},
+		because: "the one process that reads the internet holds no store and names no asset: what a feed says reaches the platform as a validated advisory on the backbone and by no other way",
+	},
+	"internal/advisoryfeed": {
+		prefixes: []string{
+			"net/http",
+			modulePath + "/internal/platform/httpx",
+			modulePath + "/internal/platform/tlsx",
+			modulePath + "/internal/inventory",
+		},
+		because: "following a feed has no transport of its own and no reach into what the platform knows about an asset, so a feed that fails or lies cannot touch the inventory",
+	},
+	"internal/advisorystore": {
+		prefixes: []string{
+			"net/http",
+			modulePath + "/internal/platform/httpx",
+			modulePath + "/internal/platform/tlsx",
+		},
+		because: "what a stored advisory is has no transport of its own: this half is reached from the backbone",
+	},
+	"internal/osv": {
+		prefixes: []string{
+			"database/sql",
+			modulePath + "/internal/inventory",
+			modulePath + "/internal/inventorystore",
+		},
+		because: "an OSV record describes software and never an asset, and the only thing this adapter reaches is the export it reads",
+	},
 	"internal/analysis": {
 		prefixes: []string{
 			"net/http",

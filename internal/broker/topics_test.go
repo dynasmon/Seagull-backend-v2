@@ -377,3 +377,33 @@ func TestInventoryIsAStreamOfItsOwnAndTheMigratorCreatesIt(t *testing.T) {
 		}
 	}
 }
+
+func TestAdvisoriesAreALogOfTheirOwnThatKeepsTheNewestOfEach(t *testing.T) {
+	topology := declared(t, map[string]string{
+		"SEAGULL_BACKBONE_ADVISORIES_PARTITIONS":            "12",
+		"SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_TOPIC":      "tenant.advisories.refused",
+		"SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_PARTITIONS": "2",
+		"SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_RETENTION":  "96h",
+	})
+
+	if topology.Advisories.Name != "security.advisories" {
+		t.Errorf("the advisory topic is %q", topology.Advisories.Name)
+	}
+	if topology.Advisories.Cleanup != cleanupCompact || topology.Advisories.Retention != 0 || topology.Advisories.Partitions != 1 {
+		t.Errorf("the advisory topic is cleaned up by %q with a retention of %s over %d partitions: it has to keep every advisory "+
+			"for a reader that starts long after it was published, and read an attempt's advisories before the record accounting for them",
+			topology.Advisories.Cleanup, topology.Advisories.Retention, topology.Advisories.Partitions)
+	}
+	if quarantine := topology.AdvisoriesQuarantine; quarantine.Name != "tenant.advisories.refused" ||
+		quarantine.Cleanup != cleanupDelete || quarantine.Partitions != 2 || quarantine.Retention != 96*time.Hour {
+		t.Errorf("the advisory quarantine is %+v", quarantine)
+	}
+	for _, topic := range []Topic{topology.Advisories, topology.AdvisoriesQuarantine} {
+		if err := topic.Validate(); err != nil {
+			t.Errorf("the shipped %s is refused: %v", topic.Name, err)
+		}
+		if !slices.ContainsFunc(topology.Topics(), func(applied Topic) bool { return applied.Name == topic.Name }) {
+			t.Errorf("%s is not in the topology the migrator applies, so the processes that need it would refuse to serve", topic.Name)
+		}
+	}
+}

@@ -45,6 +45,8 @@ type Topology struct {
 	DetectionsQuarantine Topic
 	Inventory            Topic
 	InventoryQuarantine  Topic
+	Advisories           Topic
+	AdvisoriesQuarantine Topic
 	Rulesets             Topic
 	Agents               Topic
 }
@@ -114,6 +116,23 @@ func LoadTopology(parser *config.Parser) Topology {
 			Compression: compressionZstd,
 			MinInSync:   minInSync,
 		},
+		Advisories: Topic{
+			Name:        parser.String("SEAGULL_BACKBONE_ADVISORIES_TOPIC", "security.advisories"),
+			Partitions:  1,
+			Replicas:    replicas,
+			Cleanup:     cleanupCompact,
+			Compression: compressionZstd,
+			MinInSync:   minInSync,
+		},
+		AdvisoriesQuarantine: Topic{
+			Name:        parser.String("SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_TOPIC", "security.advisories.quarantine"),
+			Partitions:  int32(parser.Int("SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_PARTITIONS", 1, 1, 1_000)),
+			Replicas:    replicas,
+			Retention:   parser.Duration("SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:     cleanupDelete,
+			Compression: compressionZstd,
+			MinInSync:   minInSync,
+		},
 		Rulesets: Topic{
 			Name:        parser.String("SEAGULL_BACKBONE_RULESETS_TOPIC", "security.rulesets"),
 			Partitions:  1,
@@ -138,6 +157,7 @@ func (t Topology) Topics() []Topic {
 		t.Events, t.Quarantine,
 		t.Detections, t.DetectionsQuarantine,
 		t.Inventory, t.InventoryQuarantine,
+		t.Advisories, t.AdvisoriesQuarantine,
 		t.Rulesets, t.Agents,
 	}
 }

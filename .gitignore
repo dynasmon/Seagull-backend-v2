@@ -10,3 +10,7 @@
 
 /go.work
 /go.work.sum
+
+/.claude/
+/.agents/
+/skills-lock.json

@@ -123,6 +123,15 @@ var outside = map[layer]restriction{
 // A rule that belongs to one package rather than to its layer, because ingest
 // is a transport and a rule about capabilities would refuse it too.
 var within = map[string]restriction{
+	"cmd/advisory-importer": {
+		prefixes: []string{
+			modulePath + "/internal/clickhouse",
+			modulePath + "/internal/postgres",
+			modulePath + "/internal/inventory",
+			modulePath + "/internal/inventorystore",
+		},
+		because: "the one process that reads the internet holds no store and names no asset: what a feed says reaches the platform as a validated advisory on the backbone and by no other way",
+	},
 	"internal/advisoryfeed": {
 		prefixes: []string{
 			"net/http",

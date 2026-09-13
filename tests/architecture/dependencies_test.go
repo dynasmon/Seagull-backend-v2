@@ -50,6 +50,7 @@ var layers = map[string]layer{
 	"internal/ingest":         capability,
 	"internal/inventory":      domain,
 	"internal/inventorystore": capability,
+	"internal/osv":            adapter,
 	"internal/pki":            domain,
 	"internal/platform":       platform,
 	"internal/policyfile":     adapter,
@@ -121,6 +122,14 @@ var outside = map[layer]restriction{
 // A rule that belongs to one package rather than to its layer, because ingest
 // is a transport and a rule about capabilities would refuse it too.
 var within = map[string]restriction{
+	"internal/osv": {
+		prefixes: []string{
+			"database/sql",
+			modulePath + "/internal/inventory",
+			modulePath + "/internal/inventorystore",
+		},
+		because: "an OSV record describes software and never an asset, and the only thing this adapter reaches is the export it reads",
+	},
 	"internal/analysis": {
 		prefixes: []string{
 			"net/http",

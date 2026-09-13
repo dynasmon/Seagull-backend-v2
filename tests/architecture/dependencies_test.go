@@ -58,6 +58,7 @@ var layers = map[string]layer{
 	"internal/rulefile":       adapter,
 	"internal/ruleset":        capability,
 	"internal/sigma":          adapter,
+	"internal/vulnerability":  domain,
 	"tests":                   suite,
 	"tools":                   tool,
 }

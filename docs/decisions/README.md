@@ -31,3 +31,4 @@ rediscovered by reading the code.
 - [25. The platform signs the identity it binds, and an agent renews with the certificate it is replacing](0025-the-platform-signs-the-identity-it-binds.md)
 - [26. An agent sends into the tenant it was registered in, and an agent the registry never named is not admitted](0026-an-agent-sends-into-the-tenant-it-was-registered-in.md)
 - [27. Inventory is a record kind of its own, and what an asset currently has is what the newest full scan named](0027-inventory-is-a-record-kind-of-its-own.md)
+- [28. Vulnerability intelligence is a record kind of its own, read from its source and never inferred from what a feed left out](0028-vulnerability-intelligence-is-read-from-its-source.md)

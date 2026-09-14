@@ -90,6 +90,10 @@ was.
 | `SEAGULL_BACKBONE_INVENTORY_PARTITIONS` | `6` | how far per-asset ordering spreads |
 | `SEAGULL_BACKBONE_INVENTORY_RETENTION` | `720h` | how far back the projection can be rebuilt |
 | `SEAGULL_BACKBONE_INVENTORY_QUARANTINE_TOPIC` | `security.inventory.quarantine` | records the projector refused |
+| `SEAGULL_BACKBONE_ADVISORIES_TOPIC` | `security.advisories` | every advisory the platform holds, and the freshness of each feed |
+| `SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_TOPIC` | `security.advisories.quarantine` | records the advisory writer refused |
+| `SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_PARTITIONS` | `1` | |
+| `SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_RETENTION` | `720h` | |
 | `SEAGULL_BACKBONE_RULESETS_TOPIC` | `security.rulesets` | published rulesets and the pointer at the one to run |
 | `SEAGULL_BACKBONE_QUARANTINE_PARTITIONS` | `3` | |
 | `SEAGULL_BACKBONE_QUARANTINE_RETENTION` | `720h` | |
@@ -285,6 +289,59 @@ record is folded whole or refused whole — one item the store cannot hold takes
 its scan with it, because a scan whose items never landed would retire
 everything the record was about to confirm.
 
+### advisory-importer
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEAGULL_ADVISORY_FEEDS` | required | the distributions whose advisories are read: any of `Debian`, `Ubuntu`, `Alpine`, `Rocky Linux`, `AlmaLinux` |
+| `SEAGULL_ADVISORY_OSV_EXPORT` | `https://osv-vulnerabilities.storage.googleapis.com` | OSV's export, or a mirror laid out the same way; https only |
+| `SEAGULL_ADVISORY_OSV_CA` | unset | the authority a mirror is signed by; the system pool when unset |
+| `SEAGULL_ADVISORY_SYNC_INTERVAL` | `1h` | how often a feed is asked what changed |
+| `SEAGULL_ADVISORY_SYNC_RETRY_DELAY` | `1m` | first delay before a feed that did not complete is asked again, backing off to the interval |
+| `SEAGULL_ADVISORY_FETCH_ATTEMPTS` | `3` | times one request to an unreachable or busy origin is made before the attempt stops |
+| `SEAGULL_ADVISORY_FETCH_BACKOFF` | `1s` | first delay between those requests |
+| `SEAGULL_ADVISORY_FETCH_TIMEOUT` | `30s` | budget for one request |
+| `SEAGULL_ADVISORY_FETCH_CONCURRENCY` | `8` | records fetched at once, across every feed |
+| `SEAGULL_ADVISORY_PUBLISH_BATCH` | `64` | advisories published to the backbone at once |
+| `SEAGULL_ADVISORY_MAX_INDEX_BYTES` | `64MiB` | ceiling on one feed's index |
+| `SEAGULL_ADVISORY_MAX_RECORD_BYTES` | `4MiB` | ceiling on one record as the feed serves it |
+| `SEAGULL_ADVISORY_REPLAY_RECORDS` | `1000` | records read at once when the log is read back at startup |
+| `SEAGULL_ADVISORY_START_TIMEOUT` | `30s` | budget for verifying the topic before anything else |
+
+The one process that reaches the internet, and it holds no store: what a feed
+says reaches the platform as a validated advisory on `security.advisories` and by
+no other way. It reads the whole topic back before it asks a feed anything, so it
+knows what it holds without a disk, then asks each feed's index what changed with
+`If-None-Match` and fetches only the records listed as newer than what it holds.
+An origin that cannot be reached is asked again a few times and then the attempt
+stops, publishing what it read and saying what it still owes; the platform's copy
+of that feed stays exactly as fresh as it was. A record that is not an advisory is
+refused alone, counted, and asked for again only once the feed changes it.
+
+Every feed is followed on its own. The first read of one is its whole index —
+Alpine's 4,657 records take a few minutes and Debian's, fourteen times as many,
+close to forty at the default concurrency — which is why no feed is followed
+unless a deployment names it.
+
+### advisory-writer
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEAGULL_ADVISORY_WRITER_CONSUMER_GROUP` | `advisory-writer` | the consumer group that owns the offsets |
+| `SEAGULL_ADVISORY_WRITER_BATCH_RECORDS` | `512` | records per poll, and per store batch |
+| `SEAGULL_ADVISORY_WRITER_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
+| `SEAGULL_ADVISORY_WRITER_RETRY_DELAY` | `1s` | first delay before a batch is retried |
+| `SEAGULL_ADVISORY_WRITER_RETRY_DELAY_MAX` | `30s` | ceiling the delay backs off to |
+| `SEAGULL_ADVISORY_STORE_ADDRESS` | required | the store's native protocol address, `clickhouse:9000` |
+| `SEAGULL_ADVISORY_STORE_DATABASE` | `seagull` | the database holding `vulnerability_advisories` |
+| `SEAGULL_ADVISORY_STORE_USER` | `seagull` | |
+| `SEAGULL_ADVISORY_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
+| `SEAGULL_ADVISORY_STORE_TIMEOUT` | `30s` | budget for one write attempt, and to dial |
+
+An advisory is stored whole or refused whole: a version whose packages never
+landed would read as affecting nothing, which is the one wrong answer a matcher
+cannot tell from a right one.
+
 ### alert-writer
 
 | Variable | Default | Meaning |
@@ -468,7 +525,7 @@ before its body is read.
 
 ## The backbone topology
 
-Eight topics, declared once in `internal/broker` and applied by
+Ten topics, declared once in `internal/broker` and applied by
 `backbone-migrator`:
 
 | Topic | Partitions | Retention | Why |
@@ -481,6 +538,8 @@ Eight topics, declared once in `internal/broker` and applied by
 | `security.inventory.quarantine` | 3 | 30 days | records the inventory projector could not store, for the same reason the other two quarantines are apart |
 | `security.rulesets` | 1 | compacted, kept | every published ruleset under its own content id, plus one `active` key naming the one to run; one partition because a version and the record activating it are only meaningful in the order they were written |
 | `security.agents` | 1 | compacted, kept | the last thing the control plane decided about each agent, keyed by the agent; one partition because the last record about an agent has to be the last one every gateway sees |
+| `security.advisories` | 1 | compacted, kept | the newest version of every advisory the platform holds, keyed by its source and id, and the newest attempt to follow each feed, keyed by the feed; one partition so the advisories an attempt published are read before the record accounting for them |
+| `security.advisories.quarantine` | 1 | 30 days | records the advisory writer could not store |
 
 **Partitions and replication are refused, never converged.** Records are keyed
 by `agent_id`, so growing the partition count moves an agent to a different
@@ -608,3 +667,66 @@ for a year.
 two. A record is folded whole or refused whole: one item the store cannot hold
 takes its scan with it, because a scan whose items never landed would retire
 everything the record was about to confirm.
+
+## The vulnerability intelligence store
+
+Three tables hold what the platform has read about vulnerabilities, projected
+from the contract by `internal/advisorystore` and written by `advisory-writer`.
+As for telemetry, a field exists there because the contract carries it, and a
+test walks the descriptor so the contract cannot grow a field the store quietly
+stops keeping.
+
+- **`vulnerability_advisories`** — one row per version of an advisory, keyed by
+  `(source, advisory_id, modified, normalization)`: the modification time the
+  source gave it and the rules the platform read it with. It carries the names,
+  the prose, the severities as their authors wrote them and the whole
+  provenance.
+- **`vulnerability_affected`** — one row per package a version affects, ordered
+  by `(ecosystem, package, …)`, which is how a matcher asks. Ranges and their
+  events are parallel arrays; `event_ranges` says which range each event belongs
+  to, in the order the source wrote them.
+- **`vulnerability_feed_syncs`** — one row per attempt to follow a feed.
+
+**What affects a package.** The entries of the newest version of each advisory,
+read with the newest rules that version was stored under, leaving out one whose
+newest version withdrew it. The newest version is found among the advisories, so
+a version that stopped naming the package takes it out of the answer:
+
+```sql
+SELECT entry.advisory_id, entry.event_kinds, entry.event_versions
+FROM vulnerability_affected AS entry FINAL
+INNER JOIN (
+    SELECT source, advisory_id, max((modified, normalization)) AS newest
+    FROM vulnerability_advisories
+    WHERE (source, advisory_id) IN (
+        SELECT source, advisory_id FROM vulnerability_affected
+        WHERE ecosystem = 'Debian:12' AND package = 'openssl')
+    GROUP BY source, advisory_id
+) AS version
+ON entry.source = version.source AND entry.advisory_id = version.advisory_id
+WHERE entry.ecosystem = 'Debian:12' AND entry.package = 'openssl'
+  AND (entry.modified, entry.normalization) = version.newest
+  AND entry.withdrawn = toDateTime64(0, 3, 'UTC');
+```
+
+**How fresh a feed is.** Its newest attempt says when it was asked and what came
+of it, `synced_at` when the platform last held everything it listed, and
+`newest_listed` the newest change the feed itself lists. An attempt that failed
+carries `synced_at` forward, so the answer never looks fresher than it is:
+
+```sql
+SELECT argMax(outcome, checked_at), argMax(synced_at, checked_at), argMax(newest_listed, checked_at)
+FROM vulnerability_feed_syncs
+WHERE source = 'osv' AND feed = 'Debian';
+```
+
+**Nothing is deleted.** A version of an advisory is never removed, and a
+withdrawal is a newer version carrying `withdrawn`; the engine only collapses a
+version written twice, which is what a replay does. Neither advisory table has a
+`PARTITION BY` or a `TTL`: intelligence is kept for as long as the platform runs,
+because a finding made from a version of it has to stay explicable after the
+source has moved on. The sync attempts expire after a year.
+
+**Quarantine.** `security.advisories.quarantine`, on the same terms as the other
+three. The payload is never logged: it is what a feed on the internet wrote, and
+the position is enough to fetch it.

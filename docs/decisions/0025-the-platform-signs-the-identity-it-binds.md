@@ -84,6 +84,11 @@ which is ADR 2 applied to a control-plane surface, and the registry is consulted
 for admissibility so an agent it stopped honouring is refused a new certificate
 by the same `State.Admits()` that refuses its telemetry.
 
+The registry also compares the fingerprint of that verified leaf with the
+identity currently bound to the agent. Once a renewal replaces a certificate,
+the superseded certificate cannot renew again, including while two certificate
+authorities coexist during a rotation.
+
 A second listener is not a second process. It is one address, one trust domain
 and one route, in the process §35 already names, which is the difference between
 a security boundary and a microservice.

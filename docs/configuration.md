@@ -99,11 +99,11 @@ was.
 | `SEAGULL_BACKBONE_QUARANTINE_RETENTION` | `720h` | |
 | `SEAGULL_BACKBONE_REPLICAS` | `1` | replication factor of every topic |
 | `SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS` | `replicas/2 + 1` | replicas that must be in sync for a write to be acknowledged |
-| `SEAGULL_BACKBONE_TLS` | `false` | encrypt the connection to the brokers |
+| `SEAGULL_BACKBONE_TLS` | `true` | encrypt the connection to the brokers; the development Compose file explicitly sets `false` |
 | `SEAGULL_BACKBONE_TLS_CA` | unset | authority the brokers must chain to; the system pool when unset |
 | `SEAGULL_BACKBONE_TLS_CERT`, `SEAGULL_BACKBONE_TLS_KEY` | unset | client certificate for mutual TLS to the brokers |
 | `SEAGULL_BACKBONE_TLS_SERVER_NAME` | unset | name the broker certificate must carry |
-| `SEAGULL_BACKBONE_SASL_MECHANISM` | `none` | `scram-sha-256` or `scram-sha-512` |
+| `SEAGULL_BACKBONE_SASL_MECHANISM` | required | `none` for an explicitly unauthenticated development backbone, or `scram-sha-256` / `scram-sha-512` |
 | `SEAGULL_BACKBONE_SASL_USER`, `SEAGULL_BACKBONE_SASL_PASSWORD` | unset | credentials for that mechanism |
 
 Every process reads the same declaration: `backbone-migrator` applies it, and
@@ -242,10 +242,13 @@ that spread, so an analyst can see the order was not established by the data. Se
 | `SEAGULL_EVENT_STORE_USER` | `seagull` | |
 | `SEAGULL_EVENT_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
 | `SEAGULL_EVENT_STORE_TIMEOUT` | `30s` | budget for one write attempt, and to dial |
+| `SEAGULL_EVENT_STORE_TLS` | `true` | verify and encrypt the native connection; development Compose explicitly sets `false` |
+| `SEAGULL_EVENT_STORE_TLS_CA` | unset | authority the store must chain to; the system pool when unset |
+| `SEAGULL_EVENT_STORE_TLS_SERVER_NAME` | unset | name the store certificate must carry; the dialled host when unset |
 
-The connection to the store carries no TLS, deliberately: the gateway already
-reaches Redpanda in the clear on the same internal network, and securing one leg
-of the data plane and not the other would describe a boundary that is not there.
+Every ClickHouse connection uses verified TLS by default. The local Compose
+topology disables it explicitly because its ClickHouse listener is confined to
+the development network and has no certificate.
 
 ### detection-writer
 
@@ -261,6 +264,9 @@ of the data plane and not the other would describe a boundary that is not there.
 | `SEAGULL_DETECTION_STORE_USER` | `seagull` | |
 | `SEAGULL_DETECTION_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
 | `SEAGULL_DETECTION_STORE_TIMEOUT` | `30s` | budget for one write attempt, and to dial |
+| `SEAGULL_DETECTION_STORE_TLS` | `true` | verify and encrypt the native connection; development Compose explicitly sets `false` |
+| `SEAGULL_DETECTION_STORE_TLS_CA` | unset | authority the store must chain to; the system pool when unset |
+| `SEAGULL_DETECTION_STORE_TLS_SERVER_NAME` | unset | name the store certificate must carry; the dialled host when unset |
 
 A batch is smaller than the event writer's because detections are rarer than the
 telemetry they are made from, and waiting to fill five thousand of them would
@@ -282,6 +288,9 @@ processes choosing the same adapter is not the same as sharing one.
 | `SEAGULL_INVENTORY_STORE_USER` | `seagull` | |
 | `SEAGULL_INVENTORY_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
 | `SEAGULL_INVENTORY_STORE_TIMEOUT` | `30s` | budget for one write attempt, and to dial |
+| `SEAGULL_INVENTORY_STORE_TLS` | `true` | verify and encrypt the native connection; development Compose explicitly sets `false` |
+| `SEAGULL_INVENTORY_STORE_TLS_CA` | unset | authority the store must chain to; the system pool when unset |
+| `SEAGULL_INVENTORY_STORE_TLS_SERVER_NAME` | unset | name the store certificate must carry; the dialled host when unset |
 
 A batch is counted in records and not in items, and it is small because each
 record is a whole scan: sixty-four of them can be half a million packages. A
@@ -337,6 +346,9 @@ unless a deployment names it.
 | `SEAGULL_ADVISORY_STORE_USER` | `seagull` | |
 | `SEAGULL_ADVISORY_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
 | `SEAGULL_ADVISORY_STORE_TIMEOUT` | `30s` | budget for one write attempt, and to dial |
+| `SEAGULL_ADVISORY_STORE_TLS` | `true` | verify and encrypt the native connection; development Compose explicitly sets `false` |
+| `SEAGULL_ADVISORY_STORE_TLS_CA` | unset | authority the store must chain to; the system pool when unset |
+| `SEAGULL_ADVISORY_STORE_TLS_SERVER_NAME` | unset | name the store certificate must carry; the dialled host when unset |
 
 An advisory is stored whole or refused whole: a version whose packages never
 landed would read as affecting nothing, which is the one wrong answer a matcher
@@ -408,7 +420,7 @@ is labelled by rule and by the reason written down. See
 | `SEAGULL_ALERT_STORE_DATABASE` | `seagull` | the database holding alerts, incidents and agents with their trails |
 | `SEAGULL_ALERT_STORE_USER` | `seagull` | |
 | `SEAGULL_ALERT_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
-| `SEAGULL_ALERT_STORE_SSLMODE` | `prefer` | `disable` only on a network you already trust |
+| `SEAGULL_ALERT_STORE_SSLMODE` | `verify-full` | certificate and hostname verification; development Compose explicitly sets `disable` |
 | `SEAGULL_ALERT_STORE_MAX_CONNECTIONS` | `8` | connections one process will hold |
 | `SEAGULL_ALERT_STORE_TIMEOUT` | `30s` | budget for one statement |
 | `SEAGULL_ALERT_STORE_CONNECT_TIMEOUT` | `10s` | budget to dial |
@@ -445,6 +457,9 @@ detection away from somebody's triage.
 | `SEAGULL_CONTROL_TELEMETRY_STORE_DATABASE` | `seagull` | |
 | `SEAGULL_CONTROL_TELEMETRY_STORE_USER` | `seagull` | |
 | `SEAGULL_CONTROL_TELEMETRY_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
+| `SEAGULL_CONTROL_TELEMETRY_STORE_TLS` | `true` | verify and encrypt the native connection; development Compose explicitly sets `false` |
+| `SEAGULL_CONTROL_TELEMETRY_STORE_TLS_CA` | unset | authority the store must chain to; the system pool when unset |
+| `SEAGULL_CONTROL_TELEMETRY_STORE_TLS_SERVER_NAME` | unset | name the store certificate must carry; the dialled host when unset |
 
 The control plane authenticates a caller by certificate, so it has no plaintext
 mode and no mode without a caller authority: without one there is nobody to be
@@ -477,6 +492,9 @@ one question — when an agent was last heard from — and writes nothing.
 | `SEAGULL_QUERY_API_CURSOR_KEY` | generated | signs a page token; set it when more than one replica serves one address |
 | `SEAGULL_QUERY_API_MAX_BODY` | `256KiB` | ceiling on a query body |
 | `SEAGULL_QUERY_STORE_ADDRESS` | required | ClickHouse address, read only |
+| `SEAGULL_QUERY_STORE_TLS` | `true` | verify and encrypt the native connection; development Compose explicitly sets `false` |
+| `SEAGULL_QUERY_STORE_TLS_CA` | unset | authority the store must chain to; the system pool when unset |
+| `SEAGULL_QUERY_STORE_TLS_SERVER_NAME` | unset | name the store certificate must carry; the dialled host when unset |
 
 There is no plaintext mode and no mode without a caller authority: the scope a
 query is answered within comes from the caller's certificate, so without one

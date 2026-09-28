@@ -42,7 +42,7 @@ func (m Match) Detected(ruleset string, record *eventv1.Event, at time.Time) *de
 	origin, _ := proto.Clone(record.GetOrigin()).(*eventv1.Origin)
 
 	return &detectionv1.Detection{
-		DetectionId:    identify(m.Rule.ID, m.Rule.Revision, from),
+		DetectionId:    identify(m.Rule.ID, m.Rule.Revision, record.GetOrigin().GetTenantId(), record.GetOrigin().GetAgentId(), from),
 		SchemaVersion:  SchemaVersion,
 		Rule:           decided(m.Rule),
 		RulesetId:      ruleset,
@@ -111,11 +111,11 @@ func aggregated(counting Count, found Counted) *detectionv1.Aggregation {
 	return aggregation
 }
 
-// A detection is named by what decided it: the rule, the revision it was
-// decided at, and the events it was decided from. Nothing about when, and
-// nothing about the process — so a replay rewrites the detection it already
-// wrote instead of adding a second copy of it, which is what lets a stage be
-// retried until it is durable.
+// A detection is named by what decided it: the tenant, the agent, the rule, the
+// revision it was decided at, and the events it was decided from. Nothing about
+// when or the process — so a replay rewrites the detection it already wrote
+// instead of adding a second copy of it, which is what lets a stage be retried
+// until it is durable.
 //
 // The ruleset is not in here on purpose. It names the whole set, so an
 // unrelated rule arriving would rename every detection the others made, and a
@@ -127,12 +127,14 @@ func aggregated(counting Count, found Counted) *detectionv1.Aggregation {
 // Sorted and counted, as a ruleset names itself, so that the same events in a
 // different order are the same detection and no two sets can write the same
 // bytes.
-func identify(rule ID, revision int, events []string) string {
+func identify(rule ID, revision int, tenant, agent string, events []string) string {
 	digest := sha256.New()
 	write := func(value string) { fmt.Fprintf(digest, "%d:%s", len(value), value) }
 
 	write(string(rule))
 	write(strconv.Itoa(revision))
+	write(tenant)
+	write(agent)
 	write(strconv.Itoa(len(events)))
 	for _, event := range slices.Sorted(slices.Values(events)) {
 		write(event)

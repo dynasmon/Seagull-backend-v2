@@ -188,6 +188,32 @@ func TestTheSameEventDecidedTwiceNamesTheSameDetection(t *testing.T) {
 	}
 }
 
+func TestTwoTenantsCannotNameOneDetection(t *testing.T) {
+	one := observed(t)
+	two := proto.Clone(one).(*eventv1.Event)
+	two.Origin.TenantId = "another-tenant"
+
+	first := detected(t, attributed(), one)
+	second := detected(t, attributed(), two)
+
+	if first.GetDetectionId() == second.GetDetectionId() {
+		t.Fatalf("two tenants named one detection %s", first.GetDetectionId())
+	}
+}
+
+func TestTwoAgentsCannotNameOneDetection(t *testing.T) {
+	one := observed(t)
+	two := proto.Clone(one).(*eventv1.Event)
+	two.Origin.AgentId = "another-agent"
+
+	first := detected(t, attributed(), one)
+	second := detected(t, attributed(), two)
+
+	if first.GetDetectionId() == second.GetDetectionId() {
+		t.Fatalf("two agents named one detection %s", first.GetDetectionId())
+	}
+}
+
 // What the name is over, and what it is deliberately not over. A ruleset that
 // gained an unrelated rule must not rename what the others found, and the hour
 // a replay happens to run at must not either.

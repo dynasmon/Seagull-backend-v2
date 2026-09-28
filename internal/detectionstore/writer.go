@@ -9,11 +9,13 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 )
 
 const (
 	ReasonUndecodable = "undecodable"
+	ReasonInvalid     = "invalid"
 	ReasonUnstorable  = "unstorable"
 )
 
@@ -165,9 +167,18 @@ func (w *Writer) classify(records []Record) ([]Row, []Refused) {
 	var refused []Refused
 
 	for _, record := range records {
+		if len(record.Value) > detection.MaxDetectionBytes {
+			refused = append(refused, refuse(record, ReasonInvalid,
+				fmt.Sprintf("the detection is %d bytes and the ceiling is %d", len(record.Value), detection.MaxDetectionBytes)))
+			continue
+		}
 		var decoded detectionv1.Detection
 		if err := proto.Unmarshal(record.Value, &decoded); err != nil {
 			refused = append(refused, refuse(record, ReasonUndecodable, "the record is not a seagull.detection.v1.Detection"))
+			continue
+		}
+		if err := detection.ValidateContract(&decoded); err != nil {
+			refused = append(refused, refuse(record, ReasonInvalid, err.Error()))
 			continue
 		}
 		row := Project(&decoded)

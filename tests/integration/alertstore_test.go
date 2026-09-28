@@ -143,18 +143,22 @@ func mustConsider(t *testing.T, raised *alertv1.Alert) alert.Candidate {
 
 func detectedIn(tenant, id string, severity detectionv1.Severity, at time.Time) *detectionv1.Detection {
 	return &detectionv1.Detection{
-		DetectionId: id,
+		DetectionId:   id,
+		SchemaVersion: 1,
 		Rule: &detectionv1.Rule{
 			Id:       "ssh.failed_password_from_outside",
 			Revision: 3,
 			Name:     "Failed SSH password from outside the estate",
 			Source:   &detectionv1.Source{Catalogue: "sigma", Identifier: "5013fd8a"},
 		},
-		Severity:   severity,
-		Technique:  &detectionv1.Technique{Tactic: "credential_access", Id: "T1110.001", Name: "Password Guessing"},
-		EventClass: eventv1.EventClass_EVENT_CLASS_AUTHENTICATION,
-		Origin:     &eventv1.Origin{TenantId: tenant, AgentId: "integration-agent"},
-		EventTime:  timestamppb.New(at),
+		RulesetId:      "89ab5f2c1d",
+		Severity:       severity,
+		Technique:      &detectionv1.Technique{Tactic: "credential_access", Id: "T1110.001", Name: "Password Guessing"},
+		EventClass:     eventv1.EventClass_EVENT_CLASS_AUTHENTICATION,
+		Origin:         &eventv1.Origin{TenantId: tenant, AgentId: "integration-agent"},
+		SourceEventIds: []string{id + "-event"},
+		EventTime:      timestamppb.New(at),
+		DetectedTime:   timestamppb.New(at.Add(time.Minute)),
 	}
 }
 
@@ -458,14 +462,7 @@ func TestTheWriterTurnsRealDetectionsIntoWorkAndReplayingThemAddsNothing(t *test
 		"medium":   detectionv1.Severity_SEVERITY_MEDIUM,
 		"critical": detectionv1.Severity_SEVERITY_CRITICAL,
 	} {
-		encoded, err := proto.Marshal(&detectionv1.Detection{
-			DetectionId: tenant + "-" + name,
-			Rule:        &detectionv1.Rule{Id: "ssh.failed_password_from_outside", Revision: 3, Name: "Failed SSH password"},
-			Severity:    severity,
-			EventClass:  eventv1.EventClass_EVENT_CLASS_AUTHENTICATION,
-			Origin:      &eventv1.Origin{TenantId: tenant, AgentId: "integration-agent"},
-			EventTime:   timestamppb.New(at),
-		})
+		encoded, err := proto.Marshal(detectedIn(tenant, tenant+"-"+name, severity, at))
 		if err != nil {
 			t.Fatalf("encode a detection: %v", err)
 		}

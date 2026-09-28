@@ -114,13 +114,18 @@ func (s *source) Consume(ctx context.Context, deliver alertstore.Deliver) error 
 }
 
 func detection(id string, severity detectionv1.Severity) *detectionv1.Detection {
+	eventTime := time.Date(2026, 8, 30, 11, 0, 0, 0, time.UTC)
 	return &detectionv1.Detection{
-		DetectionId: id,
-		Rule:        &detectionv1.Rule{Id: "ssh_password_failure", Revision: 1, Name: "SSH password failure"},
-		Severity:    severity,
-		EventClass:  eventv1.EventClass_EVENT_CLASS_AUTHENTICATION,
-		Origin:      &eventv1.Origin{TenantId: "acme", AgentId: "dev-agent-01"},
-		EventTime:   timestamppb.New(time.Date(2026, 8, 30, 11, 0, 0, 0, time.UTC)),
+		DetectionId:    id,
+		SchemaVersion:  1,
+		Rule:           &detectionv1.Rule{Id: "ssh_password_failure", Revision: 1, Name: "SSH password failure"},
+		RulesetId:      "3538ec98f5ce3e22e8e65f47cd0344ee",
+		Severity:       severity,
+		EventClass:     eventv1.EventClass_EVENT_CLASS_AUTHENTICATION,
+		Origin:         &eventv1.Origin{TenantId: "acme", AgentId: "dev-agent-01"},
+		SourceEventIds: []string{"11111111-2222-3333-4444-555555555555"},
+		EventTime:      timestamppb.New(eventTime),
+		DetectedTime:   timestamppb.New(eventTime.Add(time.Minute)),
 	}
 }
 
@@ -200,6 +205,20 @@ func TestOnlyWhatClearsTheFloorBecomesSomebodysWork(t *testing.T) {
 		if raised[refused] {
 			t.Errorf("a %s detection raised an alert", refused)
 		}
+	}
+}
+
+func TestASeverityTheContractDoesNotDeclareNeverBecomesWork(t *testing.T) {
+	from := &source{batches: [][]alertstore.Record{{
+		record(t, detection("unknown-severity", detectionv1.Severity(99))),
+	}}}
+	into := &sink{}
+
+	if err := writer(t, from, into).Run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(into.batches) != 0 || into.alerts() != 0 {
+		t.Fatalf("an unknown severity became work: %v", into.batches)
 	}
 }
 
@@ -316,15 +335,17 @@ func TestDetectionsSharingAKeyBecomeOnePieceOfWork(t *testing.T) {
 
 func story(id string, severity detectionv1.Severity) *detectionv1.Detection {
 	told := detection(id, severity)
-	told.Rule = &detectionv1.Rule{Id: "ssh.password_guessing_that_succeeded", Revision: 1}
+	told.Rule = &detectionv1.Rule{Id: "ssh.password_guessing_that_succeeded", Revision: 1, Name: "SSH password guessing that succeeded"}
+	told.SourceEventIds = []string{"event-0001", "event-0002"}
+	told.EventTime = timestamppb.New(time.Date(2026, 8, 30, 11, 0, 40, 0, time.UTC))
 	told.Correlation = &detectionv1.Correlation{
 		Stages: []*detectionv1.Stage{
 			{
-				Name: "a failed password", EventId: "event-1",
+				Name: "a failed password", EventId: "event-0001",
 				EventTime: timestamppb.New(time.Date(2026, 8, 30, 11, 0, 0, 0, time.UTC)),
 			},
 			{
-				Name: "one that was accepted", EventId: "event-2",
+				Name: "one that was accepted", EventId: "event-0002",
 				EventTime: timestamppb.New(time.Date(2026, 8, 30, 11, 0, 40, 0, time.UTC)),
 			},
 		},
@@ -358,7 +379,7 @@ func TestAStoryBecomesAnIncidentAndNeverAnAlert(t *testing.T) {
 	if !opened {
 		t.Fatal("the story opened no incident under the detection that told it")
 	}
-	if len(one.GetStages()) != 2 || one.GetStages()[1].GetEventId() != "event-2" {
+	if len(one.GetStages()) != 2 || one.GetStages()[1].GetEventId() != "event-0002" {
 		t.Error("the incident does not name the events the story is made of")
 	}
 	if one.GetConfidence() != incidentv1.Confidence_CONFIDENCE_HIGH {

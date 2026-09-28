@@ -7,13 +7,16 @@ import (
 	"io"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
+	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 )
 
 type journal struct {
@@ -114,13 +117,19 @@ func writerOn(t *testing.T, from *source, to *sink, refused *quarantine) (*Write
 	return writer, &written
 }
 
+func writable() *detectionv1.Detection {
+	made := populated()
+	made.Correlation = nil
+	return made
+}
+
 // One record that is not a detection must never hold a partition. It is refused
 // on its own and the rest of the batch is stored.
 func TestARecordThatIsNotADetectionIsQuarantinedAndTheBatchContinues(t *testing.T) {
 	shared := &journal{}
 	from := &source{records: []Record{
 		{Partition: 3, Offset: 17, Value: []byte("this is not a protobuf detection")},
-		encoded(t, populated()),
+		encoded(t, writable()),
 	}}
 	to := &sink{journal: shared}
 	refused := &quarantine{journal: shared}
@@ -147,7 +156,7 @@ func TestARecordThatIsNotADetectionIsQuarantinedAndTheBatchContinues(t *testing.
 // A detection the store cannot hold is refused for that reason and not for the
 // other, because an operator answers the two differently.
 func TestADetectionTheStoreCannotHoldIsQuarantined(t *testing.T) {
-	made := populated()
+	made := writable()
 	made.DetectionId = ""
 
 	shared := &journal{}
@@ -160,7 +169,7 @@ func TestADetectionTheStoreCannotHoldIsQuarantined(t *testing.T) {
 		t.Fatalf("run the writer: %v", err)
 	}
 
-	if len(refused.refused) != 1 || refused.refused[0][0].Reason != ReasonUnstorable {
+	if len(refused.refused) != 1 || refused.refused[0][0].Reason != ReasonInvalid {
 		t.Fatalf("the record was refused as %v", refused.refused)
 	}
 	if len(to.stored) != 0 {
@@ -168,11 +177,52 @@ func TestADetectionTheStoreCannotHoldIsQuarantined(t *testing.T) {
 	}
 }
 
+func TestADetectionThatViolatesItsContractIsQuarantined(t *testing.T) {
+	made := writable()
+	made.Origin.TenantId = strings.Repeat("t", 65)
+
+	shared := &journal{}
+	from := &source{records: []Record{encoded(t, made)}}
+	to := &sink{journal: shared}
+	refused := &quarantine{journal: shared}
+
+	writer, _ := writerOn(t, from, to, refused)
+	if err := writer.Run(context.Background()); err != nil {
+		t.Fatalf("run the writer: %v", err)
+	}
+
+	if len(refused.refused) != 1 {
+		t.Fatalf("the invalid detection produced %v", refused.refused)
+	}
+	if len(to.stored) != 0 {
+		t.Errorf("an invalid detection was written anyway: %v", to.stored)
+	}
+}
+
+func TestAnOversizedDetectionIsRejectedAtTheWireBoundary(t *testing.T) {
+	shared := &journal{}
+	from := &source{records: []Record{{Value: make([]byte, detection.MaxDetectionBytes+1)}}}
+	to := &sink{journal: shared}
+	refused := &quarantine{journal: shared}
+
+	writer, _ := writerOn(t, from, to, refused)
+	if err := writer.Run(context.Background()); err != nil {
+		t.Fatalf("run the writer: %v", err)
+	}
+
+	if len(refused.refused) != 1 || refused.refused[0][0].Reason != ReasonInvalid {
+		t.Fatalf("the oversized record was refused as %v", refused.refused)
+	}
+	if len(to.stored) != 0 {
+		t.Errorf("an oversized detection was written anyway: %v", to.stored)
+	}
+}
+
 // A store outage is retried, not dropped, and the position stays where it is
 // until the batch is durable.
 func TestABatchIsRetriedUntilItIsDurable(t *testing.T) {
 	shared := &journal{}
-	from := &source{records: []Record{encoded(t, populated())}}
+	from := &source{records: []Record{encoded(t, writable())}}
 	to := &sink{journal: shared, failures: 2}
 	refused := &quarantine{journal: shared}
 
@@ -192,7 +242,7 @@ func TestABatchIsRetriedUntilItIsDurable(t *testing.T) {
 // The order the whole card rests on: nothing advances while the store refuses.
 func TestThePositionDoesNotAdvanceWhileTheStoreRefusesTheBatch(t *testing.T) {
 	shared := &journal{}
-	from := &source{records: []Record{encoded(t, populated())}}
+	from := &source{records: []Record{encoded(t, writable())}}
 	to := &sink{journal: shared, failures: -1}
 	refused := &quarantine{journal: shared}
 
@@ -243,7 +293,7 @@ func TestNothingIsDroppedWhenQuarantineIsUnavailable(t *testing.T) {
 func TestAReplayedBatchWritesTheSameRows(t *testing.T) {
 	names := func() []string {
 		shared := &journal{}
-		from := &source{records: []Record{encoded(t, populated())}}
+		from := &source{records: []Record{encoded(t, writable())}}
 		to := &sink{journal: shared}
 		writer, _ := writerOn(t, from, to, &quarantine{journal: shared})
 		if err := writer.Run(context.Background()); err != nil {

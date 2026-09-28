@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/alert"
+	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	"github.com/dynasmon/Seagull-backend-v2/internal/incident"
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 	incidentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/incident/v1"
@@ -175,9 +176,18 @@ func (w *Writer) consider(records []Record) work {
 	found := work{alerts: make([]alert.Candidate, 0, len(records))}
 
 	for _, record := range records {
+		if len(record.Value) > detection.MaxDetectionBytes {
+			w.skip(record, SkipUnraisable,
+				fmt.Sprintf("the detection is %d bytes and the ceiling is %d", len(record.Value), detection.MaxDetectionBytes))
+			continue
+		}
 		var decided detectionv1.Detection
 		if err := proto.Unmarshal(record.Value, &decided); err != nil {
 			w.skip(record, SkipUndecodable, "the record is not a seagull.detection.v1.Detection")
+			continue
+		}
+		if err := detection.ValidateContract(&decided); err != nil {
+			w.skip(record, SkipUnraisable, err.Error())
 			continue
 		}
 		if !alert.Raisable(decided.GetSeverity(), w.floor) {

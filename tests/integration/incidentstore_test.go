@@ -26,19 +26,22 @@ import (
 
 func correlatedIn(tenant, id string, at time.Time, spread time.Duration) *detectionv1.Detection {
 	return &detectionv1.Detection{
-		DetectionId: id,
+		DetectionId:   id,
+		SchemaVersion: 1,
 		Rule: &detectionv1.Rule{
 			Id:       "ssh.password_guessing_that_succeeded",
 			Revision: 1,
 			Name:     "SSH password guessing that succeeded",
 			Source:   &detectionv1.Source{Catalogue: "sigma", Identifier: "5013fd8a"},
 		},
-		RulesetId:  "89ab5f2c1d",
-		Severity:   detectionv1.Severity_SEVERITY_CRITICAL,
-		Technique:  &detectionv1.Technique{Tactic: "credential_access", Id: "T1110.001", Name: "Password Guessing"},
-		EventClass: eventv1.EventClass_EVENT_CLASS_AUTHENTICATION,
-		Origin:     &eventv1.Origin{TenantId: tenant, AgentId: "dev-agent-01"},
-		EventTime:  timestamppb.New(at.Add(40 * time.Second)),
+		RulesetId:      "89ab5f2c1d",
+		Severity:       detectionv1.Severity_SEVERITY_CRITICAL,
+		Technique:      &detectionv1.Technique{Tactic: "credential_access", Id: "T1110.001", Name: "Password Guessing"},
+		EventClass:     eventv1.EventClass_EVENT_CLASS_AUTHENTICATION,
+		Origin:         &eventv1.Origin{TenantId: tenant, AgentId: "dev-agent-01"},
+		SourceEventIds: []string{id + "-event-1", id + "-event-2"},
+		EventTime:      timestamppb.New(at.Add(40 * time.Second)),
+		DetectedTime:   timestamppb.New(at.Add(time.Minute)),
 		Correlation: &detectionv1.Correlation{
 			Stages: []*detectionv1.Stage{
 				{Name: "a failed password", EventId: id + "-event-1", EventTime: timestamppb.New(at)},

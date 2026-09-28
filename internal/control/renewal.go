@@ -1,6 +1,7 @@
 package control
 
 import (
+	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agent"
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
+	"github.com/dynasmon/Seagull-backend-v2/internal/authz"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/httpx"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 )
@@ -70,6 +72,7 @@ func (s *Server) renewCertificate() http.Handler {
 			Refuse(w, http.StatusTooManyRequests, CodeRateLimited, "this agent is renewing too often")
 			return
 		}
+		fingerprint := authz.Fingerprint(r.TLS.VerifiedChains[0][0])
 
 		var asked agentv1.RenewalRequest
 		if !readWithin(w, r, &asked, MaxCertificateBodyBytes) {
@@ -90,10 +93,11 @@ func (s *Server) renewCertificate() http.Handler {
 		}
 
 		if _, err := s.agents.Renew(r.Context(), presented.AgentID, agent.Move{
-			Identity:  signed.Identity,
-			Actor:     presented.AgentID,
-			At:        s.now(),
-			Authority: s.authority.Subject(),
+			Identity:             signed.Identity,
+			Actor:                presented.AgentID,
+			At:                   s.now(),
+			Authority:            s.authority.Subject(),
+			PresentedFingerprint: hex.EncodeToString(fingerprint[:]),
 		}); err != nil {
 			s.metrics.certificateRenewed("refused")
 			s.refuseAgent(w, err)

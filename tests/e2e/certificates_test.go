@@ -205,12 +205,7 @@ func (c *controlPlane) certificates(t *testing.T, client *http.Client, token, ag
 	return &trail
 }
 
-// The rotation the card asks for a testable path to. Adding the next authority
-// to the bundle is one file write with no restart, both authorities are honoured
-// while the estate moves, and dropping the previous one ends it — an agent that
-// renewed inside the window is unaffected and one that did not is refused, which
-// is why step two waits for the estate rather than for a clock.
-func TestACertificateAuthorityIsRotatedWithoutStrandingAnAgent(t *testing.T) {
+func TestASecondTrustedAuthorityCannotReplaceTheBoundAgentIdentity(t *testing.T) {
 	plane := startControlAPI(t, nil)
 	operator := plane.caller(t, "e2e-admin")
 	token := plane.open(t, operator).GetToken()
@@ -228,37 +223,35 @@ func TestACertificateAuthorityIsRotatedWithoutStrandingAnAgent(t *testing.T) {
 		next.Material().CertificatePEM...)
 	write(t, plane.bundleFile, coexisting)
 
-	_, renewalRequest := keyAndRequest(t, "e2e-agent-72")
-	response, body := plane.renew(t, current, renewalRequest)
-	if response.StatusCode != http.StatusCreated {
-		t.Fatalf("renewing during a rotation was refused: %d %s", response.StatusCode, body)
-	}
-	var renewed agentv1.IssuedCertificate
-	decode(t, body, &renewed)
-	if !bytes.Equal(renewed.GetTrustBundlePem(), coexisting) {
-		t.Fatal("an agent that renewed during a rotation was not told about the next authority")
-	}
-
-	// What an agent signed by the next authority would present. It authenticates
-	// while both are trusted, which is what makes the middle of a rotation safe.
 	elsewhere, err := next.IssueClient("e2e-agent-72", time.Hour)
 	if err != nil {
 		t.Fatalf("issue a certificate from the next authority: %v", err)
 	}
 	moved := plane.clientWithKey(t, elsewhere, coexisting)
-	if response, body = plane.renew(t, moved, renewalRequest); response.StatusCode != http.StatusCreated {
-		t.Fatalf("a certificate from the next authority was refused mid-rotation: %d %s", response.StatusCode, body)
+	_, unboundRequest := keyAndRequest(t, "e2e-agent-72")
+	if response, body := plane.renew(t, moved, unboundRequest); response.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("an unbound certificate from a trusted authority answered %d: %s", response.StatusCode, body)
 	}
 
-	// Retiring an authority takes effect on the next handshake, so the connection
-	// that is already up drains rather than breaking mid-request.
+	renewalKey, renewalRequest := keyAndRequest(t, "e2e-agent-72")
+	response, body := plane.renew(t, current, renewalRequest)
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("the bound certificate was refused during coexistence: %d %s", response.StatusCode, body)
+	}
+	var renewed agentv1.IssuedCertificate
+	decode(t, body, &renewed)
+	if !bytes.Equal(renewed.GetTrustBundlePem(), coexisting) {
+		t.Fatal("the renewed agent was not given the complete trust bundle")
+	}
+	inside := plane.agentClient(t, renewalKey, &renewed)
+
 	write(t, plane.bundleFile, plane.agentAuthority.Material().CertificatePEM)
 	retired := plane.clientWithKey(t, elsewhere, coexisting)
 	if _, err := retired.Post("https://"+plane.renewalAddress+control.RenewalPath, control.ContentType, nil); err == nil {
-		t.Fatal("a certificate from an authority the bundle no longer carries still authenticated")
+		t.Fatal("a certificate from the removed authority still authenticated")
 	}
-	if response, body = plane.renew(t, current, renewalRequest); response.StatusCode != http.StatusCreated {
-		t.Fatalf("an agent that renewed inside the window was stranded by the rotation: %d %s", response.StatusCode, body)
+	if response, body = plane.renew(t, inside, renewalRequest); response.StatusCode != http.StatusCreated {
+		t.Fatalf("the bound identity was stranded after the bundle changed: %d %s", response.StatusCode, body)
 	}
 }
 

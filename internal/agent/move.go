@@ -87,6 +87,8 @@ func Apply(current *agentv1.Agent, move Move) (*agentv1.Agent, *agentv1.Transiti
 	case binding && move.Renewal && !from.Admits():
 		return nil, nil, fmt.Errorf("%w: an agent that is %s does not renew its own certificate",
 			ErrIllegalMove, from)
+	case binding && move.Renewal && move.PresentedFingerprint != current.GetIdentity().GetFingerprintSha256():
+		return nil, nil, ErrCertificateReplaced
 	case changing && !Legal(from, move.To):
 		return nil, nil, Illegal(from, move.To)
 	case changing && move.Note == "":

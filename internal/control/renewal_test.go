@@ -56,6 +56,24 @@ func active(t *testing.T, held *stubAgents, id string) {
 	}
 }
 
+func TestACertificateThatWasAlreadyReplacedCannotRenewAgain(t *testing.T) {
+	held := newStubAgents()
+	active(t, held, "web-01")
+	handler := renewals(t, held, nil)
+
+	first := call(t, handler, http.MethodPost, control.RenewalPath, "web-01", "",
+		&agentv1.RenewalRequest{CsrPem: signingRequest(t, "web-01")})
+	if first.Code != http.StatusCreated {
+		t.Fatalf("the current certificate was refused with %d: %s", first.Code, first.Body)
+	}
+
+	second := call(t, handler, http.MethodPost, control.RenewalPath, "web-01", "",
+		&agentv1.RenewalRequest{CsrPem: signingRequest(t, "web-01")})
+	if second.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("a replaced certificate renewed again with %d: %s", second.Code, second.Body)
+	}
+}
+
 func TestAnAgentRenewsWithTheCertificateItIsReplacing(t *testing.T) {
 	held := newStubAgents()
 	active(t, held, "web-01")

@@ -42,11 +42,12 @@ type Config struct {
 
 func LoadConfig(prefix string, parser *config.Parser) Config {
 	return Config{
-		Address:     parser.RequiredString(prefix + "_ADDRESS"),
-		Database:    parser.String(prefix+"_DATABASE", "seagull"),
-		User:        parser.String(prefix+"_USER", "seagull"),
-		Password:    parser.Secret(prefix + "_PASSWORD"),
-		SSLMode:     parser.String(prefix+"_SSLMODE", "prefer"),
+		Address:  parser.RequiredString(prefix + "_ADDRESS"),
+		Database: parser.String(prefix+"_DATABASE", "seagull"),
+		User:     parser.String(prefix+"_USER", "seagull"),
+		Password: parser.Secret(prefix + "_PASSWORD"),
+		SSLMode: parser.Enum(prefix+"_SSLMODE", "verify-full",
+			"disable", "allow", "prefer", "require", "verify-ca", "verify-full"),
 		MaxConns:    parser.Int(prefix+"_MAX_CONNECTIONS", 8, 1, 256),
 		Timeout:     parser.Duration(prefix+"_TIMEOUT", 30*time.Second, time.Second, 5*time.Minute),
 		ConnTimeout: parser.Duration(prefix+"_CONNECT_TIMEOUT", 10*time.Second, time.Second, time.Minute),

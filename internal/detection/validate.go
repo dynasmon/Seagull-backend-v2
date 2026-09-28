@@ -71,6 +71,9 @@ func (r Rule) Validate() error {
 	if r.Revision < 1 {
 		return r.violation("revision", "must be at least 1, and must go up when the rule changes")
 	}
+	if uint64(r.Revision) > uint64(^uint32(0)) {
+		return r.violation("revision", "must fit the uint32 wire contract")
+	}
 	if err := r.text("name", r.Name, MaxNameLength, true); err != nil {
 		return err
 	}

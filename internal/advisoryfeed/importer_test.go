@@ -536,6 +536,47 @@ func TestAnAdvisoryTheImporterCouldNotHaveReadIsNotHeld(t *testing.T) {
 	}
 }
 
+func TestAnAdvisoryFromAFeedTheImporterDoesNotFollowIsNotHeld(t *testing.T) {
+	forged := held("DSA-1", started.Add(-time.Hour), "9.9-9", osv.Normalization)
+	forged.GetAdvisory().Provenance.Feed = "Alpine"
+	h := build(t, history{forged})
+	h.origin.list("Debian", `"generation-1"`, map[string]time.Time{"DSA-1": started.Add(-time.Hour)})
+	h.origin.serve("Debian", "DSA-1", record("DSA-1", started.Add(-time.Hour), "1.0-1"))
+
+	_, published := h.sync(t, "Debian")
+	if found := advisories(published); found["DSA-1"] == nil {
+		t.Errorf("a record from an unfollowed feed kept the real one from being asked for: %v", found)
+	}
+}
+
+func TestAFeedSyncTheImporterCouldNotHaveObservedIsNotRecalled(t *testing.T) {
+	forged := &vulnerabilityv1.Record{Record: &vulnerabilityv1.Record_Sync{Sync: &vulnerabilityv1.FeedSync{
+		Source: osv.Source, Feed: "Debian", Outcome: vulnerabilityv1.FeedSync_OUTCOME_COMPLETE,
+		CheckedAt: timestamppb.New(started.Add(48 * time.Hour)), SyncedAt: timestamppb.New(started.Add(48 * time.Hour)),
+	}}}
+	h := build(t, history{forged})
+	h.origin.indexErr["Debian"] = errors.New("osv.example answered 403")
+
+	sync, _ := h.sync(t, "Debian")
+	if sync.GetSyncedAt() != nil {
+		t.Errorf("a feed sync from the future became the last complete sync: %v", sync)
+	}
+}
+
+func TestAMalformedFeedSyncIsNotRecalled(t *testing.T) {
+	malformed := &vulnerabilityv1.Record{Record: &vulnerabilityv1.Record_Sync{Sync: &vulnerabilityv1.FeedSync{
+		Source: osv.Source, Feed: "Debian", Outcome: vulnerabilityv1.FeedSync_OUTCOME_COMPLETE,
+		SyncedAt: timestamppb.New(started.Add(-time.Hour)),
+	}}}
+	h := build(t, history{malformed})
+	h.origin.indexErr["Debian"] = errors.New("osv.example answered 403")
+
+	sync, _ := h.sync(t, "Debian")
+	if sync.GetSyncedAt() != nil {
+		t.Errorf("a malformed feed sync became the last complete sync: %v", sync)
+	}
+}
+
 func TestAnAdvisoryReadWithOlderRulesIsReadAgain(t *testing.T) {
 	h := build(t, history{held("DSA-1", started.Add(-time.Hour), "1.0-1", osv.Normalization-1)})
 	h.origin.list("Debian", `"generation-1"`, map[string]time.Time{"DSA-1": started.Add(-time.Hour)})

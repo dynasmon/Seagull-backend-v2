@@ -39,16 +39,15 @@ type Security struct {
 
 func LoadSecurity(parser *config.Parser) Security {
 	return Security{
-		TLS:        parser.Bool("SEAGULL_BACKBONE_TLS", false),
+		TLS:        parser.Bool("SEAGULL_BACKBONE_TLS", true),
 		CAFile:     parser.FilePath("SEAGULL_BACKBONE_TLS_CA", ""),
 		CertFile:   parser.FilePath("SEAGULL_BACKBONE_TLS_CERT", ""),
 		KeyFile:    parser.FilePath("SEAGULL_BACKBONE_TLS_KEY", ""),
 		ServerName: parser.String("SEAGULL_BACKBONE_TLS_SERVER_NAME", ""),
 
-		Mechanism: parser.Enum("SEAGULL_BACKBONE_SASL_MECHANISM", MechanismNone,
-			MechanismNone, MechanismScramSHA256, MechanismScramSHA512),
-		User:     parser.String("SEAGULL_BACKBONE_SASL_USER", ""),
-		Password: parser.Secret("SEAGULL_BACKBONE_SASL_PASSWORD"),
+		Mechanism: parser.RequiredString("SEAGULL_BACKBONE_SASL_MECHANISM"),
+		User:      parser.String("SEAGULL_BACKBONE_SASL_USER", ""),
+		Password:  parser.Secret("SEAGULL_BACKBONE_SASL_PASSWORD"),
 	}
 }
 
@@ -57,17 +56,22 @@ func (s Security) Encrypted() bool { return s.TLS }
 func (s Security) Authenticated() bool { return s.Mechanism != "" && s.Mechanism != MechanismNone }
 
 func (s Security) Validate() error {
+	switch s.Mechanism {
+	case "", MechanismNone, MechanismScramSHA256, MechanismScramSHA512:
+	default:
+		return fmt.Errorf("%q is not a backbone authentication mechanism", s.Mechanism)
+	}
 	if (s.CertFile == "") != (s.KeyFile == "") {
 		return errors.New("a backbone client certificate needs its key, and a key needs its certificate")
 	}
-	if !s.TLS && (s.CAFile != "" || s.CertFile != "") {
+	if !s.TLS && (s.CAFile != "" || s.CertFile != "" || s.KeyFile != "" || s.ServerName != "") {
 		return errors.New("backbone tls material was given and tls is off")
 	}
 	if s.Authenticated() && (s.User == "" || s.Password.Reveal() == "") {
 		return fmt.Errorf("%s needs a user and a password", s.Mechanism)
 	}
-	if !s.Authenticated() && s.User != "" {
-		return errors.New("a backbone user was given and no mechanism to authenticate it with")
+	if !s.Authenticated() && (s.User != "" || s.Password.Reveal() != "") {
+		return errors.New("backbone credentials were given and no mechanism authenticates them")
 	}
 	// Credentials on a plaintext connection are read by anything on the path.
 	if s.Authenticated() && !s.TLS {

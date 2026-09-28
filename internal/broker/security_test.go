@@ -12,6 +12,34 @@ func authenticated(user, password string) Security {
 	return Security{TLS: true, Mechanism: MechanismScramSHA256, User: user, Password: config.Secret(password)}
 }
 
+func TestTheBackboneUsesTLSByDefault(t *testing.T) {
+	parser := config.New(func(key string) (string, bool) {
+		if key == "SEAGULL_BACKBONE_SASL_MECHANISM" {
+			return MechanismNone, true
+		}
+		return "", false
+	})
+
+	loaded := LoadSecurity(parser)
+
+	if err := parser.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.TLS {
+		t.Fatal("the backbone defaulted to plaintext")
+	}
+}
+
+func TestTheBackboneAuthenticationPostureMustBeExplicit(t *testing.T) {
+	parser := config.New(func(string) (string, bool) { return "", false })
+
+	LoadSecurity(parser)
+
+	if parser.Err() == nil {
+		t.Fatal("the backbone silently defaulted to unauthenticated")
+	}
+}
+
 func TestPlaintextIsAPostureAndNotAnAccident(t *testing.T) {
 	var plain Security
 
@@ -36,12 +64,14 @@ func TestAuthenticatingOverPlaintextIsRefused(t *testing.T) {
 
 func TestHalfAnAuthenticationIsRefused(t *testing.T) {
 	cases := map[string]Security{
-		"a mechanism with no user":  {TLS: true, Mechanism: MechanismScramSHA512},
-		"a user with no password":   {TLS: true, Mechanism: MechanismScramSHA256, User: "seagull"},
-		"a user with no mechanism":  {TLS: true, User: "seagull"},
-		"tls material with tls off": {CAFile: "authority.pem"},
-		"a certificate with no key": {TLS: true, CertFile: "client.pem"},
-		"a key with no certificate": {TLS: true, KeyFile: "client-key.pem"},
+		"a mechanism with no user":     {TLS: true, Mechanism: MechanismScramSHA512},
+		"a user with no password":      {TLS: true, Mechanism: MechanismScramSHA256, User: "seagull"},
+		"a user with no mechanism":     {TLS: true, User: "seagull"},
+		"a password with no mechanism": {TLS: true, Password: config.Secret("hunter2")},
+		"tls material with tls off":    {CAFile: "authority.pem"},
+		"a tls name with tls off":      {ServerName: "broker.example"},
+		"a certificate with no key":    {TLS: true, CertFile: "client.pem"},
+		"a key with no certificate":    {TLS: true, KeyFile: "client-key.pem"},
 	}
 
 	for name, held := range cases {

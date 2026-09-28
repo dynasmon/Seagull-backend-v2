@@ -1,6 +1,8 @@
 package control_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"log/slog"
 	"net/http"
@@ -45,6 +47,8 @@ func active(t *testing.T, held *stubAgents, id string) {
 	if err != nil {
 		t.Fatalf("sign a first certificate: %v", err)
 	}
+	fingerprint := sha256.Sum256(certificate(id).Raw)
+	issued.Identity.FingerprintSha256 = hex.EncodeToString(fingerprint[:])
 	if _, err := held.Move(t.Context(), id, []string{"default"}, agent.Move{
 		Identity: issued.Identity, Actor: "dev-admin", At: at, Authority: authoritySubject,
 	}); err != nil {

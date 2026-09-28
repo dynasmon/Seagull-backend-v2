@@ -153,8 +153,8 @@ type Config struct {
 	Password config.Secret
 	Timeout  time.Duration
 
-	// There is no option to skip verification: a deployment that cannot verify
-	// the store names the authority that signs it.
+	// When TLS is enabled there is no option to skip verification: a deployment
+	// names the authority that signs the store when the system pool does not.
 	TLS        bool
 	CAFile     string
 	ServerName string
@@ -167,7 +167,7 @@ func LoadConfig(prefix string, parser *config.Parser) Config {
 		User:       parser.String(prefix+"_USER", "seagull"),
 		Password:   parser.Secret(prefix + "_PASSWORD"),
 		Timeout:    parser.Duration(prefix+"_TIMEOUT", 30*time.Second, time.Second, 5*time.Minute),
-		TLS:        parser.Bool(prefix+"_TLS", false),
+		TLS:        parser.Bool(prefix+"_TLS", true),
 		CAFile:     parser.FilePath(prefix+"_TLS_CA", ""),
 		ServerName: parser.String(prefix+"_TLS_SERVER_NAME", ""),
 	}
@@ -175,7 +175,7 @@ func LoadConfig(prefix string, parser *config.Parser) Config {
 
 func (c Config) tls() (*tls.Config, error) {
 	if !c.TLS {
-		if c.CAFile != "" {
+		if c.CAFile != "" || c.ServerName != "" {
 			return nil, errors.New("event store tls material was given and tls is off")
 		}
 		return nil, nil
@@ -321,7 +321,6 @@ func agreesWithSchema() error {
 	return nil
 }
 
-// Internal ClickHouse traffic matches the clear-text broker leg.
 func connect(configuration Config) (driver.Conn, error) {
 	switch {
 	case configuration.Address == "":

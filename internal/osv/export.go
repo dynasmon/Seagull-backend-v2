@@ -19,7 +19,7 @@ import (
 
 const indexName = "modified_id.csv"
 
-var errInsecureRedirect = errors.New("the export redirected away from https")
+var errUntrustedRedirect = errors.New("the export redirected to an untrusted origin")
 
 type ExportOptions struct {
 	Base           string
@@ -58,12 +58,16 @@ func NewExport(options ExportOptions) (*Export, error) {
 	}
 
 	client := *options.Client
+	checkRedirect := client.CheckRedirect
 	client.CheckRedirect = func(request *http.Request, via []*http.Request) error {
-		if request.URL.Scheme != "https" {
-			return fmt.Errorf("%w: %s", errInsecureRedirect, request.URL.Redacted())
+		if request.URL.Scheme != base.Scheme || !strings.EqualFold(request.URL.Host, base.Host) || request.URL.User != nil {
+			return fmt.Errorf("%w: %s", errUntrustedRedirect, request.URL.Redacted())
 		}
 		if len(via) >= 5 {
 			return errors.New("the export redirected more than five times")
+		}
+		if checkRedirect != nil {
+			return checkRedirect(request, via)
 		}
 		return nil
 	}
@@ -178,7 +182,7 @@ func (e *Export) get(ctx context.Context, location, known string) (*http.Respons
 		return response, nil
 	case ctx.Err() != nil:
 		return nil, ctx.Err()
-	case errors.Is(err, errInsecureRedirect):
+	case errors.Is(err, errUntrustedRedirect):
 		return nil, err
 	default:
 		return nil, &advisoryfeed.Unavailable{Err: err}

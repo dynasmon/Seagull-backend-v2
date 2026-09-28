@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
@@ -211,6 +212,41 @@ func TestTwoAgentsCannotNameOneDetection(t *testing.T) {
 
 	if first.GetDetectionId() == second.GetDetectionId() {
 		t.Fatalf("two agents named one detection %s", first.GetDetectionId())
+	}
+}
+
+func TestOnlyDetectionsThatHonorTheWireContractAreAccepted(t *testing.T) {
+	valid := detected(t, attributed(), observed(t))
+	if err := detection.ValidateContract(valid); err != nil {
+		t.Fatalf("a generated detection was refused: %v", err)
+	}
+	story := correlated(t, correlating(), observed(t))
+	if err := detection.ValidateContract(story); err != nil {
+		t.Fatalf("a generated correlation was refused: %v", err)
+	}
+
+	invalid := proto.Clone(valid).(*detectionv1.Detection)
+	invalid.Aggregation.Window = durationpb.New(-time.Second)
+	if err := detection.ValidateContract(invalid); err == nil {
+		t.Error("a negative aggregation window was accepted")
+	}
+
+	invalid = proto.Clone(valid).(*detectionv1.Detection)
+	invalid.Severity = detectionv1.Severity(99)
+	if err := detection.ValidateContract(invalid); err == nil {
+		t.Error("an unknown severity was accepted")
+	}
+
+	invalid = proto.Clone(valid).(*detectionv1.Detection)
+	invalid.Technique.Name = ""
+	if err := detection.ValidateContract(invalid); err == nil {
+		t.Error("a partial technique was accepted")
+	}
+
+	invalid = proto.Clone(valid).(*detectionv1.Detection)
+	invalid.DetectionId = "detection id with spaces"
+	if err := detection.ValidateContract(invalid); err == nil {
+		t.Error("a malformed detection identifier was accepted")
 	}
 }
 

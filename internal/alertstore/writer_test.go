@@ -208,6 +208,20 @@ func TestOnlyWhatClearsTheFloorBecomesSomebodysWork(t *testing.T) {
 	}
 }
 
+func TestASeverityTheContractDoesNotDeclareNeverBecomesWork(t *testing.T) {
+	from := &source{batches: [][]alertstore.Record{{
+		record(t, detection("unknown-severity", detectionv1.Severity(99))),
+	}}}
+	into := &sink{}
+
+	if err := writer(t, from, into).Run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(into.batches) != 0 || into.alerts() != 0 {
+		t.Fatalf("an unknown severity became work: %v", into.batches)
+	}
+}
+
 func TestAReplayedBatchRaisesNothingNew(t *testing.T) {
 	batch := []alertstore.Record{record(t, detection("bc84b318", detectionv1.Severity_SEVERITY_HIGH))}
 	into := &sink{}

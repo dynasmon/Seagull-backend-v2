@@ -39,6 +39,7 @@ func TestARenewedCertificateSupersedesTheOneItReplacedOnPostgresql(t *testing.T)
 	second := certificateFor(t, agentID, at.Add(time.Hour))
 	if _, err := registry.Renew(ctx, agentID, agent.Move{
 		Identity: second, Actor: agentID, At: at.Add(time.Hour), Authority: "Integration Agent CA",
+		PresentedFingerprint: first.GetFingerprintSha256(),
 	}); err != nil {
 		t.Fatalf("renew: %v", err)
 	}

@@ -2,6 +2,7 @@ package agent_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,6 +63,43 @@ func TestRebindingReplacesTheIdentityWithoutMovingTheAgent(t *testing.T) {
 	}
 	if held.GetIdentity().GetSerial() != renewed.GetSerial() {
 		t.Error("the renewed certificate was not recorded")
+	}
+}
+
+func TestAReplacedCertificateCannotRenewAcrossAnAuthorityRotation(t *testing.T) {
+	renewed := identity()
+	renewed.Serial = "9c4e1a2b3d5f6071"
+	renewed.FingerprintSha256 = strings.Repeat("cd", 32)
+
+	_, _, err := agent.Apply(active(t), agent.Move{
+		Identity:             renewed,
+		Actor:                "agent-001",
+		At:                   moved,
+		Authority:            "next authority",
+		PresentedFingerprint: strings.Repeat("ef", 32),
+		Renewal:              true,
+	})
+	if !errors.Is(err, agent.ErrCertificateReplaced) {
+		t.Fatalf("a replaced certificate from a coexisting authority answered %v", err)
+	}
+}
+
+func TestTheCurrentCertificateCanRenewAcrossAnAuthorityRotation(t *testing.T) {
+	renewed := identity()
+	renewed.Serial = "9c4e1a2b3d5f6071"
+	renewed.FingerprintSha256 = strings.Repeat("cd", 32)
+	current := active(t)
+
+	_, _, err := agent.Apply(current, agent.Move{
+		Identity:             renewed,
+		Actor:                "agent-001",
+		At:                   moved,
+		Authority:            "next authority",
+		PresentedFingerprint: current.GetIdentity().GetFingerprintSha256(),
+		Renewal:              true,
+	})
+	if err != nil {
+		t.Fatalf("the bound certificate was refused during an authority rotation: %v", err)
 	}
 }
 

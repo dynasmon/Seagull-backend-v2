@@ -12,18 +12,19 @@ import (
 )
 
 var (
-	ErrNothingAsked = errors.New("the move asks for neither a state nor an identity")
-	ErrNoActor      = errors.New("a move is attributable or it does not happen")
-	ErrMoved        = errors.New("the agent moved since it was read")
-	ErrNeedsReason  = errors.New("a lifecycle change is recorded with the reason for it")
-	ErrUnknownState = errors.New("the move names no agent state")
+	ErrNothingAsked        = errors.New("the move asks for neither a state nor an identity")
+	ErrNoActor             = errors.New("a move is attributable or it does not happen")
+	ErrMoved               = errors.New("the agent moved since it was read")
+	ErrNeedsReason         = errors.New("a lifecycle change is recorded with the reason for it")
+	ErrUnknownState        = errors.New("the move names no agent state")
+	ErrCertificateReplaced = errors.New("the certificate was already replaced")
 )
 
 func Refused(err error) bool {
 	return errors.Is(err, ErrIllegalMove) || errors.Is(err, ErrNothingAsked) ||
 		errors.Is(err, ErrNeedsReason) || errors.Is(err, ErrUnknownState) ||
 		errors.Is(err, ErrNoActor) || errors.Is(err, ErrMalformedIdentity) ||
-		errors.Is(err, ErrMalformed)
+		errors.Is(err, ErrMalformed) || errors.Is(err, ErrCertificateReplaced)
 }
 
 // One act on a registered agent: a state, a certificate identity, or both.
@@ -40,7 +41,8 @@ type Move struct {
 	// The subject of the certificate authority that signed the identity being
 	// bound, so rotating one is visible in the certificate trail rather than
 	// only in the configuration of the process that signed.
-	Authority string
+	Authority            string
+	PresentedFingerprint string
 
 	// Set when the agent asked for this itself rather than an operator. A
 	// platform that stopped listening to a machine stops signing for it too, so
@@ -85,6 +87,8 @@ func Apply(current *agentv1.Agent, move Move) (*agentv1.Agent, *agentv1.Transiti
 	case binding && move.Renewal && !from.Admits():
 		return nil, nil, fmt.Errorf("%w: an agent that is %s does not renew its own certificate",
 			ErrIllegalMove, from)
+	case binding && move.Renewal && move.PresentedFingerprint != current.GetIdentity().GetFingerprintSha256():
+		return nil, nil, ErrCertificateReplaced
 	case changing && !Legal(from, move.To):
 		return nil, nil, Illegal(from, move.To)
 	case changing && move.Note == "":

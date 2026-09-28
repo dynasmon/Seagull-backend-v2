@@ -1,6 +1,8 @@
 package control_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"log/slog"
 	"net/http"
@@ -45,10 +47,30 @@ func active(t *testing.T, held *stubAgents, id string) {
 	if err != nil {
 		t.Fatalf("sign a first certificate: %v", err)
 	}
+	fingerprint := sha256.Sum256(certificate(id).Raw)
+	issued.Identity.FingerprintSha256 = hex.EncodeToString(fingerprint[:])
 	if _, err := held.Move(t.Context(), id, []string{"default"}, agent.Move{
 		Identity: issued.Identity, Actor: "dev-admin", At: at, Authority: authoritySubject,
 	}); err != nil {
 		t.Fatalf("bind a first certificate: %v", err)
+	}
+}
+
+func TestACertificateThatWasAlreadyReplacedCannotRenewAgain(t *testing.T) {
+	held := newStubAgents()
+	active(t, held, "web-01")
+	handler := renewals(t, held, nil)
+
+	first := call(t, handler, http.MethodPost, control.RenewalPath, "web-01", "",
+		&agentv1.RenewalRequest{CsrPem: signingRequest(t, "web-01")})
+	if first.Code != http.StatusCreated {
+		t.Fatalf("the current certificate was refused with %d: %s", first.Code, first.Body)
+	}
+
+	second := call(t, handler, http.MethodPost, control.RenewalPath, "web-01", "",
+		&agentv1.RenewalRequest{CsrPem: signingRequest(t, "web-01")})
+	if second.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("a replaced certificate renewed again with %d: %s", second.Code, second.Body)
 	}
 }
 

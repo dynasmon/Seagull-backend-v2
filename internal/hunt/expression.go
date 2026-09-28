@@ -65,11 +65,6 @@ func Operators() []Operator {
 	return known
 }
 
-func (o Operator) known() bool {
-	_, declared := accepts[o]
-	return declared
-}
-
 func (o Operator) asks(kind Kind) bool {
 	return slices.Contains(accepts[o], kind)
 }

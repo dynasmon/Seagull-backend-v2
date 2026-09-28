@@ -30,12 +30,6 @@ func (j *journal) record(entry string) {
 	j.entries = append(j.entries, entry)
 }
 
-func (j *journal) list() []string {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	return slices.Clone(j.entries)
-}
-
 // Advances only when deliver returns nil, which is the whole of what this
 // capability asks of a backbone.
 type source struct {

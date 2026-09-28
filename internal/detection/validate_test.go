@@ -3,6 +3,7 @@ package detection_test
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -52,6 +53,25 @@ func rule() detection.Rule {
 func TestARuleTheEngineCanRunIsAccepted(t *testing.T) {
 	if err := rule().Validate(); err != nil {
 		t.Fatalf("a rule that should run was refused: %v", err)
+	}
+}
+
+func TestARuleRevisionMustFitTheWireContract(t *testing.T) {
+	if strconv.IntSize < 64 {
+		t.Skip("int cannot represent a revision above uint32")
+	}
+
+	subject := rule()
+	revision := uint64(^uint32(0)) + 1
+	subject.Revision = int(revision)
+
+	err := subject.Validate()
+	if err == nil {
+		t.Fatal("a revision larger than uint32 was accepted")
+	}
+	var violation *detection.Violation
+	if !errors.As(err, &violation) || violation.Part != "revision" {
+		t.Fatalf("the refusal does not identify the revision: %v", err)
 	}
 }
 

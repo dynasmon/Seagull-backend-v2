@@ -203,3 +203,22 @@ func TestAnExportIsOnlyEverReadOverTLS(t *testing.T) {
 		t.Error("a redirect to plaintext was followed")
 	}
 }
+
+func TestAnExportDoesNotFollowARedirectToAnotherOrigin(t *testing.T) {
+	var reached atomic.Int32
+	target := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		reached.Add(1)
+		_, _ = writer.Write([]byte(index))
+	}))
+	t.Cleanup(target.Close)
+
+	_, export := serving(t, func(writer http.ResponseWriter, request *http.Request) {
+		http.Redirect(writer, request, target.URL+request.URL.Path, http.StatusFound)
+	})
+	if _, err := export.Index(context.Background(), "Debian", ""); err == nil {
+		t.Error("a redirect to another origin was followed")
+	}
+	if requests := reached.Load(); requests != 0 {
+		t.Errorf("the redirected origin received %d requests", requests)
+	}
+}

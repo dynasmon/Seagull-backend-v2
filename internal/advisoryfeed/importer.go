@@ -176,19 +176,34 @@ func (i *Importer) learn(record *vulnerabilityv1.Record) {
 	defer i.mu.Unlock()
 	switch body := record.GetRecord().(type) {
 	case *vulnerabilityv1.Record_Advisory:
-		read := body.Advisory.GetProvenance().GetFetchedAt().AsTime()
-		if body.Advisory.GetSource() == i.source && vulnerability.Validate(body.Advisory) == nil &&
-			!read.After(i.now().Add(vulnerability.MaxClockSkew)) {
+		advisory := body.Advisory
+		if advisory.GetSource() != i.source || vulnerability.Validate(advisory) != nil {
+			return
+		}
+		provenance := advisory.GetProvenance()
+		_, followed := i.follows[provenance.GetFeed()]
+		read := provenance.GetFetchedAt().AsTime()
+		if followed && !read.After(i.now().Add(vulnerability.MaxClockSkew)) {
 			i.keep(body.Advisory)
 		}
 	case *vulnerabilityv1.Record_Sync:
-		state, followed := i.follows[body.Sync.GetFeed()]
-		synced := body.Sync.GetSyncedAt()
-		if body.Sync.GetSource() != i.source || !followed || !synced.IsValid() {
+		sync := body.Sync
+		state, followed := i.follows[sync.GetFeed()]
+		if sync.GetSource() != i.source || !followed || vulnerability.ValidateSync(sync) != nil {
 			return
 		}
-		if at := synced.AsTime(); !state.synced || at.After(state.syncedAt) {
-			state.syncedAt, state.synced = at, true
+		latest := i.now().Add(vulnerability.MaxClockSkew)
+		if sync.GetCheckedAt().AsTime().After(latest) ||
+			(sync.GetSyncedAt() != nil && sync.GetSyncedAt().AsTime().After(latest)) ||
+			(sync.GetNewestListed() != nil && sync.GetNewestListed().AsTime().After(latest)) {
+			return
+		}
+		synced := sync.GetSyncedAt()
+		if synced != nil {
+			at := synced.AsTime()
+			if !state.synced || at.After(state.syncedAt) {
+				state.syncedAt, state.synced = at, true
+			}
 		}
 	}
 }

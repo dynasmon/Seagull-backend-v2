@@ -89,6 +89,19 @@ identity currently bound to the agent. Once a renewal replaces a certificate,
 the superseded certificate cannot renew again, including while two certificate
 authorities coexist during a rotation.
 
+One renewal is the exception, because without it an answer lost on its way
+strands the agent that asked: the platform bound a certificate the agent never
+received, and the agent can only present the one it holds. So the registry keeps,
+with each certificate a renewal issued, the certificate that renewal was
+presented with and the digest of its request. A renewal presented with that
+certificate and carrying the very same request is that renewal asked again, and
+it is answered again with a new certificate for the same key, which supersedes
+the one that never arrived. Only a request whose signature is drawn at random,
+ECDSA or RSA-PSS, is recognised this way: another holder of the key cannot
+produce the bytes the agent sent, so a copied key still cannot renew in place of
+the agent that asked. A request signed with Ed25519 or PKCS #1 v1.5 could be sent
+again by anybody holding its key, and is never answered twice.
+
 A second listener is not a second process. It is one address, one trust domain
 and one route, in the process §35 already names, which is the difference between
 a security boundary and a microservice.

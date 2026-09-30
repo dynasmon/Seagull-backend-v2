@@ -217,6 +217,11 @@ func (a *Agents) move(ctx context.Context, id string, asked agent.Move, query st
 	if len(held) == 0 {
 		return nil, agent.ErrUnknown
 	}
+	if asked.Renewal {
+		if asked.Bound, err = boundAnswer(ctx, transaction, held[0].GetAgentId()); err != nil {
+			return nil, err
+		}
+	}
 
 	moved, line, err := agent.Apply(held[0], asked)
 	if err != nil {
@@ -242,7 +247,7 @@ func (a *Agents) move(ctx context.Context, id string, asked agent.Move, query st
 		return nil, fmt.Errorf("record the move of agent %s: %w", id, err)
 	}
 	if signed := agent.Certificate(moved, asked); signed != nil {
-		if err := recordCertificate(ctx, transaction, signed, asked.At); err != nil {
+		if err := recordCertificate(ctx, transaction, signed, agent.Answering(asked), asked.At); err != nil {
 			return nil, err
 		}
 	}

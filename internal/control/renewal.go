@@ -98,6 +98,7 @@ func (s *Server) renewCertificate() http.Handler {
 			At:                   s.now(),
 			Authority:            s.authority.Subject(),
 			PresentedFingerprint: hex.EncodeToString(fingerprint[:]),
+			Request:              signed.Request,
 		}); err != nil {
 			s.metrics.certificateRenewed("refused")
 			s.refuseAgent(w, err)

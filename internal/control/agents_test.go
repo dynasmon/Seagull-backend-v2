@@ -23,6 +23,7 @@ type stubAgents struct {
 	held         map[string]*agentv1.Agent
 	trail        map[string][]*agentv1.Transition
 	certificates map[string][]*agentv1.CertificateRecord
+	asked        map[string]agent.Asked
 	announced    map[string]uint64
 	unreached    error
 	clock        time.Time
@@ -40,6 +41,7 @@ func newStubAgents() *stubAgents {
 	return &stubAgents{
 		held:      map[string]*agentv1.Agent{registered.GetAgentId(): registered},
 		trail:     map[string][]*agentv1.Transition{registered.GetAgentId(): {line}},
+		asked:     map[string]agent.Asked{},
 		announced: map[string]uint64{},
 		clock:     time.Date(2026, 9, 6, 10, 0, 0, 0, time.UTC),
 	}
@@ -109,6 +111,7 @@ func (s *stubAgents) Renew(_ context.Context, id string, asked agent.Move) (*age
 		return nil, agent.ErrUnknown
 	}
 	asked.Renewal = true
+	asked.Bound = s.asked[id]
 	return s.apply(held, asked)
 }
 
@@ -125,6 +128,7 @@ func (s *stubAgents) apply(held *agentv1.Agent, asked agent.Move) (*agentv1.Agen
 			s.certificates = map[string][]*agentv1.CertificateRecord{}
 		}
 		s.certificates[id] = append([]*agentv1.CertificateRecord{signed}, s.certificates[id]...)
+		s.asked[id] = agent.Answering(asked)
 	}
 	return moved, nil
 }

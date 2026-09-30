@@ -45,6 +45,10 @@ type Authority struct {
 type Issued struct {
 	CertificatePEM []byte
 	Identity       *agentv1.Identity
+
+	// The digest of the request this answered, when only whoever sent that
+	// request could send the same bytes again. Empty otherwise.
+	Request string
 }
 
 func NewAuthority(certificatePEM, keyPEM []byte) (*Authority, error) {
@@ -129,7 +133,21 @@ func (a *Authority) Sign(subject string, requestPEM []byte, validity time.Durati
 			IssuedAt:          timestamppb.New(signed.NotBefore),
 			ExpiresAt:         timestamppb.New(signed.NotAfter),
 		},
+		Request: requested(asked),
 	}, nil
+}
+
+// An ECDSA or RSA-PSS signature is drawn at random, so another holder of the key
+// cannot produce the request its author sent. An Ed25519 or PKCS #1 v1.5
+// signature is not, and a request signed with one names nobody in particular.
+func requested(asked *x509.CertificateRequest) string {
+	switch asked.SignatureAlgorithm {
+	case x509.ECDSAWithSHA256, x509.ECDSAWithSHA384, x509.ECDSAWithSHA512,
+		x509.SHA256WithRSAPSS, x509.SHA384WithRSAPSS, x509.SHA512WithRSAPSS:
+		digest := sha256.Sum256(asked.Raw)
+		return hex.EncodeToString(digest[:])
+	}
+	return ""
 }
 
 // Whole bytes, lower case, the way a certificate tool prints one. big.Int.Text

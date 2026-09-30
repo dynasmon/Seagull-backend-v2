@@ -74,6 +74,68 @@ func TestARenewedCertificateSupersedesTheOneItReplacedOnPostgresql(t *testing.T)
 	}
 }
 
+// A renewal the registry granted and whose answer was lost is asked again with
+// the certificate it replaced and the same request: the registry remembers what
+// the bound certificate answered across the transaction that bound it, so it
+// answers that renewal again, however often, and refuses any other request
+// presented with the replaced certificate.
+func TestARenewalWhoseAnswerWasLostIsAnsweredWhenAskedAgainOnPostgresql(t *testing.T) {
+	address := alertStoreAddress(t)
+	store := migratedAlertStore(t, address)
+	registry := store.Agents()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	agentID := agentIdentifier(t)
+	at := time.Now().UTC().Truncate(time.Millisecond)
+	if _, err := registry.Register(ctx, &agentv1.Registration{AgentId: agentID, TenantId: "default"}, "it-admin", at); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	first := certificateFor(t, agentID, at)
+	if _, err := registry.Move(ctx, agentID, []string{"default"}, agent.Move{Identity: first, Actor: "it-admin", At: at}); err != nil {
+		t.Fatalf("bind the first certificate: %v", err)
+	}
+
+	request := agentFingerprint(t)
+	renew := func(identity *agentv1.Identity, asked string, after time.Duration) error {
+		_, err := registry.Renew(ctx, agentID, agent.Move{
+			Identity: identity, Actor: agentID, At: at.Add(after),
+			PresentedFingerprint: first.GetFingerprintSha256(), Request: asked,
+		})
+		return err
+	}
+	if err := renew(certificateFor(t, agentID, at.Add(time.Hour)), request, time.Hour); err != nil {
+		t.Fatalf("renew: %v", err)
+	}
+	for attempt := 2; attempt <= 3; attempt++ {
+		again := certificateFor(t, agentID, at.Add(time.Duration(attempt)*time.Hour))
+		if err := renew(again, request, time.Duration(attempt)*time.Hour); err != nil {
+			t.Fatalf("the renewal asked again for the %d time was answered with %v", attempt, err)
+		}
+		held, err := registry.Agent(ctx, agentID, []string{"default"})
+		if err != nil || held.GetIdentity().GetFingerprintSha256() != again.GetFingerprintSha256() {
+			t.Fatalf("answering the renewal again left the agent bound to %v: %v", held.GetIdentity(), err)
+		}
+	}
+	if err := renew(certificateFor(t, agentID, at.Add(4*time.Hour)), agentFingerprint(t), 4*time.Hour); !errors.Is(err, agent.ErrCertificateReplaced) {
+		t.Fatalf("another request presented with the replaced certificate was answered with %v", err)
+	}
+
+	trail, err := registry.Certificates(ctx, agentID, []string{"default"})
+	if err != nil {
+		t.Fatalf("read the certificate trail: %v", err)
+	}
+	if len(trail.GetCertificates()) != 4 {
+		t.Fatalf("a certificate and three answers to one renewal left %d certificates on the trail", len(trail.GetCertificates()))
+	}
+	for index, one := range trail.GetCertificates() {
+		if superseded := one.GetSupersededAt() != nil; superseded != (index > 0) {
+			t.Errorf("certificate %d of the trail is superseded %t", index, superseded)
+		}
+	}
+}
+
 func TestAnAgentThePlatformStoppedHonouringDoesNotRenewOnPostgresql(t *testing.T) {
 	address := alertStoreAddress(t)
 	store := migratedAlertStore(t, address)

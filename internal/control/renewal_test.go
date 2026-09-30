@@ -74,6 +74,41 @@ func TestACertificateThatWasAlreadyReplacedCannotRenewAgain(t *testing.T) {
 	}
 }
 
+// An answer lost on its way leaves the registry holding a certificate the agent
+// never received, and the agent asks again with the certificate it holds and the
+// request it sent. That is answered again; another request from the replaced
+// certificate is still refused.
+func TestARenewalWhoseAnswerWasLostIsAnsweredWhenAskedAgain(t *testing.T) {
+	held := newStubAgents()
+	active(t, held, "web-01")
+	handler := renewals(t, held, nil)
+	asked := &agentv1.RenewalRequest{CsrPem: signingRequest(t, "web-01")}
+
+	lost := call(t, handler, http.MethodPost, control.RenewalPath, "web-01", "", asked)
+	if lost.Code != http.StatusCreated {
+		t.Fatalf("the renewal was refused with %d: %s", lost.Code, lost.Body)
+	}
+	unreceived := held.held["web-01"].GetIdentity().GetFingerprintSha256()
+
+	again := call(t, handler, http.MethodPost, control.RenewalPath, "web-01", "", asked)
+	if again.Code != http.StatusCreated {
+		t.Fatalf("the renewal asked again was refused with %d: %s", again.Code, again.Body)
+	}
+	var issued agentv1.IssuedCertificate
+	if err := proto.Unmarshal(again.Body.Bytes(), &issued); err != nil {
+		t.Fatalf("read what was issued: %v", err)
+	}
+	if bound := held.held["web-01"].GetIdentity().GetFingerprintSha256(); bound != issued.GetIdentity().GetFingerprintSha256() || bound == unreceived {
+		t.Fatalf("the registry holds %q after answering %q again", bound, issued.GetIdentity().GetFingerprintSha256())
+	}
+
+	other := call(t, handler, http.MethodPost, control.RenewalPath, "web-01", "",
+		&agentv1.RenewalRequest{CsrPem: signingRequest(t, "web-01")})
+	if other.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("another request from the replaced certificate was answered %d: %s", other.Code, other.Body)
+	}
+}
+
 func TestAnAgentRenewsWithTheCertificateItIsReplacing(t *testing.T) {
 	held := newStubAgents()
 	active(t, held, "web-01")

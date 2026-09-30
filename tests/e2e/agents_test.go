@@ -22,6 +22,7 @@ type registeredAgents struct {
 	held         map[string]*agentv1.Agent
 	trail        map[string][]*agentv1.Transition
 	certificates map[string][]*agentv1.CertificateRecord
+	asked        map[string]agent.Asked
 	announced    map[string]uint64
 }
 
@@ -30,6 +31,7 @@ func newRegisteredAgents() *registeredAgents {
 		held:         map[string]*agentv1.Agent{},
 		trail:        map[string][]*agentv1.Transition{},
 		certificates: map[string][]*agentv1.CertificateRecord{},
+		asked:        map[string]agent.Asked{},
 		announced:    map[string]uint64{},
 	}
 }
@@ -112,6 +114,7 @@ func (r *registeredAgents) Renew(_ context.Context, id string, asked agent.Move)
 		return nil, agent.ErrUnknown
 	}
 	asked.Renewal = true
+	asked.Bound = r.asked[id]
 	return r.apply(held, asked)
 }
 
@@ -125,6 +128,7 @@ func (r *registeredAgents) apply(held *agentv1.Agent, asked agent.Move) (*agentv
 	r.trail[id] = append(r.trail[id], line)
 	if signed := agent.Certificate(moved, asked); signed != nil {
 		r.certificates[id] = append([]*agentv1.CertificateRecord{signed}, r.certificates[id]...)
+		r.asked[id] = agent.Answering(asked)
 	}
 	return moved, nil
 }

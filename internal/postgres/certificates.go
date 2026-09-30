@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,8 +17,12 @@ const supersedeCertificate = `UPDATE agent_certificates SET superseded_at = $2
 WHERE agent_id = $1 AND superseded_at IS NULL`
 
 const insertCertificate = `INSERT INTO agent_certificates
-	(fingerprint, agent_id, serial, subject, authority_subject, issued_by, issued_at, expires_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`
+	(fingerprint, agent_id, serial, subject, authority_subject, issued_by, issued_at, expires_at,
+	 presented_fingerprint, request_sha256)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`
+
+const currentAnswer = `SELECT presented_fingerprint, request_sha256 FROM agent_certificates
+WHERE agent_id = $1 AND superseded_at IS NULL`
 
 const certificateColumns = `agent_id, subject, serial, fingerprint,
 	issued_at, expires_at, authority_subject, issued_by, superseded_at`
@@ -41,7 +46,7 @@ func (a *Agents) Certificates(ctx context.Context, id string, tenants []string) 
 	return &agentv1.CertificateHistory{AgentId: id, Certificates: signed}, nil
 }
 
-func recordCertificate(ctx context.Context, transaction pgx.Tx, one *agentv1.CertificateRecord, at time.Time) error {
+func recordCertificate(ctx context.Context, transaction pgx.Tx, one *agentv1.CertificateRecord, answered agent.Asked, at time.Time) error {
 	if _, err := transaction.Exec(ctx, supersedeCertificate, one.GetAgentId(), at.UTC()); err != nil {
 		return fmt.Errorf("supersede the certificate of agent %s: %w", one.GetAgentId(), err)
 	}
@@ -50,6 +55,7 @@ func recordCertificate(ctx context.Context, transaction pgx.Tx, one *agentv1.Cer
 		identity.GetFingerprintSha256(), one.GetAgentId(), identity.GetSerial(), identity.GetSubject(),
 		one.GetAuthoritySubject(), one.GetIssuedBy(),
 		identity.GetIssuedAt().AsTime(), identity.GetExpiresAt().AsTime(),
+		answered.Presented, answered.Request,
 	); err != nil {
 		if duplicate(err) {
 			return fmt.Errorf("%w: that certificate was already recorded", agent.ErrMalformedIdentity)
@@ -78,4 +84,18 @@ func restoreCertificate(row pgx.CollectableRow) (*agentv1.CertificateRecord, err
 	record.Identity = &identity
 	record.SupersededAt = instant(supersededAt)
 	return &record, nil
+}
+
+// Read under the agent's row lock, so the certificate whose answer is compared is
+// the one bound when the renewal is decided.
+func boundAnswer(ctx context.Context, transaction pgx.Tx, id string) (agent.Asked, error) {
+	var bound agent.Asked
+	err := transaction.QueryRow(ctx, currentAnswer, id).Scan(&bound.Presented, &bound.Request)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return agent.Asked{}, nil
+	case err != nil:
+		return agent.Asked{}, fmt.Errorf("read what the certificate of agent %s answered: %w", id, err)
+	}
+	return bound, nil
 }

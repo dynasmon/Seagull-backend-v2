@@ -44,6 +44,12 @@ type Move struct {
 	Authority            string
 	PresentedFingerprint string
 
+	// The digest of the request a renewal answers, empty unless only the agent
+	// that sent it could send it again, and what the renewal that issued the
+	// bound certificate asked with, which the store reads with the agent.
+	Request string
+	Bound   Asked
+
 	// Set when the agent asked for this itself rather than an operator. A
 	// platform that stopped listening to a machine stops signing for it too, so
 	// a renewal is refused wherever telemetry would be.
@@ -54,6 +60,21 @@ type Move struct {
 	// so two operators acting at once means the second is told rather than
 	// losing silently to the first.
 	Expected uint64
+}
+
+// What a renewal asked with: the certificate it was presented with and the
+// digest of its request. Empty for a certificate an operator had signed.
+type Asked struct {
+	Presented string
+	Request   string
+}
+
+// A renewal the platform granted and whose answer never reached the agent is
+// asked again with the certificate it asked to replace and the very request the
+// bound certificate answered. It is the same renewal, answered again; anybody
+// else presenting the replaced certificate is still refused.
+func (m Move) asksAgain() bool {
+	return m.Request != "" && m.Request == m.Bound.Request && m.PresentedFingerprint == m.Bound.Presented
 }
 
 // Pure, so the store's only job is to make it atomic: it reads the agent, calls
@@ -87,7 +108,7 @@ func Apply(current *agentv1.Agent, move Move) (*agentv1.Agent, *agentv1.Transiti
 	case binding && move.Renewal && !from.Admits():
 		return nil, nil, fmt.Errorf("%w: an agent that is %s does not renew its own certificate",
 			ErrIllegalMove, from)
-	case binding && move.Renewal && move.PresentedFingerprint != current.GetIdentity().GetFingerprintSha256():
+	case binding && move.Renewal && move.PresentedFingerprint != current.GetIdentity().GetFingerprintSha256() && !move.asksAgain():
 		return nil, nil, ErrCertificateReplaced
 	case changing && !Legal(from, move.To):
 		return nil, nil, Illegal(from, move.To)

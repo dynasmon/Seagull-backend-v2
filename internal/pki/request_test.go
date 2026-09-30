@@ -6,8 +6,10 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"strings"
@@ -81,6 +83,70 @@ func TestSignRefusesARequestThatIsNotOne(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if _, err := signing.Sign(subject, requestPEM, time.Hour, time.Now()); !errors.Is(err, pki.ErrMalformedRequest) {
 				t.Fatalf("%s was answered with %v", name, err)
+			}
+		})
+	}
+}
+
+// A renewal whose answer was lost is asked again with the same request, and the
+// digest of that request is how the platform recognises it. Only a signature
+// drawn at random makes the bytes the author's alone: a holder of the same key
+// signing deterministically would produce them too, so such a request names no
+// renewal.
+func TestARequestSignedAtRandomIsNamedByItsDigest(t *testing.T) {
+	signing := authority(t, 30*24*time.Hour)
+	p256, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate a P-256 key: %v", err)
+	}
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate an RSA key: %v", err)
+	}
+	_, edKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate an Ed25519 key: %v", err)
+	}
+
+	asked := requestWithKey(t, subject, p256)
+	issued, err := signing.Sign(subject, asked, time.Hour, time.Now())
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	block, _ := pem.Decode(asked)
+	if digest := sha256.Sum256(block.Bytes); issued.Request != hex.EncodeToString(digest[:]) {
+		t.Fatalf("an ECDSA request was named %q", issued.Request)
+	}
+	again, err := signing.Sign(subject, asked, time.Hour, time.Now())
+	if err != nil || again.Request != issued.Request {
+		t.Fatalf("the same request asked again was named %q, then %q: %v", issued.Request, again.Request, err)
+	}
+	other, err := signing.Sign(subject, requestWithKey(t, subject, p256), time.Hour, time.Now())
+	if err != nil || other.Request == issued.Request {
+		t.Fatalf("another request for the same key was named %q like the first: %v", other.Request, err)
+	}
+
+	pss, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		Subject: pkix.Name{CommonName: subject}, SignatureAlgorithm: x509.SHA256WithRSAPSS,
+	}, rsaKey)
+	if err != nil {
+		t.Fatalf("create an RSA-PSS request: %v", err)
+	}
+	for name, c := range map[string]struct {
+		request []byte
+		named   bool
+	}{
+		"rsa-pss":   {request: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: pss}), named: true},
+		"rsa-pkcs1": {request: requestWithKey(t, subject, rsaKey)},
+		"ed25519":   {request: requestWithKey(t, subject, edKey)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			issued, err := signing.Sign(subject, c.request, time.Hour, time.Now())
+			if err != nil {
+				t.Fatalf("sign: %v", err)
+			}
+			if (issued.Request != "") != c.named {
+				t.Fatalf("a %s request was named %q", name, issued.Request)
 			}
 		})
 	}

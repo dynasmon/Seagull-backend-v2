@@ -171,6 +171,46 @@ func TestAnAgentIsIssuedACertificateAndThenRenewsItItself(t *testing.T) {
 	}
 }
 
+// Over real mutual TLS: the answer to a renewal never reaches the agent, which
+// asks again with the certificate it still holds and the request it sent, and is
+// answered with a certificate it can renew with in turn. Whoever else holds the
+// replaced certificate and its key, asking with a request of its own, is refused.
+func TestAnAgentWhoseRenewalAnswerWasLostIsAnsweredWhenItAsksAgain(t *testing.T) {
+	plane := startControlAPI(t, nil)
+	operator := plane.caller(t, "e2e-admin")
+	token := plane.open(t, operator).GetToken()
+	plane.register(t, operator, token, "e2e-agent-73")
+
+	key, requestPEM := keyAndRequest(t, "e2e-agent-73")
+	issued := plane.issue(t, operator, token, "e2e-agent-73", requestPEM)
+	holder := plane.agentClient(t, key, issued)
+
+	renewalKey, renewalRequest := keyAndRequest(t, "e2e-agent-73")
+	if response, body := plane.renew(t, holder, renewalRequest); response.StatusCode != http.StatusCreated {
+		t.Fatalf("renewing was refused: %d %s", response.StatusCode, body)
+	}
+
+	response, body := plane.renew(t, holder, renewalRequest)
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("the renewal asked again was refused: %d %s", response.StatusCode, body)
+	}
+	var answered agentv1.IssuedCertificate
+	decode(t, body, &answered)
+	held, err := plane.agents.Agent(t.Context(), "e2e-agent-73", []string{"default"})
+	if err != nil || held.GetIdentity().GetFingerprintSha256() != answered.GetIdentity().GetFingerprintSha256() {
+		t.Fatalf("the registry did not bind the certificate it answered again with: %v", err)
+	}
+	_, nextRequest := keyAndRequest(t, "e2e-agent-73")
+	if response, body = plane.renew(t, plane.agentClient(t, renewalKey, &answered), nextRequest); response.StatusCode != http.StatusCreated {
+		t.Fatalf("the certificate answered again could not renew: %d %s", response.StatusCode, body)
+	}
+
+	_, copiedRequest := keyAndRequest(t, "e2e-agent-73")
+	if response, body = plane.renew(t, holder, copiedRequest); response.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("another request from the replaced certificate was answered: %d %s", response.StatusCode, body)
+	}
+}
+
 func TestARevokedAgentStopsBeingAbleToRenew(t *testing.T) {
 	plane := startControlAPI(t, nil)
 	operator := plane.caller(t, "e2e-admin")

@@ -103,6 +103,61 @@ func TestTheCurrentCertificateCanRenewAcrossAnAuthorityRotation(t *testing.T) {
 	}
 }
 
+// A renewal the platform granted and whose answer never reached the agent is
+// asked again by the same agent: presented with the certificate it asked to
+// replace, and carrying the very request the bound certificate answered. That
+// is the same renewal, and the platform answers it again. A holder of the same
+// key cannot send that request, so anybody else presenting the replaced
+// certificate is still refused.
+func TestARenewalAskedAgainWithTheRequestTheBoundCertificateAnsweredIsAnsweredAgain(t *testing.T) {
+	replaced := strings.Repeat("ef", 32)
+	answered := strings.Repeat("0a", 32)
+	again := identity()
+	again.Serial = "9c4e1a2b3d5f6071"
+	again.FingerprintSha256 = strings.Repeat("cd", 32)
+
+	held, _, err := agent.Apply(active(t), agent.Move{
+		Identity:             again,
+		Actor:                "agent-001",
+		At:                   moved,
+		PresentedFingerprint: replaced,
+		Request:              answered,
+		Bound:                agent.Asked{Presented: replaced, Request: answered},
+		Renewal:              true,
+	})
+	if err != nil {
+		t.Fatalf("a renewal asked again with the request the bound certificate answered was refused: %v", err)
+	}
+	if held.GetIdentity().GetFingerprintSha256() != again.GetFingerprintSha256() {
+		t.Fatal("answering the renewal again did not bind the certificate it answered with")
+	}
+
+	for name, move := range map[string]agent.Move{
+		"another request": {
+			PresentedFingerprint: replaced, Request: strings.Repeat("0b", 32),
+			Bound: agent.Asked{Presented: replaced, Request: answered},
+		},
+		"another replaced certificate": {
+			PresentedFingerprint: strings.Repeat("12", 32), Request: answered,
+			Bound: agent.Asked{Presented: replaced, Request: answered},
+		},
+		"a request that names nobody": {
+			PresentedFingerprint: replaced,
+			Bound:                agent.Asked{Presented: replaced},
+		},
+		"a certificate an operator had signed": {
+			PresentedFingerprint: replaced, Request: answered,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			move.Identity, move.Actor, move.At, move.Renewal = again, "agent-001", moved, true
+			if _, _, err := agent.Apply(active(t), move); !errors.Is(err, agent.ErrCertificateReplaced) {
+				t.Fatalf("a replaced certificate asking with %s was answered with %v", name, err)
+			}
+		})
+	}
+}
+
 func TestAnEndedAgentTakesNoFurtherIdentity(t *testing.T) {
 	revoked, _, err := agent.Apply(active(t), agent.Move{
 		To: agent.Revoked, Note: "the host was rebuilt", Actor: "operator@acme", At: moved,

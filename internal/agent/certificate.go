@@ -18,3 +18,13 @@ func Certificate(moved *agentv1.Agent, move Move) *agentv1.CertificateRecord {
 		IssuedBy:         move.Actor,
 	}
 }
+
+// What a binding answered, kept with the certificate it bound so that the one
+// renewal that asked for it can be told from anybody else presenting the
+// certificate it replaced.
+func Answering(move Move) Asked {
+	if !move.Renewal {
+		return Asked{}
+	}
+	return Asked{Presented: move.PresentedFingerprint, Request: move.Request}
+}

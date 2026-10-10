@@ -33,6 +33,7 @@ var layers = map[string]layer{
 	"internal/advisorystore":  capability,
 	"internal/agent":          domain,
 	"internal/agentidentity":  domain,
+	"internal/agentpolicy":    domain,
 	"internal/alert":          domain,
 	"internal/alertfile":      adapter,
 	"internal/alertstore":     capability,

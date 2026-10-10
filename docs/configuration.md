@@ -460,6 +460,10 @@ detection away from somebody's triage.
 | `SEAGULL_CONTROL_TELEMETRY_STORE_TLS` | `true` | verify and encrypt the native connection; development Compose explicitly sets `false` |
 | `SEAGULL_CONTROL_TELEMETRY_STORE_TLS_CA` | unset | authority the store must chain to; the system pool when unset |
 | `SEAGULL_CONTROL_TELEMETRY_STORE_TLS_SERVER_NAME` | unset | name the store certificate must carry; the dialled host when unset |
+| `SEAGULL_CONTROL_API_AGENT_POLICY_SIGNERS` | unset | PEM public keys, ECDSA over P-256, an agent policy is accepted under; read again for every publication. Unset publishes no agent policy |
+| `SEAGULL_CONTROL_API_AGENT_POLICY_INTERVAL` | `30s` | how often one agent may ask for its policy |
+| `SEAGULL_CONTROL_API_AGENT_POLICY_BURST` | `4` | requests for a policy one agent may make at once above that |
+| `SEAGULL_CONTROL_API_TRACKED_POLICY_AGENTS` | `8192` | agents whose requests for a policy are counted at once |
 
 The control plane authenticates a caller by certificate, so it has no plaintext
 mode and no mode without a caller authority: without one there is nobody to be
@@ -475,6 +479,11 @@ It writes the agent topic rather than reading it: what it decided about an agent
 is published there for the gateway, and a decision the backbone did not take is
 carried again on the next sweep. Its connection to the telemetry store answers
 one question — when an agent was last heard from — and writes nothing.
+
+It holds the agent policies operators publish and never signs one: the signers
+setting names the public keys a publication must verify under, and an agent asks
+for the newest revision of its tenant that names it on the listener it renews
+on. See [ADR 29](decisions/0029-an-agent-policy-is-signed-off-the-platform.md).
 
 ### query-api
 

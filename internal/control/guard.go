@@ -52,6 +52,17 @@ const (
 	CodeIncidentMoved        = "incident_moved"
 	CodeStoryHeldByAnother   = "incident_held_by_another"
 	CodeIncidentsUnavailable = "incidents_unavailable"
+
+	CodePolicyUnsigned       = "policy_not_signed"
+	CodePolicyExpired        = "policy_expired"
+	CodeMalformedPolicy      = "malformed_policy"
+	CodePolicyStale          = "policy_revision_stale"
+	CodePolicyUnregistered   = "policy_names_unregistered_agents"
+	CodeUnknownPolicy        = "unknown_policy"
+	CodeNoPolicy             = "no_policy"
+	CodeNotAdmitted          = "agent_not_admitted"
+	CodePoliciesUnconfigured = "agent_policies_not_configured"
+	CodePoliciesUnavailable  = "agent_policies_unavailable"
 )
 
 // No value of this type means "anybody": the zero value refuses, so a route

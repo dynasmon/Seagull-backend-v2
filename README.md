@@ -122,6 +122,24 @@ than placed somewhere, so one gateway serves every tenant and a routing mistake
 cannot move an estate's telemetry into another's. See
 [ADR 26](docs/decisions/0026-an-agent-sends-into-the-tenant-it-was-registered-in.md).
 
+### Agent policies
+
+How agents run can be changed without visiting them, by a policy signed off the
+platform. An operator signs it with a key the platform never holds and publishes
+it; the platform checks the signature against the public keys it was given,
+records it, and hands each agent the newest revision of its tenant that names it
+on the listener the agent renews on. The agent checks the signature again under
+keys it was provisioned with, refuses any revision older than the one it holds,
+and applies what a policy may set — its log level, which modules collect, what
+the files module watches, lower budgets — inside the ceilings of its own
+configuration. A taken control plane can withhold a policy and cannot write or
+roll one back. See
+[ADR 29](docs/decisions/0029-an-agent-policy-is-signed-off-the-platform.md).
+
+```bash
+go run ./tools/policysign -key signer.pem -policy policy.json -tenant default -lifetime 720h -output publication.pb
+```
+
 ### Asset inventory
 
 What an asset has is a record kind of its own, on a contract, a topic, a store
@@ -274,7 +292,7 @@ Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 | `inventory-projector` | Folds what a collector saw into what an asset currently has, under a group and a quarantine of its own. An item the newest full scan stops naming is no longer current, and nothing is deleted to say so. |
 | `advisory-importer` | Follows the vulnerability feeds a deployment names, translates each changed record into an advisory carrying its provenance, and publishes it with the freshness of the feed. The one process that reaches the internet; it holds no store and names no asset. |
 | `advisory-writer` | Keeps every version of every advisory and every attempt to follow a feed, under a group and a quarantine of its own. |
-| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry, and the authority that signs an agent's certificate. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates on a second one. |
+| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry, the authority that signs an agent's certificate, and the signed policies agents are handed. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates and asking for their policy on a second one. |
 | `query-api` | The read plane, and the only reader of the analytical store. |
 | `backbone-migrator`, `store-migrator`, `control-migrator` | Apply the topic topology, the analytical schema and the relational schema, then exit. Nothing migrates on the way to serving traffic. |
 
@@ -432,7 +450,8 @@ container without going through the environment. The settings that matter most:
 | `SEAGULL_CONTROL_API_AGENT_AUTHORITY_CERT`, `SEAGULL_CONTROL_API_AGENT_AUTHORITY_KEY` | The authority the control plane signs agent certificates with. Read once at startup; a plane that cannot read it does not serve. |
 | `SEAGULL_CONTROL_API_AGENT_TRUST_BUNDLE` | Every authority an agent is told to trust, read at each issuance and sent with the certificate. Widening it is how a certificate authority is rotated without visiting a machine; an authority that signs and is not in it is refused. |
 | `SEAGULL_CONTROL_API_AGENT_CERT_LIFETIME` | How long an issued agent certificate is valid. Short is the answer to a stolen key nobody has revoked, and renewal is what makes short affordable. |
-| `SEAGULL_CONTROL_API_RENEWAL_ADDRESS`, `SEAGULL_CONTROL_API_RENEWAL_TLS_CERT`, `SEAGULL_CONTROL_API_RENEWAL_TLS_KEY`, `SEAGULL_CONTROL_API_AGENT_CA` | The agent-facing listener an agent renews on, in the agent trust domain rather than the operator one. |
+| `SEAGULL_CONTROL_API_RENEWAL_ADDRESS`, `SEAGULL_CONTROL_API_RENEWAL_TLS_CERT`, `SEAGULL_CONTROL_API_RENEWAL_TLS_KEY`, `SEAGULL_CONTROL_API_AGENT_CA` | The agent-facing listener an agent renews on and asks for its policy on, in the agent trust domain rather than the operator one. |
+| `SEAGULL_CONTROL_API_AGENT_POLICY_SIGNERS` | The public keys an agent policy must be signed under. Read at each publication; unset, the plane publishes no policy. |
 | `SEAGULL_BACKBONE_AGENTS_TOPIC` | Where the control plane says what it decided about an agent and the gateway reads it. Compacted, keyed by the agent. |
 | `SEAGULL_CONTROL_TELEMETRY_STORE_ADDRESS` | Where the control plane reads when an agent was last heard from. It writes nothing there. |
 | `SEAGULL_CONTROL_API_SESSION_KEY` | Key sessions are signed with; drawn at random when unset. |

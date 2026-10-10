@@ -32,3 +32,4 @@ rediscovered by reading the code.
 - [26. An agent sends into the tenant it was registered in, and an agent the registry never named is not admitted](0026-an-agent-sends-into-the-tenant-it-was-registered-in.md)
 - [27. Inventory is a record kind of its own, and what an asset currently has is what the newest full scan named](0027-inventory-is-a-record-kind-of-its-own.md)
 - [28. Vulnerability intelligence is a record kind of its own, read from its source and never inferred from what a feed left out](0028-vulnerability-intelligence-is-read-from-its-source.md)
+- [29. An agent policy is signed off the platform, and an agent is handed the newest revision of its tenant that names it](0029-an-agent-policy-is-signed-off-the-platform.md)

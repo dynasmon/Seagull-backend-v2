@@ -175,6 +175,7 @@ func controlAPI(ctx context.Context) error {
 		Agents:          raised.Agents(),
 		Admissions:      admissions,
 		Liveness:        seen,
+		Reports:         seen,
 		Authority:       authority,
 		TrustBundle:     bundle,
 		CertificateLife: settings.certificateLife,

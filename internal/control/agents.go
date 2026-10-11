@@ -96,7 +96,7 @@ func (s *Server) searchAgents() http.Handler {
 			s.refuseAgent(w, err)
 			return
 		}
-		s.observed(r.Context(), page.GetAgents(), caller.Grant.Tenants())
+		s.observed(r.Context(), page.GetAgents(), caller.Grant.Tenants(), false)
 		respond(w, http.StatusOK, page)
 	})
 }
@@ -114,7 +114,7 @@ func (s *Server) describeAgent() http.Handler {
 			s.refuseAgent(w, err)
 			return
 		}
-		s.observed(r.Context(), []*agentv1.Agent{one}, caller.Grant.Tenants())
+		s.observed(r.Context(), []*agentv1.Agent{one}, caller.Grant.Tenants(), true)
 		respond(w, http.StatusOK, one)
 	})
 }

@@ -32,6 +32,7 @@ type ServerOptions struct {
 	Agents          Agents
 	Admissions      Admissions
 	Liveness        Liveness
+	Reports         Reports
 	Authority       *pki.Authority
 	TrustBundle     func() ([]byte, error)
 	CertificateLife time.Duration
@@ -60,6 +61,7 @@ type Server struct {
 	agents     Agents
 	admissions Admissions
 	liveness   Liveness
+	reports    Reports
 	metrics    *Metrics
 	logger     *slog.Logger
 	now        func() time.Time
@@ -148,6 +150,7 @@ func newServer(options ServerOptions) (*Server, error) {
 		agents:     options.Agents,
 		admissions: options.Admissions,
 		liveness:   options.Liveness,
+		reports:    options.Reports,
 		metrics:    options.Metrics,
 		logger:     options.Logger,
 		now:        options.Now,

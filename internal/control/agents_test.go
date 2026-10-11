@@ -12,7 +12,9 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agent"
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentstatus"
 	"github.com/dynasmon/Seagull-backend-v2/internal/control"
+	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 )
 
@@ -407,7 +409,21 @@ func TestTheAnnouncerCarriesWhatTheBackboneRefusedEarlier(t *testing.T) {
 
 type stubLiveness struct {
 	seen      map[string]time.Time
+	reported  map[string]agentstatus.Report
 	unreached error
+}
+
+func (s *stubLiveness) Newest(_ context.Context, agents, tenants []string) (map[string]agentstatus.Report, error) {
+	if s.unreached != nil {
+		return nil, s.unreached
+	}
+	answered := map[string]agentstatus.Report{}
+	for _, agentID := range agents {
+		if held, known := s.reported[agentID]; known && len(tenants) > 0 {
+			answered[agentID] = held
+		}
+	}
+	return answered, nil
 }
 
 func (s *stubLiveness) LastSeen(_ context.Context, agents, tenants []string) (map[string]time.Time, error) {
@@ -463,5 +479,63 @@ func TestATelemetryStoreThatDoesNotAnswerStillLeavesTheAgentReadable(t *testing.
 	}
 	if one.GetLastSeen() != nil {
 		t.Fatal("a liveness nobody could read was answered anyway")
+	}
+}
+
+func TestHowRecentlyAnAgentReportedIsJudgedWhenItIsReadAndOnlyOneAgentCarriesItsReport(t *testing.T) {
+	h := newHarness(t, nil)
+	now := time.Now().UTC()
+	running := fixtures.Report{AgentID: "web-01", At: now.Add(-time.Minute)}.Status()
+	stopping := fixtures.Report{AgentID: "web-02", At: now.Add(-time.Hour), Condition: agentv1.Status_CONDITION_STOPPED}.Status()
+	held := newStubAgents()
+	held.held["web-02"] = proto.Clone(held.held["web-01"]).(*agentv1.Agent)
+	held.held["web-02"].AgentId = "web-02"
+	handler := listenerReading(t, h, held, &stubAdmissions{}, &stubLiveness{reported: map[string]agentstatus.Report{
+		"web-01": {Received: now.Add(-time.Minute), Status: running},
+		"web-02": {Received: now.Add(-time.Hour), Status: stopping},
+	}})
+	operator := session(t, handler, "dev-admin")
+
+	response := call(t, handler, http.MethodPost, "/v1/agents/search", "dev-admin", operator, &agentv1.Query{})
+	var page agentv1.Page
+	if err := proto.Unmarshal(response.Body.Bytes(), &page); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("searching agents answered %d: %v", response.Code, err)
+	}
+	judged := map[string]agentv1.Liveness{}
+	for _, listed := range page.GetAgents() {
+		judged[listed.GetAgentId()] = listed.GetLiveness()
+		if listed.GetStatus() != nil {
+			t.Errorf("a page carried the report of %s", listed.GetAgentId())
+		}
+	}
+	if judged["web-01"] != agentv1.Liveness_LIVENESS_ACTIVE || judged["web-02"] != agentv1.Liveness_LIVENESS_STOPPED {
+		t.Errorf("the page judged %v", judged)
+	}
+
+	response = call(t, handler, http.MethodGet, "/v1/agents/web-01", "dev-admin", operator, nil)
+	var one agentv1.Agent
+	if err := proto.Unmarshal(response.Body.Bytes(), &one); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("reading an agent answered %d: %v", response.Code, err)
+	}
+	if one.GetLiveness() != agentv1.Liveness_LIVENESS_ACTIVE || !one.GetLastReported().AsTime().Equal(now.Add(-time.Minute)) {
+		t.Errorf("the agent reads as %s, last reported %s", one.GetLiveness(), one.GetLastReported().AsTime())
+	}
+	if !proto.Equal(one.GetStatus(), running) {
+		t.Error("reading one agent did not carry the report it last sent")
+	}
+}
+
+func TestAStatusStoreThatDoesNotAnswerLeavesTheAgentReadableWithoutALiveness(t *testing.T) {
+	h := newHarness(t, nil)
+	handler := listenerReading(t, h, newStubAgents(), &stubAdmissions{},
+		&stubLiveness{unreached: errors.New("the status store is unreachable")})
+
+	response := call(t, handler, http.MethodGet, "/v1/agents/web-01", "dev-admin", session(t, handler, "dev-admin"), nil)
+	var one agentv1.Agent
+	if err := proto.Unmarshal(response.Body.Bytes(), &one); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("an unreachable status store made an agent unreadable: %d %v", response.Code, err)
+	}
+	if one.GetLiveness() != agentv1.Liveness_LIVENESS_UNSPECIFIED || one.GetLastReported() != nil || one.GetStatus() != nil {
+		t.Fatal("a status nobody could read was answered anyway")
 	}
 }

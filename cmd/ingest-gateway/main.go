@@ -67,11 +67,22 @@ func gateway(ctx context.Context) error {
 	}
 	defer assets.Close()
 
+	reports, err := broker.NewStatus(broker.Config{
+		Brokers:  settings.brokers,
+		Topic:    settings.topology.Status.Name,
+		ClientID: settings.statusRules.Gateway,
+		Security: settings.security,
+	})
+	if err != nil {
+		return err
+	}
+	defer reports.Close()
+
 	// The topology is applied by backbone-migrator, never here. This only refuses
 	// to serve agents when a topic it would publish to is missing or reshaped.
 	topologyCtx, cancel := context.WithTimeout(ctx, settings.publishTimeout)
 	defer cancel()
-	drift, err := publisher.VerifyTopics(topologyCtx, settings.topology.Events, settings.topology.Inventory)
+	drift, err := publisher.VerifyTopics(topologyCtx, settings.topology.Events, settings.topology.Inventory, settings.topology.Status)
 	if err != nil {
 		return err
 	}
@@ -97,16 +108,22 @@ func gateway(ctx context.Context) error {
 		return err
 	}
 
+	statusInstruments := ingest.NewStatusMetrics(platform.Metrics())
+	statusAdmitter, err := ingest.NewStatusAdmitter(reports, settings.statusRules, statusInstruments)
+	if err != nil {
+		return err
+	}
+
 	capacity, err := ingest.NewCapacity(settings.maxInflightBytes, settings.maxInflightRequests)
 	if err != nil {
 		return err
 	}
 	ingest.ObserveCapacity(platform.Metrics(), capacity)
 
-	// One limiter and one capacity across both routes: what an agent may spend
+	// One limiter and one capacity across every route: what an agent may spend
 	// and what the process may hold are bounded per agent and per process, not
 	// per kind of record, or a collector would buy a second budget by sending an
-	// inventory batch.
+	// inventory batch or a status report.
 	limiter := ratelimit.NewLimiter(settings.ratePerSecond, settings.rateBurst, settings.trackedAgents)
 
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{
@@ -135,11 +152,25 @@ func gateway(ctx context.Context) error {
 		return err
 	}
 
+	statusHandler, err := ingest.NewStatusHandler(ingest.StatusHandlerOptions{
+		Admitter:       statusAdmitter,
+		Roster:         admitted.held,
+		Limiter:        limiter,
+		Capacity:       capacity,
+		Metrics:        statusInstruments,
+		MaxBodyBytes:   settings.maxBodyBytes,
+		PublishTimeout: settings.publishTimeout,
+	})
+	if err != nil {
+		return err
+	}
+
 	listener, err := ingest.NewServer(ingest.ServerOptions{
 		Address:         settings.address,
 		TLS:             mutual,
 		Handler:         handler,
 		Inventory:       inventoryHandler,
+		Status:          statusHandler,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
 		ReadTimeout:     settings.readTimeout,
@@ -159,6 +190,7 @@ func gateway(ctx context.Context) error {
 
 	platform.Health().Register("backbone", publisher.Ping)
 	platform.Health().Register("inventory-backbone", assets.Ping)
+	platform.Health().Register("status-backbone", reports.Ping)
 	platform.Add(admitted.follower(platform.Logger()))
 	platform.Add(listener)
 

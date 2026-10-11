@@ -25,6 +25,9 @@ const (
 	InventoryPath  = "/v1/inventory"
 	InventoryRoute = "POST " + InventoryPath
 
+	StatusPath  = "/v1/status"
+	StatusRoute = "POST " + StatusPath
+
 	ContentType = "application/x-protobuf"
 
 	CodeAtCapacity    = "gateway_at_capacity"
@@ -56,6 +59,16 @@ type InventoryHandlerOptions struct {
 	Limiter        *ratelimit.Limiter
 	Capacity       *Capacity
 	Metrics        *InventoryMetrics
+	MaxBodyBytes   int64
+	PublishTimeout time.Duration
+}
+
+type StatusHandlerOptions struct {
+	Admitter       *StatusAdmitter
+	Roster         Roster
+	Limiter        *ratelimit.Limiter
+	Capacity       *Capacity
+	Metrics        *StatusMetrics
 	MaxBodyBytes   int64
 	PublishTimeout time.Duration
 }
@@ -97,6 +110,22 @@ func NewInventoryHandler(options InventoryHandlerOptions) (*Handler, error) {
 		return nil, errors.New("the inventory handler needs metrics")
 	}
 	return newHandler(inventoryStream{admitter: options.Admitter, metrics: options.Metrics}, gate{
+		roster:         options.Roster,
+		limiter:        options.Limiter,
+		capacity:       options.Capacity,
+		maxBodyBytes:   options.MaxBodyBytes,
+		publishTimeout: options.PublishTimeout,
+	})
+}
+
+func NewStatusHandler(options StatusHandlerOptions) (*Handler, error) {
+	if options.Admitter == nil {
+		return nil, errors.New("the status handler needs an admitter")
+	}
+	if options.Metrics == nil {
+		return nil, errors.New("the status handler needs metrics")
+	}
+	return newHandler(statusStream{admitter: options.Admitter, metrics: options.Metrics}, gate{
 		roster:         options.Roster,
 		limiter:        options.Limiter,
 		capacity:       options.Capacity,

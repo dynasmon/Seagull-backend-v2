@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentpolicy"
 	"github.com/dynasmon/Seagull-backend-v2/internal/authz"
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/clickhouse"
@@ -157,6 +158,11 @@ func controlAPI(ctx context.Context) error {
 		return err
 	}
 
+	signers, accepted, err := agentPolicySigners(settings)
+	if err != nil {
+		return err
+	}
+
 	options := control.ServerOptions{
 		Address:         settings.address,
 		TLS:             transport,
@@ -176,6 +182,10 @@ func controlAPI(ctx context.Context) error {
 		RenewalTLS:      renewalTransport,
 		RenewalLimiter: ratelimit.NewLimiter(
 			settings.renewalsPerSecond, settings.renewalBurst, settings.trackedRenewalAgent),
+		Policies:      raised.AgentPolicies(),
+		PolicySigners: signers,
+		PolicyLimiter: ratelimit.NewLimiter(
+			settings.policyPullsPerSecond, settings.policyPullBurst, settings.trackedPolicyAgents),
 		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
@@ -215,6 +225,7 @@ func controlAPI(ctx context.Context) error {
 		slog.String("agent_authority", authority.Subject()),
 		slog.Time("agent_authority_expires_at", authority.NotAfter()),
 		slog.Duration("agent_certificate_lifetime", settings.certificateLife),
+		slog.Int("agent_policy_signers", accepted),
 	)
 
 	platform.Health().Register("backbone", published.publisher.Ping)
@@ -283,6 +294,24 @@ func agentAuthority(settings configuration) (*pki.Authority, func() ([]byte, err
 		return nil, nil, err
 	}
 	return authority, bundle, nil
+}
+
+func agentPolicySigners(settings configuration) (func() (*agentpolicy.Signers, error), int, error) {
+	if settings.policySignersFile == "" {
+		return nil, 0, nil
+	}
+	read := func() (*agentpolicy.Signers, error) {
+		content, err := os.ReadFile(settings.policySignersFile)
+		if err != nil {
+			return nil, fmt.Errorf("read the agent policy signers: %w", err)
+		}
+		return agentpolicy.ParseSigners(content)
+	}
+	held, err := read()
+	if err != nil {
+		return nil, 0, err
+	}
+	return read, held.Count(), nil
 }
 
 func policySource(path string) control.Source {

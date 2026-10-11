@@ -148,6 +148,7 @@ func (s *Store) VerifySchema(ctx context.Context) error {
 		alertsTable, transitionsTable,
 		incidentsTable, incidentTransitionsTable,
 		agentsTable, agentTransitionsTable, agentCertificatesTable,
+		agentPoliciesTable, agentPolicyTargetsTable,
 	} {
 		var present bool
 		err := s.pool.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", table).Scan(&present)

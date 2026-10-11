@@ -73,6 +73,7 @@ func listenerRegistering(
 	t.Helper()
 
 	signing, bundle := testAuthority(t)
+	held, _ := registered.(*stubAgents)
 	handler, err := control.NewHandler(control.ServerOptions{
 		Guard:           h.guard,
 		Sessions:        h.sessions,
@@ -86,6 +87,7 @@ func listenerRegistering(
 		Authority:       signing,
 		TrustBundle:     bundle,
 		CertificateLife: 24 * time.Hour,
+		Policies:        newStubPolicies(held),
 		Metrics:         h.metrics,
 		Logger:          slog.New(slog.DiscardHandler),
 		Instrumentation: httpx.NewInstrumentation(metrics.New("control-api-routes")),

@@ -11,6 +11,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentpolicy"
 	"github.com/dynasmon/Seagull-backend-v2/internal/pki"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/httpx"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/ratelimit"
@@ -37,6 +38,9 @@ type ServerOptions struct {
 	RenewalAddress  string
 	RenewalTLS      *tls.Config
 	RenewalLimiter  *ratelimit.Limiter
+	Policies        AgentPolicies
+	PolicySigners   func() (*agentpolicy.Signers, error)
+	PolicyLimiter   *ratelimit.Limiter
 	Metrics         *Metrics
 	Instrumentation *httpx.Instrumentation
 	Logger          *slog.Logger
@@ -64,6 +68,10 @@ type Server struct {
 	trustBundle     func() ([]byte, error)
 	certificateLife time.Duration
 	renewals        *ratelimit.Limiter
+
+	policies      AgentPolicies
+	policySigners func() (*agentpolicy.Signers, error)
+	policyPulls   *ratelimit.Limiter
 }
 
 type route struct {
@@ -104,6 +112,8 @@ func newServer(options ServerOptions) (*Server, error) {
 	switch {
 	case options.Agents == nil:
 		return nil, errors.New("the control listener administers agents and needs a registry to keep them in")
+	case options.Policies == nil:
+		return nil, errors.New("the control listener hands agents their policies and needs somewhere to keep them")
 	case options.Authority == nil:
 		return nil, errors.New("the control listener issues the identities it binds and needs an authority to sign with")
 	case options.CertificateLife <= 0:
@@ -146,6 +156,10 @@ func newServer(options ServerOptions) (*Server, error) {
 		trustBundle:     options.TrustBundle,
 		certificateLife: options.CertificateLife,
 		renewals:        options.RenewalLimiter,
+
+		policies:      options.Policies,
+		policySigners: options.PolicySigners,
+		policyPulls:   options.PolicyLimiter,
 	}, nil
 }
 
@@ -192,7 +206,7 @@ func (s *Server) routes() []route {
 		{http.MethodGet, SessionPath, "session_describe", Session(), s.describeSession()},
 		{http.MethodDelete, SessionPath, "session_revoke", Session(), s.revokeSession()},
 		{http.MethodGet, SessionsPath, "session_list", Session(), s.listSessions()},
-	}, slices.Concat(rulesetRoutes(s), alertRoutes(s), incidentRoutes(s), agentRoutes(s), certificateRoutes(s))...)
+	}, slices.Concat(rulesetRoutes(s), alertRoutes(s), incidentRoutes(s), agentRoutes(s), certificateRoutes(s), policyRoutes(s))...)
 }
 
 func (s *Server) descriptor() http.Handler {

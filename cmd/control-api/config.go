@@ -33,6 +33,11 @@ type configuration struct {
 	renewalBurst        int
 	trackedRenewalAgent int
 
+	policySignersFile    string
+	policyPullsPerSecond float64
+	policyPullBurst      int
+	trackedPolicyAgents  int
+
 	brokers      []string
 	topology     broker.Topology
 	security     broker.Security
@@ -82,6 +87,10 @@ func load(parser *config.Parser) (configuration, error) {
 		renewalBurst:        parser.Int("SEAGULL_CONTROL_API_RENEWAL_BURST", 4, 1, 1_000),
 		trackedRenewalAgent: parser.Int("SEAGULL_CONTROL_API_TRACKED_RENEWING_AGENTS", 8192, 1, 1_000_000),
 
+		policySignersFile:   parser.FilePath("SEAGULL_CONTROL_API_AGENT_POLICY_SIGNERS", ""),
+		policyPullBurst:     parser.Int("SEAGULL_CONTROL_API_AGENT_POLICY_BURST", 4, 1, 1_000),
+		trackedPolicyAgents: parser.Int("SEAGULL_CONTROL_API_TRACKED_POLICY_AGENTS", 8192, 1, 1_000_000),
+
 		brokers:      parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
 		topology:     broker.LoadTopology(parser),
 		security:     broker.LoadSecurity(parser),
@@ -114,6 +123,8 @@ func load(parser *config.Parser) (configuration, error) {
 	loaded.ratePerSecond = float64(parser.Int("SEAGULL_CONTROL_API_RATE_PER_SECOND", 20, 0, 10_000))
 	loaded.renewalsPerSecond = 1 / parser.Duration("SEAGULL_CONTROL_API_RENEWAL_INTERVAL",
 		time.Minute, time.Second, 24*time.Hour).Seconds()
+	loaded.policyPullsPerSecond = 1 / parser.Duration("SEAGULL_CONTROL_API_AGENT_POLICY_INTERVAL",
+		30*time.Second, time.Second, 24*time.Hour).Seconds()
 
 	if err := parser.Err(); err != nil {
 		return configuration{}, err

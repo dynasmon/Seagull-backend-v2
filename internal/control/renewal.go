@@ -16,10 +16,10 @@ import (
 
 const RenewalPath = "/v1/agents/certificate"
 
-// The agent-facing half of the control plane, and the only route on it. It
-// terminates the agent trust domain rather than the operator one, so a
-// certificate that may renew cannot reach /v1/agents and an operator certificate
-// cannot renew an agent's.
+// The agent-facing half of the control plane: renewing a certificate and asking
+// for the policy that names the agent. It terminates the agent trust domain
+// rather than the operator one, so a certificate that may renew cannot reach
+// /v1/agents and an operator certificate cannot renew an agent's.
 func NewRenewalServer(options ServerOptions) (*httpx.Server, error) {
 	if options.RenewalTLS == nil {
 		return nil, errors.New("the renewal listener authenticates an agent by certificate and cannot serve without one")
@@ -53,6 +53,8 @@ func NewRenewalHandler(options ServerOptions) (http.Handler, error) {
 	mux := http.NewServeMux()
 	mux.Handle(http.MethodPost+" "+RenewalPath,
 		options.Instrumentation.Handle("agent_certificate_renew", server.renewCertificate()))
+	mux.Handle(http.MethodGet+" "+PolicyPath,
+		options.Instrumentation.Handle("agent_policy_serve", server.servePolicy()))
 	return mux, nil
 }
 

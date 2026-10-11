@@ -30,6 +30,8 @@ type Metrics struct {
 	signed      *prometheus.CounterVec
 	renewed     *prometheus.CounterVec
 	outstanding prometheus.Gauge
+	instructed  *prometheus.CounterVec
+	handed      *prometheus.CounterVec
 }
 
 func NewMetrics(registry *metrics.Registry) *Metrics {
@@ -154,6 +156,18 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "agent_admissions_outstanding",
 			Help:      "Agents whose recorded state the data plane has not been told about.",
 		}),
+		instructed: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "agent_policies_published_total",
+			Help:      "Signed agent policies an operator asked the platform to publish, by what came of them.",
+		}, []string{"outcome"}),
+		handed: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "agent_policies_served_total",
+			Help:      "Agents asking for the policy that names them, by what they were answered.",
+		}, []string{"outcome"}),
 	}
 
 	registry.MustRegister(
@@ -163,6 +177,7 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 		instruments.published, instruments.activated, instruments.moved, instruments.correlated,
 		instruments.registered, instruments.announced, instruments.outstanding,
 		instruments.signed, instruments.renewed,
+		instruments.instructed, instruments.handed,
 	)
 	return instruments
 }
@@ -277,5 +292,17 @@ func (m *Metrics) agentAnnounced(outcome string) {
 func (m *Metrics) agentsOutstanding(count int) {
 	if m != nil {
 		m.outstanding.Set(float64(count))
+	}
+}
+
+func (m *Metrics) policyPublished(outcome string) {
+	if m != nil {
+		m.instructed.WithLabelValues(outcome).Inc()
+	}
+}
+
+func (m *Metrics) policyServed(outcome string) {
+	if m != nil {
+		m.handed.WithLabelValues(outcome).Inc()
 	}
 }

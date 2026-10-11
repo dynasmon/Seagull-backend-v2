@@ -3,6 +3,9 @@ package e2e_test
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"io"
@@ -106,6 +109,7 @@ type controlPlane struct {
 	sessions       *control.Sessions
 	agents         *registeredAgents
 	told           *announcedAdmissions
+	policyKey      *ecdsa.PrivateKey
 	stopped        chan error
 }
 
@@ -187,6 +191,10 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 
 	registered, told := newRegisteredAgents(), &announcedAdmissions{}
 	agentAuthority, signing, renewalMutual, bundleFile := agentDomain(t, directory)
+	policyKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate the policy signing key: %v", err)
+	}
 
 	options := control.ServerOptions{
 		Address:         "127.0.0.1:0",
@@ -204,6 +212,8 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 		CertificateLife: time.Hour,
 		RenewalAddress:  "127.0.0.1:0",
 		RenewalTLS:      renewalMutual,
+		Policies:        newPublishedPolicies(registered),
+		PolicySigners:   signersOf(t, policyKey),
 		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
@@ -234,6 +244,7 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 		sessions:       sessions,
 		agents:         registered,
 		told:           told,
+		policyKey:      policyKey,
 		stopped:        make(chan error, 1),
 	}
 	go func() { running.stopped <- platform.Run(ctx) }()

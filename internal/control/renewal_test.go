@@ -25,6 +25,7 @@ func renewals(t *testing.T, held *stubAgents, limiter *ratelimit.Limiter) http.H
 	signing, bundle := testAuthority(t)
 	handler, err := control.NewRenewalHandler(control.ServerOptions{
 		Agents:          held,
+		Policies:        newStubPolicies(held),
 		Authority:       signing,
 		TrustBundle:     bundle,
 		CertificateLife: 24 * time.Hour,

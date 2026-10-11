@@ -6,6 +6,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
+	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
 	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 )
@@ -70,6 +71,30 @@ func (s inventoryStream) admit(ctx context.Context, identity agentidentity.Ident
 	}
 
 	carried := outcome{batchID: batch.GetBatchId(), records: len(batch.GetRecords())}
+	acknowledgement, err := s.admitter.Admit(ctx, identity, tenant, &batch)
+	if err != nil {
+		return carried, err
+	}
+	carried.acknowledgement = acknowledgement
+	return carried, nil
+}
+
+type statusStream struct {
+	admitter *StatusAdmitter
+	metrics  *StatusMetrics
+}
+
+func (s statusStream) name() string { return "status" }
+
+func (s statusStream) rejected(code string) { s.metrics.batchRejected(code) }
+
+func (s statusStream) admit(ctx context.Context, identity agentidentity.Identity, tenant string, payload []byte) (outcome, error) {
+	var batch agentv1.StatusBatch
+	if err := proto.Unmarshal(payload, &batch); err != nil {
+		return outcome{}, refuseMalformed(s)
+	}
+
+	carried := outcome{batchID: batch.GetBatchId(), records: len(batch.GetReports())}
 	acknowledgement, err := s.admitter.Admit(ctx, identity, tenant, &batch)
 	if err != nil {
 		return carried, err

@@ -287,6 +287,33 @@ services:
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
     <<: *hardening
 
+  # Keeps the newest thing each agent said of itself, under a group and a
+  # quarantine of its own: a status store outage costs how fresh liveness is,
+  # and never the admission or the storage of telemetry.
+  status-projector:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        COMPONENT: status-projector
+        VERSION: ${SEAGULL_VERSION:-dev}
+    depends_on:
+      backbone-migrator:
+        condition: service_completed_successfully
+      store-migrator:
+        condition: service_completed_successfully
+    networks: [backbone]
+    environment:
+      <<: *backbone
+      SEAGULL_STATUS_STORE_ADDRESS: clickhouse:9000
+      SEAGULL_STATUS_STORE_DATABASE: ${SEAGULL_STATUS_STORE_DATABASE:-seagull}
+      SEAGULL_STATUS_STORE_USER: ${SEAGULL_STATUS_STORE_USER:-seagull}
+      SEAGULL_STATUS_STORE_PASSWORD: ${SEAGULL_STATUS_STORE_PASSWORD:-}
+      SEAGULL_STATUS_STORE_TLS: ${SEAGULL_STATUS_STORE_TLS:-false}
+      SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
+      SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    <<: *hardening
+
   # Reads vulnerability advisories from their source and publishes them to the
   # backbone. The one process that reaches the internet, so it holds no store
   # and names no asset: a feed that fails or lies can stop nothing but this.

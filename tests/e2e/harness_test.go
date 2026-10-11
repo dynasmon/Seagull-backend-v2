@@ -32,6 +32,7 @@ import (
 type backbone struct {
 	published []*eventv1.Event
 	inventory []*inventoryv1.Record
+	status    []*agentv1.Status
 	failure   error
 	release   chan struct{}
 	entered   chan struct{}
@@ -64,6 +65,14 @@ func (b *backbone) PublishInventory(_ context.Context, records []*inventoryv1.Re
 	return nil
 }
 
+func (b *backbone) PublishStatus(_ context.Context, reports []*agentv1.Status) error {
+	if b.failure != nil {
+		return b.failure
+	}
+	b.status = append(b.status, reports...)
+	return nil
+}
+
 type gateway struct {
 	address    string
 	opsAddress string
@@ -78,6 +87,7 @@ type gatewayOptions struct {
 	maxBodyBytes        int64
 	maxEventsPerBatch   int
 	maxRecordsPerBatch  int
+	maxReportsPerBatch  int
 	ratePerSecond       float64
 	rateBurst           int
 	maxInflightBytes    int64
@@ -97,6 +107,9 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	}
 	if options.maxRecordsPerBatch == 0 {
 		options.maxRecordsPerBatch = 16
+	}
+	if options.maxReportsPerBatch == 0 {
+		options.maxReportsPerBatch = 16
 	}
 	if options.maxInflightBytes == 0 {
 		options.maxInflightBytes = 64 << 20
@@ -206,11 +219,35 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		t.Fatalf("build inventory handler: %v", err)
 	}
 
+	reported := ingest.NewStatusMetrics(platform.Metrics())
+	reporter, err := ingest.NewStatusAdmitter(options.backbone, ingest.StatusPolicy{
+		Gateway:            "gateway-test",
+		MaxReportsPerBatch: options.maxReportsPerBatch,
+		Report:             event.Policy{MaxClockSkew: 5 * time.Minute, MaxAge: 168 * time.Hour},
+	}, reported)
+	if err != nil {
+		t.Fatalf("build status admitter: %v", err)
+	}
+
+	status, err := ingest.NewStatusHandler(ingest.StatusHandlerOptions{
+		Admitter:       reporter,
+		Roster:         options.roster,
+		Limiter:        limiter,
+		Capacity:       capacity,
+		Metrics:        reported,
+		MaxBodyBytes:   options.maxBodyBytes,
+		PublishTimeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("build status handler: %v", err)
+	}
+
 	listener, err := ingest.NewServer(ingest.ServerOptions{
 		Address:         "127.0.0.1:0",
 		TLS:             mutual,
 		Handler:         handler,
 		Inventory:       inventory,
+		Status:          status,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
 		ReadTimeout:     10 * time.Second,
@@ -325,6 +362,8 @@ func (g *gateway) url() string { return "https://" + g.address + ingest.EventsPa
 
 func (g *gateway) inventoryURL() string { return "https://" + g.address + ingest.InventoryPath }
 
+func (g *gateway) statusURL() string { return "https://" + g.address + ingest.StatusPath }
+
 func (g *gateway) post(t *testing.T, client *http.Client, contentType string, body []byte) (*http.Response, []byte) {
 	t.Helper()
 	return g.postTo(t, client, g.url(), contentType, body)
@@ -368,6 +407,15 @@ func (g *gateway) sendInventory(t *testing.T, client *http.Client, batch *invent
 		t.Fatalf("encode inventory batch: %v", err)
 	}
 	return g.postTo(t, client, g.inventoryURL(), ingest.ContentType, encoded)
+}
+
+func (g *gateway) sendStatus(t *testing.T, client *http.Client, batch *agentv1.StatusBatch) (*http.Response, []byte) {
+	t.Helper()
+	encoded, err := proto.Marshal(batch)
+	if err != nil {
+		t.Fatalf("encode status batch: %v", err)
+	}
+	return g.postTo(t, client, g.statusURL(), ingest.ContentType, encoded)
 }
 
 func decodeAck(t *testing.T, payload []byte) *ingestv1.BatchAck {

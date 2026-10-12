@@ -34,3 +34,4 @@ rediscovered by reading the code.
 - [28. Vulnerability intelligence is a record kind of its own, read from its source and never inferred from what a feed left out](0028-vulnerability-intelligence-is-read-from-its-source.md)
 - [29. An agent policy is signed off the platform, and an agent is handed the newest revision of its tenant that names it](0029-an-agent-policy-is-signed-off-the-platform.md)
 - [30. An agent's status is a record of its own, and an agent is alive while its reports arrive](0030-an-agent-is-alive-while-its-reports-arrive.md)
+- [31. An agent release is authorized off the platform by the roles of a root, and the platform decides only which agent runs which release](0031-an-agent-release-is-authorized-off-the-platform.md)

@@ -163,9 +163,9 @@ func (s *stubUpdates) Package(_ context.Context, agentID string, digest []byte) 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if newest := s.newest(); newest != nil {
+	if newest := s.newest(); newest != nil && newest.Names(s.assigned[agentID]) {
 		for _, release := range newest.Releases() {
-			if release.GetVersion() == s.assigned[agentID] && bytes.Equal(release.GetPayload().GetSha256(), digest) {
+			if bytes.Equal(release.GetPayload().GetSha256(), digest) {
 				return agentupdate.ServedPackage{State: state, Content: s.packages[hex.EncodeToString(digest)]}, nil
 			}
 		}
@@ -522,7 +522,7 @@ func TestAnAgentIsOfferedTheRootsTheNewestCatalogAndItsVersionAsTheyWereRecorded
 	}
 }
 
-func TestAnAgentIsHandedOnlyThePackageOfTheReleaseItWasAssigned(t *testing.T) {
+func TestAnAssignedAgentIsHandedOnlyThePackagesTheNewestCatalogNames(t *testing.T) {
 	h := newHarness(t, nil)
 	published := publishUpdates(t, h)
 	facing := updateFacing(t, published.held, published.store, published.anchor, nil)
@@ -543,6 +543,26 @@ func TestAnAgentIsHandedOnlyThePackageOfTheReleaseItWasAssigned(t *testing.T) {
 	for _, asked := range []string{digestOf([]byte("another package")), strings.ToUpper(digest), digest[:63], "not-a-digest"} {
 		refusedWith(t, askPackage(t, facing, "web-01", asked), http.StatusNotFound, control.CodeUnknownPackage)
 	}
+
+	handler := updateListener(t, h, published.held, published.store, published.anchor)
+	admin := open(t, h, "dev-admin")
+	before := []byte("!<arch>\nthe package of v0.1.0")
+	if recorder := upload(t, handler, "dev-admin", admin, before); recorder.Code != http.StatusCreated {
+		t.Fatalf("giving the package of v0.1.0 answered %d: %s", recorder.Code, recorder.Body)
+	}
+	publish := func(version uint64, releases ...*updatev1.Release) {
+		t.Helper()
+		if recorder := call(t, handler, http.MethodPost, control.UpdateCatalogsPath, "dev-admin", admin,
+			&updatev1.CatalogPublication{Catalog: updateCatalog(t, version, published.publisher, releases...)}); recorder.Code != http.StatusCreated {
+			t.Fatalf("publishing catalog %d answered %d: %s", version, recorder.Code, recorder.Body)
+		}
+	}
+	publish(2, packageRelease("v0.1.0", before), packageRelease("v0.2.0", published.content))
+	if recorder := askPackage(t, facing, "web-01", digestOf(before)); recorder.Code != http.StatusOK || !bytes.Equal(recorder.Body.Bytes(), before) {
+		t.Fatalf("the package of a release the agent would go back to was answered %d: %s", recorder.Code, recorder.Body)
+	}
+	publish(3, packageRelease("v0.2.0", published.content))
+	refusedWith(t, askPackage(t, facing, "web-01", digestOf(before)), http.StatusNotFound, control.CodeUnknownPackage)
 	refusedWith(t, askPackage(t, facing, "web-77", digest), http.StatusNotFound, control.CodeUnknownAgent)
 	if _, err := published.held.Move(t.Context(), "web-01", []string{"default"}, agent.Move{
 		To: agent.Disabled, Note: "the machine is being rebuilt", Actor: "dev-admin", At: published.held.clock,

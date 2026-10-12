@@ -79,15 +79,17 @@ agent to anything an operator did not sign, nor back past what a release allows:
 an agent refuses an older release unless that release names the one it runs in
 `replaces`, and refuses a catalog older than the newest it verified.
 
-### The platform keeps packages and hands each one only to the agents assigned it
+### The platform keeps packages and hands them only to agents assigned a release
 
 A package is given to the platform by its bytes and kept by its digest, trusted
 for nothing: an agent checks every byte against the catalog before anything
 installs it. A catalog naming a package the platform was not given is refused,
 so nothing an agent is told to install is missing. An agent asking for a package
-is handed it only when it is assigned a version the newest catalog names that
-package for, over the listener it renews on, with no redirect and no other host
-to reach, by as few agents at once as the process can hold in memory.
+is handed it only while the newest catalog names it and the agent is assigned a
+version that catalog names: the release it is to run, and the release it runs,
+which its installer goes back to when the new one does not run. It is handed
+over the listener the agent renews on, with no redirect and no other host to
+reach, by as few agents at once as the process can hold in memory.
 
 ### Versions only move forward, decided under a lock
 

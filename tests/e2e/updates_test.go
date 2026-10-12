@@ -154,9 +154,9 @@ func (p *publishedUpdates) Package(_ context.Context, agentID string, digest []b
 	}
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
-	if newest := p.newest(); newest != nil {
+	if newest := p.newest(); newest != nil && newest.Names(p.assigned[agentID]) {
 		for _, release := range newest.Releases() {
-			if release.GetVersion() == p.assigned[agentID] && bytes.Equal(release.GetPayload().GetSha256(), digest) {
+			if bytes.Equal(release.GetPayload().GetSha256(), digest) {
 				return agentupdate.ServedPackage{State: state, Content: p.packages[hex.EncodeToString(digest)]}, nil
 			}
 		}
@@ -282,10 +282,11 @@ func expect(t *testing.T, response *http.Response, body []byte, status int, what
 }
 
 // Over real mutual TLS: an operator rotates the update root, gives the
-// platform a package, publishes a catalog naming it and assigns its version to
-// one agent; that agent, starting from the root it was provisioned with,
-// verifies the chain and the catalog and downloads exactly the bytes the catalog
-// names, while an agent assigned nothing is handed nothing.
+// platform two packages, publishes a catalog naming both and assigns the later
+// version to one agent; that agent, starting from the root it was provisioned
+// with, verifies the chain and the catalog and downloads exactly the bytes the
+// catalog names for the release it is to run and the one it would go back to,
+// while an agent assigned nothing is handed nothing.
 func TestAnAgentIsOfferedAndHandedAReleaseAnOperatorAuthorizedOverRealMutualTLS(t *testing.T) {
 	plane := startControlAPI(t, nil)
 	operator := plane.caller(t, "e2e-admin")
@@ -308,12 +309,14 @@ func TestAnAgentIsOfferedAndHandedAReleaseAnOperatorAuthorizedOverRealMutualTLS(
 	response, body = plane.send(t, operator, http.MethodPost, control.UpdateRootsPath, token,
 		&updatev1.RootPublication{Root: updateRootSigned(t, 2, rotated, plane.updateKey, rotated)})
 	expect(t, response, body, http.StatusCreated, "publishing root 2")
-	content := []byte("!<arch>\ndebian-binary   the package of v0.2.0")
-	if given := plane.give(t, operator, token, content); given.StatusCode != http.StatusCreated {
-		t.Fatalf("giving the package was answered %d", given.StatusCode)
+	running, content := []byte("!<arch>\ndebian-binary   the package of v0.1.0"), []byte("!<arch>\ndebian-binary   the package of v0.2.0")
+	for _, given := range [][]byte{running, content} {
+		if response := plane.give(t, operator, token, given); response.StatusCode != http.StatusCreated {
+			t.Fatalf("giving a package was answered %d", response.StatusCode)
+		}
 	}
 	response, body = plane.send(t, operator, http.MethodPost, control.UpdateCatalogsPath, token,
-		&updatev1.CatalogPublication{Catalog: releaseCatalog(t, 1, rotated, releaseOfPackage("v0.2.0", content))})
+		&updatev1.CatalogPublication{Catalog: releaseCatalog(t, 1, rotated, releaseOfPackage("v0.1.0", running), releaseOfPackage("v0.2.0", content))})
 	expect(t, response, body, http.StatusCreated, "publishing catalog 1")
 	response, body = plane.send(t, operator, http.MethodPost, control.UpdateAssignmentsPath, token,
 		&updatev1.Assignment{TenantId: "default", AgentIds: []string{"e2e-agent-90"}, Version: "v0.2.0"})
@@ -345,16 +348,17 @@ func TestAnAgentIsOfferedAndHandedAReleaseAnOperatorAuthorizedOverRealMutualTLS(
 	if err != nil || offer.GetVersion() != "v0.2.0" || !catalog.Names("v0.2.0") {
 		t.Fatalf("the agent could not verify the catalog it was offered for %q: %v", offer.GetVersion(), err)
 	}
-	digest := hex.EncodeToString(catalog.Releases()[0].GetPayload().GetSha256())
-
-	response, body = plane.agentGet(t, assigned, "/v1/agents/update/packages/"+digest, "")
-	expect(t, response, body, http.StatusOK, "downloading the package")
-	if sum := sha256.Sum256(body); !bytes.Equal(sum[:], catalog.Releases()[0].GetPayload().GetSha256()) {
-		t.Fatal("the bytes downloaded are not the package the catalog names")
-	}
-	if response, body := plane.agentGet(t, unassigned, "/v1/agents/update/packages/"+digest, ""); response.StatusCode != http.StatusNotFound ||
-		refusalCode(t, body) != control.CodeUnknownPackage {
-		t.Fatalf("an agent assigned nothing was answered %d", response.StatusCode)
+	for _, release := range catalog.Releases() {
+		digest := hex.EncodeToString(release.GetPayload().GetSha256())
+		response, body = plane.agentGet(t, assigned, "/v1/agents/update/packages/"+digest, "")
+		expect(t, response, body, http.StatusOK, "downloading the package of "+release.GetVersion())
+		if sum := sha256.Sum256(body); !bytes.Equal(sum[:], release.GetPayload().GetSha256()) {
+			t.Fatalf("the bytes downloaded are not the package the catalog names for %s", release.GetVersion())
+		}
+		if response, body := plane.agentGet(t, unassigned, "/v1/agents/update/packages/"+digest, ""); response.StatusCode != http.StatusNotFound ||
+			refusalCode(t, body) != control.CodeUnknownPackage {
+			t.Fatalf("an agent assigned nothing was answered %d", response.StatusCode)
+		}
 	}
 
 	if again, _ := plane.agentGet(t, assigned, control.UpdatePath, offered); again.StatusCode != http.StatusNotModified {

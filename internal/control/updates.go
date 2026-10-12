@@ -307,8 +307,9 @@ func (s *Server) serveUpdate() http.Handler {
 	})
 }
 
-// A package is handed only to an agent assigned a release the newest catalog
-// names it for, by as few agents at once as the process can hold in memory.
+// A package is handed only while the newest catalog names it, to an agent
+// assigned a release that catalog names: the one it is to run and the one it
+// would go back to, by as few agents at once as the process can hold in memory.
 func (s *Server) servePackage() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		presented, err := agentidentity.FromConnection(r.TLS)

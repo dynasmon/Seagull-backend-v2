@@ -245,7 +245,7 @@ func TestACatalogIsRecordedOnlyWithEveryPackageItNamesOnPostgresql(t *testing.T)
 	}
 }
 
-func TestAnAgentIsHandedOnlyThePackageOfTheVersionItWasAssignedOnPostgresql(t *testing.T) {
+func TestAnAssignedAgentIsHandedOnlyThePackagesTheNewestCatalogNamesOnPostgresql(t *testing.T) {
 	store := migratedAlertStore(t, alertStoreAddress(t))
 	updates := store.AgentUpdates()
 	authority := newUpdateAuthority(t)
@@ -254,16 +254,21 @@ func TestAnAgentIsHandedOnlyThePackageOfTheVersionItWasAssignedOnPostgresql(t *t
 
 	tenant, elsewhere := isolated(t), isolated(t)
 	assigned, outsider := registeredIn(t, ctx, store, tenant), registeredIn(t, ctx, store, elsewhere)
-	current, later := randomPackage(t), randomPackage(t)
-	for _, given := range []agentupdate.AcceptedPackage{current, later} {
+	stale, current, later := randomPackage(t), randomPackage(t), randomPackage(t)
+	for _, given := range []agentupdate.AcceptedPackage{stale, current, later} {
 		if _, err := updates.PublishPackage(ctx, given); err != nil {
 			t.Fatalf("give a package: %v", err)
 		}
 	}
 	version := newestCatalogVersion(t, ctx, updates, assigned) + 1
-	if _, err := updates.PublishCatalog(ctx, authority.catalog(t, authority.anchor(t, 1), version,
-		releaseFor("v0.2.0", current), releaseFor("v0.3.0", later))); err != nil {
-		t.Fatalf("record catalog %d: %v", version, err)
+	for _, named := range [][]*updatev1.Release{
+		{releaseFor("v0.1.0", stale), releaseFor("v0.2.0", current)},
+		{releaseFor("v0.2.0", current), releaseFor("v0.3.0", later)},
+	} {
+		if _, err := updates.PublishCatalog(ctx, authority.catalog(t, authority.anchor(t, 1), version, named...)); err != nil {
+			t.Fatalf("record catalog %d: %v", version, err)
+		}
+		version++
 	}
 
 	assign := func(version string, agents ...string) error {
@@ -292,8 +297,11 @@ func TestAnAgentIsHandedOnlyThePackageOfTheVersionItWasAssignedOnPostgresql(t *t
 	if err != nil || !bytes.Equal(handed.Content, current.Content) {
 		t.Fatalf("the package of v0.2.0 was not handed over: %v", err)
 	}
-	if _, err := updates.Package(ctx, assigned, later.Record.GetSha256()); !errors.Is(err, agentupdate.ErrUnknown) {
-		t.Fatalf("the package of a version the agent was not assigned was handed over: %v", err)
+	if handed, err := updates.Package(ctx, assigned, later.Record.GetSha256()); err != nil || !bytes.Equal(handed.Content, later.Content) {
+		t.Fatalf("the package of another release the newest catalog names was not handed over: %v", err)
+	}
+	if _, err := updates.Package(ctx, assigned, stale.Record.GetSha256()); !errors.Is(err, agentupdate.ErrUnknown) {
+		t.Fatalf("a package only an older catalog names was handed over: %v", err)
 	}
 	if _, err := updates.Package(ctx, outsider, current.Record.GetSha256()); !errors.Is(err, agentupdate.ErrUnknown) {
 		t.Fatalf("a package was handed to an agent assigned nothing: %v", err)

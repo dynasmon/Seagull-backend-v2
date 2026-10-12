@@ -49,11 +49,14 @@ LEFT JOIN agent_release_assignments assignments ON assignments.agent_id = agents
 WHERE agents.agent_id = $1`
 
 const servedPackage = `SELECT packages.content
-FROM agent_release_assignments assignments
-JOIN agent_catalog_releases releases
-	ON releases.version = assignments.version AND releases.catalog_version = ` + newestCatalog + `
-JOIN agent_packages packages ON packages.sha256 = releases.sha256
-WHERE assignments.agent_id = $1 AND releases.sha256 = $2`
+FROM agent_packages packages
+WHERE packages.sha256 = $2
+AND EXISTS (SELECT 1 FROM agent_catalog_releases releases
+	WHERE releases.sha256 = packages.sha256 AND releases.catalog_version = ` + newestCatalog + `)
+AND EXISTS (SELECT 1 FROM agent_release_assignments assignments
+	JOIN agent_catalog_releases assigned
+		ON assigned.version = assignments.version AND assigned.catalog_version = ` + newestCatalog + `
+	WHERE assignments.agent_id = $1)`
 
 type AgentUpdates struct {
 	store *Store
@@ -304,7 +307,8 @@ func (u *AgentUpdates) Served(ctx context.Context, agentID string, after uint64)
 }
 
 // A package is read only for an agent the platform still listens to, assigned
-// a version the newest catalog names that package for.
+// a version the newest catalog names, and only when that catalog names the
+// package: the release the agent is to run or the one it would go back to.
 func (u *AgentUpdates) Package(ctx context.Context, agentID string, digest []byte) (agentupdate.ServedPackage, error) {
 	var state string
 	err := u.store.pool.QueryRow(ctx, "SELECT state FROM agents WHERE agent_id = $1", agentID).Scan(&state)

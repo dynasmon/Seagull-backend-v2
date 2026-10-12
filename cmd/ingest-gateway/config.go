@@ -34,6 +34,7 @@ type configuration struct {
 	trackedAgents  int
 	admissionRules ingest.Policy
 	inventoryRules ingest.InventoryPolicy
+	statusRules    ingest.StatusPolicy
 
 	brokers       []string
 	topology      broker.Topology
@@ -92,6 +93,15 @@ func load(parser *config.Parser) (configuration, error) {
 		Record: event.Policy{
 			MaxClockSkew: parser.Duration("SEAGULL_INVENTORY_MAX_CLOCK_SKEW", 5*time.Minute, time.Second, time.Hour),
 			MaxAge:       parser.Duration("SEAGULL_INVENTORY_MAX_AGE", 720*time.Hour, time.Minute, 8760*time.Hour),
+		},
+	}
+
+	loaded.statusRules = ingest.StatusPolicy{
+		Gateway:            gateway,
+		MaxReportsPerBatch: parser.Int("SEAGULL_GATEWAY_MAX_REPORTS_PER_BATCH", 16, 1, 16),
+		Report: event.Policy{
+			MaxClockSkew: parser.Duration("SEAGULL_STATUS_MAX_CLOCK_SKEW", 5*time.Minute, time.Second, time.Hour),
+			MaxAge:       parser.Duration("SEAGULL_STATUS_MAX_AGE", 168*time.Hour, time.Minute, 8760*time.Hour),
 		},
 	}
 

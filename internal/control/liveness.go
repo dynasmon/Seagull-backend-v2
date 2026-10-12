@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentstatus"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 )
 
@@ -18,11 +19,19 @@ type Liveness interface {
 	LastSeen(ctx context.Context, agents, tenants []string) (map[string]time.Time, error)
 }
 
-// A failure here costs the caller the liveness column and not the answer: the
-// registry holds what was decided, and where telemetry landed is a second store
-// that may be slower or absent without making an agent unreadable.
-func (s *Server) observed(ctx context.Context, listed []*agentv1.Agent, tenants []string) {
-	if s.liveness == nil || len(listed) == 0 {
+// The newest status report of each agent, asked of where the status projector
+// keeps it, for the same reason and with the same bounds as LastSeen.
+type Reports interface {
+	Newest(ctx context.Context, agents, tenants []string) (map[string]agentstatus.Report, error)
+}
+
+// A failure here costs the caller the observed columns and not the answer: the
+// registry holds what was decided, and what agents send lands in stores that
+// may be slower or absent without making an agent unreadable. A page carries
+// how recently each agent reported; the report itself is carried when one agent
+// is read.
+func (s *Server) observed(ctx context.Context, listed []*agentv1.Agent, tenants []string, whole bool) {
+	if len(listed) == 0 {
 		return
 	}
 
@@ -31,14 +40,36 @@ func (s *Server) observed(ctx context.Context, listed []*agentv1.Agent, tenants 
 		asked = append(asked, one.GetAgentId())
 	}
 
-	seen, err := s.liveness.LastSeen(ctx, asked, tenants)
-	if err != nil {
-		s.logger.Warn("agent_liveness_unavailable", slog.String("error", err.Error()))
+	if s.liveness != nil {
+		if seen, err := s.liveness.LastSeen(ctx, asked, tenants); err != nil {
+			s.logger.Warn("agent_liveness_unavailable", slog.String("error", err.Error()))
+		} else {
+			for _, one := range listed {
+				if at, found := seen[one.GetAgentId()]; found {
+					one.LastSeen = timestamppb.New(at.UTC())
+				}
+			}
+		}
+	}
+
+	if s.reports == nil {
 		return
 	}
+	newest, err := s.reports.Newest(ctx, asked, tenants)
+	if err != nil {
+		s.logger.Warn("agent_status_unavailable", slog.String("error", err.Error()))
+		return
+	}
+	now := s.now()
 	for _, one := range listed {
-		if at, found := seen[one.GetAgentId()]; found {
-			one.LastSeen = timestamppb.New(at.UTC())
+		held, found := newest[one.GetAgentId()]
+		if !found {
+			continue
+		}
+		one.Liveness = held.Liveness(now)
+		one.LastReported = timestamppb.New(held.Received.UTC())
+		if whole {
+			one.Status = held.Status
 		}
 	}
 }

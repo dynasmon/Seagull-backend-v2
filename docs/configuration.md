@@ -49,6 +49,7 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_GATEWAY_MAX_INFLIGHT_REQUESTS` | `512` | requests held at once across every caller |
 | `SEAGULL_GATEWAY_MAX_EVENTS_PER_BATCH` | `1000` | ceiling on events in one batch |
 | `SEAGULL_GATEWAY_MAX_RECORDS_PER_BATCH` | `64` | ceiling on inventory records in one batch, alongside the contract's 20,000 items |
+| `SEAGULL_GATEWAY_MAX_REPORTS_PER_BATCH` | `16` | ceiling on status reports in one batch, at most the contract's 16 |
 | `SEAGULL_GATEWAY_PUBLISH_TIMEOUT` | `10s` | budget for making a batch durable |
 | `SEAGULL_GATEWAY_RATE_PER_SECOND` | `200` | per-agent batch budget, `0` disables it |
 | `SEAGULL_GATEWAY_RATE_BURST` | `400` | per-agent burst |
@@ -60,6 +61,8 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_EVENT_MAX_AGE` | `168h` | how old an event may be and still be admitted |
 | `SEAGULL_INVENTORY_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock a scan may be |
 | `SEAGULL_INVENTORY_MAX_AGE` | `720h` | how old a scan may be and still be admitted |
+| `SEAGULL_STATUS_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock a status report may be |
+| `SEAGULL_STATUS_MAX_AGE` | `168h` | how old a status report may be and still be admitted |
 
 The batch ceiling is measured, not chosen. No event in a batch is published until
 every event in it has been decoded and validated, so a larger batch is a larger
@@ -68,12 +71,14 @@ thousand the gateway sustains 727k events/s with a p99 of 139ms; at ten thousand
 it sustains 300k with a p99 of three seconds. `make test-load` is where those
 numbers come from.
 
-The gateway serves two routes on one listener: `POST /v1/events` and
-`POST /v1/inventory`. They stand behind the same certificate, the same registry
-answer, the same rate limiter and the same capacity bound, so a collector cannot
-buy a second budget by sending inventory. A scan may be older than an event may
-be, because an asset that was offline for a fortnight sends what it saw while it
-was.
+The gateway serves three routes on one listener: `POST /v1/events`,
+`POST /v1/inventory` and `POST /v1/status`. They stand behind the same
+certificate, the same registry answer, the same rate limiter and the same
+capacity bound, so a collector cannot buy a second budget by sending inventory or
+a status report. A scan may be older than an event may be, because an asset that
+was offline for a fortnight sends what it saw while it was. A status report is
+admitted on the event window: liveness is measured from when the platform
+received a report, never from when the agent says it wrote it.
 
 ### The backbone, shared by both halves of the data plane and the migrator
 
@@ -95,6 +100,11 @@ was.
 | `SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_PARTITIONS` | `1` | |
 | `SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_RETENTION` | `720h` | |
 | `SEAGULL_BACKBONE_RULESETS_TOPIC` | `security.rulesets` | published rulesets and the pointer at the one to run |
+| `SEAGULL_BACKBONE_STATUS_TOPIC` | `security.agents.status` | the newest status report of every agent |
+| `SEAGULL_BACKBONE_STATUS_PARTITIONS` | `3` | how far per-agent ordering spreads |
+| `SEAGULL_BACKBONE_STATUS_QUARANTINE_TOPIC` | `security.agents.status.quarantine` | reports the status projector refused |
+| `SEAGULL_BACKBONE_STATUS_QUARANTINE_PARTITIONS` | `1` | |
+| `SEAGULL_BACKBONE_STATUS_QUARANTINE_RETENTION` | `720h` | |
 | `SEAGULL_BACKBONE_QUARANTINE_PARTITIONS` | `3` | |
 | `SEAGULL_BACKBONE_QUARANTINE_RETENTION` | `720h` | |
 | `SEAGULL_BACKBONE_REPLICAS` | `1` | replication factor of every topic |
@@ -297,6 +307,28 @@ record is a whole scan: sixty-four of them can be half a million packages. A
 record is folded whole or refused whole — one item the store cannot hold takes
 its scan with it, because a scan whose items never landed would retire
 everything the record was about to confirm.
+
+### status-projector
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEAGULL_STATUS_PROJECTOR_CONSUMER_GROUP` | `status-projector` | the consumer group that owns the offsets |
+| `SEAGULL_STATUS_PROJECTOR_BATCH_RECORDS` | `512` | reports per poll, and per store batch |
+| `SEAGULL_STATUS_PROJECTOR_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
+| `SEAGULL_STATUS_PROJECTOR_RETRY_DELAY` | `1s` | first delay before a batch is retried |
+| `SEAGULL_STATUS_PROJECTOR_RETRY_DELAY_MAX` | `30s` | ceiling the delay backs off to |
+| `SEAGULL_STATUS_STORE_ADDRESS` | required | the store's native protocol address, `clickhouse:9000` |
+| `SEAGULL_STATUS_STORE_DATABASE` | `seagull` | the database holding `agent_status`, which `control-api` reads through `SEAGULL_CONTROL_TELEMETRY_STORE_*` |
+| `SEAGULL_STATUS_STORE_USER` | `seagull` | |
+| `SEAGULL_STATUS_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
+| `SEAGULL_STATUS_STORE_TIMEOUT` | `30s` | budget for one write attempt, and to dial |
+| `SEAGULL_STATUS_STORE_TLS` | `true` | verify and encrypt the native connection; development Compose explicitly sets `false` |
+| `SEAGULL_STATUS_STORE_TLS_CA` | unset | authority the store must chain to; the system pool when unset |
+| `SEAGULL_STATUS_STORE_TLS_SERVER_NAME` | unset | name the store certificate must carry; the dialled host when unset |
+
+A report is a few kilobytes and a fleet sends one per agent every interval, so a
+batch is counted generously. A store outage costs how fresh liveness is and is
+retried until the batch is durable; a report is never skipped to make progress.
 
 ### advisory-importer
 
@@ -552,7 +584,7 @@ before its body is read.
 
 ## The backbone topology
 
-Ten topics, declared once in `internal/broker` and applied by
+Twelve topics, declared once in `internal/broker` and applied by
 `backbone-migrator`:
 
 | Topic | Partitions | Retention | Why |
@@ -567,6 +599,8 @@ Ten topics, declared once in `internal/broker` and applied by
 | `security.agents` | 1 | compacted, kept | the last thing the control plane decided about each agent, keyed by the agent; one partition because the last record about an agent has to be the last one every gateway sees |
 | `security.advisories` | 1 | compacted, kept | the newest version of every advisory the platform holds, keyed by its source and id, and the newest attempt to follow each feed, keyed by the feed; one partition so the advisories an attempt published are read before the record accounting for them |
 | `security.advisories.quarantine` | 1 | 30 days | records the advisory writer could not store |
+| `security.agents.status` | 3 | compacted, kept | what every agent last said of itself, keyed by the agent, so the newest report of each one is there for a reader that starts long after it was written, and one agent's reports are read in the order they arrived |
+| `security.agents.status.quarantine` | 1 | 30 days | reports the status projector could not store |
 
 **Partitions and replication are refused, never converged.** Records are keyed
 by `agent_id`, so growing the partition count moves an agent to a different
@@ -694,6 +728,36 @@ for a year.
 two. A record is folded whole or refused whole: one item the store cannot hold
 takes its scan with it, because a scan whose items never landed would retire
 everything the record was about to confirm.
+
+## The agent status projection
+
+One table, `agent_status`, holds the newest status report of every agent, written
+by `status-projector` from `security.agents.status`. It is one row per
+`(tenant_id, agent_id)`, a `ReplacingMergeTree` versioned by `ingest_time`, the
+platform's clock, so a report that says it was written later never stands in for
+one the platform received after it. `report` holds the report exactly as the
+gateway published it, which is what reading one agent hands back; the columns
+beside it are what a fleet is asked about without decoding every report. Like the
+inventory tables it has no `PARTITION BY` and is bounded by a TTL of a year on
+`ingest_time`.
+
+`control-api` reads it for the agents of the page it answers, within the tenants
+the caller holds, beside `last_seen`. An agent's liveness is judged when it is
+read, against the interval its newest report announced:
+
+| Liveness | When |
+|---|---|
+| `LIVENESS_ACTIVE` | the newest report arrived within twice its interval |
+| `LIVENESS_LATE` | within five times its interval |
+| `LIVENESS_SILENT` | later than that |
+| `LIVENESS_STOPPED` | the newest report said the agent was stopping, however long ago |
+
+An agent that never reported has no liveness, and silence decides nothing: no
+agent is disabled or revoked because it went quiet. A page carries liveness and
+`last_reported`; the report itself is carried when one agent is read.
+
+**Quarantine.** `security.agents.status.quarantine`, on the same terms as the
+other quarantines.
 
 ## The vulnerability intelligence store
 

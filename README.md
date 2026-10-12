@@ -264,6 +264,23 @@ Seagull Agent
                  one row per item      when that kind was last enumerated in full
 ```
 
+What an agent says of itself travels on a third stream, beside the other two, so
+an agent on a host nobody logs into is still heard from:
+
+```text
+Seagull Agent
+      │  mutual TLS · protobuf · POST /v1/status, every interval it announces
+      ▼
+ ingest-gateway ─────▶ Redpanda  security.agents.status
+                           │  compacted, keyed by the agent: the newest report of each
+                           ▼
+                    status-projector ──▶ security.agents.status.quarantine
+                           │
+                           ▼
+     ClickHouse agent_status ──▶ control-api: active · late · silent · stopped
+          one row per agent        judged when an agent is read, never decided
+```
+
 What is known to be wrong with software comes from outside, through the one
 process allowed to reach it:
 
@@ -290,9 +307,10 @@ Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 | `detection-writer` | Makes a detection queryable, on the same terms and as a consumer of its own. |
 | `alert-writer` | Opens the work a detection at or above a severity floor becomes: an alert for a finding about one event, folded on a declared key, or an incident for a story several events told. It inserts and never updates. |
 | `inventory-projector` | Folds what a collector saw into what an asset currently has, under a group and a quarantine of its own. An item the newest full scan stops naming is no longer current, and nothing is deleted to say so. |
+| `status-projector` | Keeps the newest report each agent sent of itself, one row per agent, under a group and a quarantine of its own, so a status store outage costs how fresh liveness is and never telemetry. |
 | `advisory-importer` | Follows the vulnerability feeds a deployment names, translates each changed record into an advisory carrying its provenance, and publishes it with the freshness of the feed. The one process that reaches the internet; it holds no store and names no asset. |
 | `advisory-writer` | Keeps every version of every advisory and every attempt to follow a feed, under a group and a quarantine of its own. |
-| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry, the authority that signs an agent's certificate, and the signed policies agents are handed. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates and asking for their policy on a second one. |
+| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry with how recently each agent reported, the authority that signs an agent's certificate, and the signed policies agents are handed. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates and asking for their policy on a second one. |
 | `query-api` | The read plane, and the only reader of the analytical store. |
 | `backbone-migrator`, `store-migrator`, `control-migrator` | Apply the topic topology, the analytical schema and the relational schema, then exit. Nothing migrates on the way to serving traffic. |
 

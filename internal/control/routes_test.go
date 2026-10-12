@@ -74,6 +74,7 @@ func listenerRegistering(
 
 	signing, bundle := testAuthority(t)
 	held, _ := registered.(*stubAgents)
+	reports, _ := seen.(control.Reports)
 	handler, err := control.NewHandler(control.ServerOptions{
 		Guard:           h.guard,
 		Sessions:        h.sessions,
@@ -84,6 +85,7 @@ func listenerRegistering(
 		Agents:          registered,
 		Admissions:      admissions,
 		Liveness:        seen,
+		Reports:         reports,
 		Authority:       signing,
 		TrustBundle:     bundle,
 		CertificateLife: 24 * time.Hour,

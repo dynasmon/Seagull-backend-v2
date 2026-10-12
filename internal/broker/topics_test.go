@@ -407,3 +407,38 @@ func TestAdvisoriesAreALogOfTheirOwnThatKeepsTheNewestOfEach(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusIsAStreamOfItsOwnThatKeepsTheNewestReportOfEachAgent(t *testing.T) {
+	topology := declared(t, map[string]string{
+		"SEAGULL_BACKBONE_STATUS_PARTITIONS":            "6",
+		"SEAGULL_BACKBONE_STATUS_QUARANTINE_TOPIC":      "tenant.status.refused",
+		"SEAGULL_BACKBONE_STATUS_QUARANTINE_RETENTION":  "72h",
+		"SEAGULL_BACKBONE_STATUS_QUARANTINE_PARTITIONS": "2",
+	})
+
+	status := topology.Status
+	if status.Name != "security.agents.status" || status.Partitions != 6 {
+		t.Errorf("the status topic is %s over %d partitions", status.Name, status.Partitions)
+	}
+	for _, other := range []Topic{topology.Events, topology.Inventory, topology.Agents} {
+		if status.Name == other.Name {
+			t.Errorf("status shares %s", other.Name)
+		}
+	}
+	if status.Cleanup != cleanupCompact || status.Retention != 0 {
+		t.Errorf("the status topic is cleaned up by %q with a retention of %s, and a reader starting late needs the newest report of every agent",
+			status.Cleanup, status.Retention)
+	}
+	if quarantine := topology.StatusQuarantine; quarantine.Name != "tenant.status.refused" ||
+		quarantine.Cleanup != cleanupDelete || quarantine.Partitions != 2 || quarantine.Retention != 72*time.Hour {
+		t.Errorf("the status quarantine is %+v", quarantine)
+	}
+	for _, topic := range []Topic{topology.Status, topology.StatusQuarantine} {
+		if err := topic.Validate(); err != nil {
+			t.Errorf("the shipped %s is refused: %v", topic.Name, err)
+		}
+		if !slices.ContainsFunc(topology.Topics(), func(applied Topic) bool { return applied.Name == topic.Name }) {
+			t.Errorf("%s is not in the topology the migrator applies, so the processes that need it would refuse to serve", topic.Name)
+		}
+	}
+}

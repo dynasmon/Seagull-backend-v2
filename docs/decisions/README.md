@@ -33,3 +33,4 @@ rediscovered by reading the code.
 - [27. Inventory is a record kind of its own, and what an asset currently has is what the newest full scan named](0027-inventory-is-a-record-kind-of-its-own.md)
 - [28. Vulnerability intelligence is a record kind of its own, read from its source and never inferred from what a feed left out](0028-vulnerability-intelligence-is-read-from-its-source.md)
 - [29. An agent policy is signed off the platform, and an agent is handed the newest revision of its tenant that names it](0029-an-agent-policy-is-signed-off-the-platform.md)
+- [30. An agent's status is a record of its own, and an agent is alive while its reports arrive](0030-an-agent-is-alive-while-its-reports-arrive.md)

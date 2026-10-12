@@ -16,8 +16,9 @@ import (
 
 const RenewalPath = "/v1/agents/certificate"
 
-// The agent-facing half of the control plane: renewing a certificate and asking
-// for the policy that names the agent. It terminates the agent trust domain
+// The agent-facing half of the control plane: renewing a certificate, asking
+// for the policy that names the agent, and asking whether to update and for the
+// package of the release it is to run. It terminates the agent trust domain
 // rather than the operator one, so a certificate that may renew cannot reach
 // /v1/agents and an operator certificate cannot renew an agent's.
 func NewRenewalServer(options ServerOptions) (*httpx.Server, error) {
@@ -55,6 +56,10 @@ func NewRenewalHandler(options ServerOptions) (http.Handler, error) {
 		options.Instrumentation.Handle("agent_certificate_renew", server.renewCertificate()))
 	mux.Handle(http.MethodGet+" "+PolicyPath,
 		options.Instrumentation.Handle("agent_policy_serve", server.servePolicy()))
+	mux.Handle(http.MethodGet+" "+UpdatePath,
+		options.Instrumentation.Handle("agent_update_offer", server.serveUpdate()))
+	mux.Handle(http.MethodGet+" "+UpdatePackagePath,
+		options.Instrumentation.Handle("agent_package_serve", server.servePackage()))
 	return mux, nil
 }
 

@@ -70,7 +70,10 @@ func ValidateContract(report *agentv1.Status) error {
 	if err := validateConfiguration(report.GetConfiguration()); err != nil {
 		return err
 	}
-	return validatePrivileges(report.GetPrivileges())
+	if err := validatePrivileges(report.GetPrivileges()); err != nil {
+		return err
+	}
+	return validateUpdate(report.GetUpdate())
 }
 
 func admissible(reported, now time.Time, policy event.Policy) error {
@@ -264,6 +267,26 @@ func validatePrivileges(privileges *agentv1.Status_Privileges) error {
 		return err
 	}
 	return text("privileges.seccomp", privileges.GetSeccomp(), MaxSeccompLength, false)
+}
+
+// Absent while no update was asked of the agent.
+func validateUpdate(update *agentv1.Status_Update) error {
+	if update == nil {
+		return nil
+	}
+	if err := declared("update.stage", int32(update.GetStage()), agentv1.Status_Update_Stage_name); err != nil {
+		return err
+	}
+	if err := text("update.version", update.GetVersion(), MaxVersionLength, true); err != nil {
+		return err
+	}
+	if err := required("update.since", update.GetSince()); err != nil {
+		return err
+	}
+	if err := named("update.failure", int32(update.GetFailure()), agentv1.Status_Update_Failure_name); err != nil {
+		return err
+	}
+	return text("update.reason", update.GetReason(), MaxReasonLength, false)
 }
 
 func listed(field string, values []string, most, longest int) error {

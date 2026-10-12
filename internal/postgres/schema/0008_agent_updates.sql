@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS agent_update_catalogs
 
 -- Which versions each catalog names and the packages it names them with, so a
 -- version is assigned only while the newest catalog names it, and a package is
--- handed only to an agent assigned a version the newest catalog names it for.
+-- handed only while the newest catalog names it, to an agent assigned a version
+-- that catalog names.
 CREATE TABLE IF NOT EXISTS agent_catalog_releases
 (
     catalog_version BIGINT NOT NULL REFERENCES agent_update_catalogs (version) ON DELETE CASCADE,

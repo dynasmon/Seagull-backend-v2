@@ -496,6 +496,10 @@ detection away from somebody's triage.
 | `SEAGULL_CONTROL_API_AGENT_POLICY_INTERVAL` | `30s` | how often one agent may ask for its policy |
 | `SEAGULL_CONTROL_API_AGENT_POLICY_BURST` | `4` | requests for a policy one agent may make at once above that |
 | `SEAGULL_CONTROL_API_TRACKED_POLICY_AGENTS` | `8192` | agents whose requests for a policy are counted at once |
+| `SEAGULL_CONTROL_API_AGENT_UPDATE_ROOT` | unset | the update root every agent is provisioned with, as the signed envelope `tools/updatesign root -envelope` writes; read again whenever it is needed. Unset takes and hands out no update |
+| `SEAGULL_CONTROL_API_AGENT_UPDATE_INTERVAL` | `30s` | how often one agent may ask whether to update or for a package |
+| `SEAGULL_CONTROL_API_AGENT_UPDATE_BURST` | `4` | such requests one agent may make at once above that |
+| `SEAGULL_CONTROL_API_TRACKED_UPDATE_AGENTS` | `8192` | agents whose requests about updates are counted at once |
 
 The control plane authenticates a caller by certificate, so it has no plaintext
 mode and no mode without a caller authority: without one there is nobody to be

@@ -63,6 +63,17 @@ const (
 	CodeNotAdmitted          = "agent_not_admitted"
 	CodePoliciesUnconfigured = "agent_policies_not_configured"
 	CodePoliciesUnavailable  = "agent_policies_unavailable"
+
+	CodeUpdateUnsigned      = "update_not_signed"
+	CodeUpdateExpired       = "update_expired"
+	CodeMalformedUpdate     = "malformed_update"
+	CodeUpdateStale         = "update_stale"
+	CodeUpdatePackageAbsent = "update_names_unknown_packages"
+	CodeReleaseUncataloged  = "release_not_in_catalog"
+	CodeUpdateUnregistered  = "assignment_names_unregistered_agents"
+	CodeUnknownPackage      = "unknown_package"
+	CodeUpdatesUnconfigured = "agent_updates_not_configured"
+	CodeUpdatesUnavailable  = "agent_updates_unavailable"
 )
 
 // No value of this type means "anybody": the zero value refuses, so a route

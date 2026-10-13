@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agent"
@@ -42,21 +43,25 @@ ON CONFLICT (agent_id) DO UPDATE SET
 	tenant_id = excluded.tenant_id, version = excluded.version,
 	assigned_by = excluded.assigned_by, assigned_at = excluded.assigned_at, note = excluded.note`
 
-const servedUpdate = `SELECT agents.state, assignments.version,
-	(SELECT envelope FROM agent_update_catalogs ORDER BY version DESC LIMIT 1)
+// What decides the release an agent is asked to run: a release assigned to it
+// one by one, or else its tenant's rollout in force, with whether that rollout
+// may move it.
+const wantedRelease = `SELECT agents.state, assignments.version,
+	rollouts.rollout_id, rollouts.waves, rollouts.version, rollouts.state, rollouts.wave,
+	(rollouts.agents = 0 OR EXISTS (SELECT 1 FROM agent_rollout_agents named
+		WHERE named.rollout_id = rollouts.rollout_id AND named.agent_id = agents.agent_id))
 FROM agents
 LEFT JOIN agent_release_assignments assignments ON assignments.agent_id = agents.agent_id
+LEFT JOIN agent_rollouts rollouts ON rollouts.tenant_id = agents.tenant_id AND rollouts.state IN ('active', 'paused')
 WHERE agents.agent_id = $1`
 
 const servedPackage = `SELECT packages.content
 FROM agent_packages packages
-WHERE packages.sha256 = $2
+WHERE packages.sha256 = $1
 AND EXISTS (SELECT 1 FROM agent_catalog_releases releases
 	WHERE releases.sha256 = packages.sha256 AND releases.catalog_version = ` + newestCatalog + `)
-AND EXISTS (SELECT 1 FROM agent_release_assignments assignments
-	JOIN agent_catalog_releases assigned
-		ON assigned.version = assignments.version AND assigned.catalog_version = ` + newestCatalog + `
-	WHERE assignments.agent_id = $1)`
+AND EXISTS (SELECT 1 FROM agent_catalog_releases wanted
+	WHERE wanted.version = $2 AND wanted.catalog_version = ` + newestCatalog + `)`
 
 type AgentUpdates struct {
 	store *Store
@@ -284,21 +289,14 @@ func (u *AgentUpdates) Assign(ctx context.Context, accepted agentupdate.Accepted
 // An agent asking whether to update is not a caller with a scope: the
 // connection proved which agent it is.
 func (u *AgentUpdates) Served(ctx context.Context, agentID string, after uint64) (agentupdate.Served, error) {
-	var (
-		state   string
-		version *string
-		catalog []byte
-	)
-	err := u.store.pool.QueryRow(ctx, servedUpdate, agentID).Scan(&state, &version, &catalog)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		return agentupdate.Served{}, agent.ErrUnknown
-	case err != nil:
-		return agentupdate.Served{}, fmt.Errorf("read the update agent %s is offered: %w", agentID, err)
+	state, version, err := u.wanted(ctx, agentID)
+	if err != nil {
+		return agentupdate.Served{}, err
 	}
-	served := agentupdate.Served{State: agent.State(state), Catalog: catalog}
-	if version != nil {
-		served.Version = *version
+	served := agentupdate.Served{State: state, Version: version}
+	if err := u.store.pool.QueryRow(ctx,
+		"SELECT envelope FROM agent_update_catalogs ORDER BY version DESC LIMIT 1").Scan(&served.Catalog); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return agentupdate.Served{}, fmt.Errorf("read the newest update catalog: %w", err)
 	}
 	if served.Roots, err = u.Roots(ctx, after); err != nil {
 		return agentupdate.Served{}, err
@@ -306,23 +304,64 @@ func (u *AgentUpdates) Served(ctx context.Context, agentID string, after uint64)
 	return served, nil
 }
 
-// A package is read only for an agent the platform still listens to, assigned
-// a version the newest catalog names, and only when that catalog names the
-// package: the release the agent is to run or the one it would go back to.
-func (u *AgentUpdates) Package(ctx context.Context, agentID string, digest []byte) (agentupdate.ServedPackage, error) {
-	var state string
-	err := u.store.pool.QueryRow(ctx, "SELECT state FROM agents WHERE agent_id = $1", agentID).Scan(&state)
+// The release an agent is asked to run: the one assigned to it one by one,
+// whatever its tenant's rollout says, or else the one that rollout asks of it.
+func (u *AgentUpdates) wanted(ctx context.Context, agentID string) (agent.State, string, error) {
+	var (
+		state                        string
+		assigned, rolloutID, version *string
+		waves                        []byte
+		rolloutState                 *string
+		wave                         *int32
+		member                       *bool
+	)
+	err := u.store.pool.QueryRow(ctx, wantedRelease, agentID).Scan(
+		&state, &assigned, &rolloutID, &waves, &version, &rolloutState, &wave, &member)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		return agentupdate.ServedPackage{}, agent.ErrUnknown
+		return "", "", agent.ErrUnknown
 	case err != nil:
-		return agentupdate.ServedPackage{}, fmt.Errorf("read the state of agent %s: %w", agentID, err)
+		return "", "", fmt.Errorf("read the release agent %s is asked to run: %w", agentID, err)
 	}
-	served := agentupdate.ServedPackage{State: agent.State(state)}
+	var (
+		named  string
+		record *updatev1.RolloutRecord
+	)
+	if assigned != nil {
+		named = *assigned
+	}
+	if rolloutID != nil {
+		var opened updatev1.Rollout
+		if err := proto.Unmarshal(waves, &opened); err != nil {
+			return "", "", fmt.Errorf("read the waves of rollout %s: %w", *rolloutID, err)
+		}
+		held, _ := agentupdate.ParseState(*rolloutState)
+		record = &updatev1.RolloutRecord{
+			RolloutId: *rolloutID,
+			Rollout:   &updatev1.Rollout{Version: *version, Waves: opened.GetWaves()},
+			State:     held,
+			Wave:      uint32(*wave),
+		}
+	}
+	return agent.State(state), agentupdate.Wanted(named, record, member != nil && *member, agentID), nil
+}
+
+// A package is read only for an agent the platform still listens to, asked to
+// run a version the newest catalog names, and only when that catalog names the
+// package: the release the agent is to run or the one it would go back to.
+func (u *AgentUpdates) Package(ctx context.Context, agentID string, digest []byte) (agentupdate.ServedPackage, error) {
+	state, version, err := u.wanted(ctx, agentID)
+	if err != nil {
+		return agentupdate.ServedPackage{}, err
+	}
+	served := agentupdate.ServedPackage{State: state}
 	if !served.State.Admits() {
 		return served, nil
 	}
-	err = u.store.pool.QueryRow(ctx, servedPackage, agentID, digest).Scan(&served.Content)
+	if version == "" {
+		return agentupdate.ServedPackage{}, agentupdate.ErrUnknown
+	}
+	err = u.store.pool.QueryRow(ctx, servedPackage, digest, version).Scan(&served.Content)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return agentupdate.ServedPackage{}, agentupdate.ErrUnknown

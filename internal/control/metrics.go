@@ -32,6 +32,9 @@ type Metrics struct {
 	outstanding prometheus.Gauge
 	instructed  *prometheus.CounterVec
 	handed      *prometheus.CounterVec
+	authorized  *prometheus.CounterVec
+	offered     *prometheus.CounterVec
+	downloaded  *prometheus.CounterVec
 }
 
 func NewMetrics(registry *metrics.Registry) *Metrics {
@@ -168,6 +171,24 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "agent_policies_served_total",
 			Help:      "Agents asking for the policy that names them, by what they were answered.",
 		}, []string{"outcome"}),
+		authorized: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "agent_updates_published_total",
+			Help:      "Update roots, packages, catalogs and assignments an operator asked the platform to take, by what came of them.",
+		}, []string{"kind", "outcome"}),
+		offered: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "agent_updates_offered_total",
+			Help:      "Agents asking whether to update, by what they were answered.",
+		}, []string{"outcome"}),
+		downloaded: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "agent_packages_served_total",
+			Help:      "Agents asking for the package of a release, by what they were answered.",
+		}, []string{"outcome"}),
 	}
 
 	registry.MustRegister(
@@ -178,6 +199,7 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 		instruments.registered, instruments.announced, instruments.outstanding,
 		instruments.signed, instruments.renewed,
 		instruments.instructed, instruments.handed,
+		instruments.authorized, instruments.offered, instruments.downloaded,
 	)
 	return instruments
 }
@@ -304,5 +326,23 @@ func (m *Metrics) policyPublished(outcome string) {
 func (m *Metrics) policyServed(outcome string) {
 	if m != nil {
 		m.handed.WithLabelValues(outcome).Inc()
+	}
+}
+
+func (m *Metrics) updatePublished(kind, outcome string) {
+	if m != nil {
+		m.authorized.WithLabelValues(kind, outcome).Inc()
+	}
+}
+
+func (m *Metrics) updateOffered(outcome string) {
+	if m != nil {
+		m.offered.WithLabelValues(outcome).Inc()
+	}
+}
+
+func (m *Metrics) packageServed(outcome string) {
+	if m != nil {
+		m.downloaded.WithLabelValues(outcome).Inc()
 	}
 }

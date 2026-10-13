@@ -17,6 +17,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentupdate"
 	"github.com/dynasmon/Seagull-backend-v2/internal/authz"
 	"github.com/dynasmon/Seagull-backend-v2/internal/control"
 	"github.com/dynasmon/Seagull-backend-v2/internal/devpki"
@@ -110,6 +111,9 @@ type controlPlane struct {
 	agents         *registeredAgents
 	told           *announcedAdmissions
 	policyKey      *ecdsa.PrivateKey
+	updateKey      *ecdsa.PrivateKey
+	updateRoot     []byte
+	updates        *publishedUpdates
 	stopped        chan error
 }
 
@@ -195,6 +199,8 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 	if err != nil {
 		t.Fatalf("generate the policy signing key: %v", err)
 	}
+	updateKey, updateRoot := firstUpdateRoot(t)
+	updates := newPublishedUpdates(registered)
 
 	options := control.ServerOptions{
 		Address:         "127.0.0.1:0",
@@ -214,6 +220,8 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 		RenewalTLS:      renewalMutual,
 		Policies:        newPublishedPolicies(registered),
 		PolicySigners:   signersOf(t, policyKey),
+		Updates:         updates,
+		UpdateRoot:      func() (*agentupdate.Root, error) { return agentupdate.Anchor(updateRoot, time.Now()) },
 		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
@@ -245,6 +253,9 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 		agents:         registered,
 		told:           told,
 		policyKey:      policyKey,
+		updateKey:      updateKey,
+		updateRoot:     updateRoot,
+		updates:        updates,
 		stopped:        make(chan error, 1),
 	}
 	go func() { running.stopped <- platform.Run(ctx) }()

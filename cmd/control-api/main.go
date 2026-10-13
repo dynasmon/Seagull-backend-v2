@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentpolicy"
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentupdate"
 	"github.com/dynasmon/Seagull-backend-v2/internal/authz"
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/clickhouse"
@@ -163,6 +164,11 @@ func controlAPI(ctx context.Context) error {
 		return err
 	}
 
+	updateRoot, anchored, err := agentUpdateRoot(settings)
+	if err != nil {
+		return err
+	}
+
 	options := control.ServerOptions{
 		Address:         settings.address,
 		TLS:             transport,
@@ -187,6 +193,10 @@ func controlAPI(ctx context.Context) error {
 		PolicySigners: signers,
 		PolicyLimiter: ratelimit.NewLimiter(
 			settings.policyPullsPerSecond, settings.policyPullBurst, settings.trackedPolicyAgents),
+		Updates:    raised.AgentUpdates(),
+		UpdateRoot: updateRoot,
+		UpdateLimiter: ratelimit.NewLimiter(
+			settings.updatePullsPerSecond, settings.updatePullBurst, settings.trackedUpdateAgents),
 		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
@@ -227,6 +237,7 @@ func controlAPI(ctx context.Context) error {
 		slog.Time("agent_authority_expires_at", authority.NotAfter()),
 		slog.Duration("agent_certificate_lifetime", settings.certificateLife),
 		slog.Int("agent_policy_signers", accepted),
+		slog.Uint64("agent_update_root", anchored),
 	)
 
 	platform.Health().Register("backbone", published.publisher.Ping)
@@ -313,6 +324,27 @@ func agentPolicySigners(settings configuration) (func() (*agentpolicy.Signers, e
 		return nil, 0, err
 	}
 	return read, held.Count(), nil
+}
+
+// The root an operator provisioned, read again whenever it is needed so it can be
+// replaced without a restart, and refused at start when it is not a root its
+// own keys signed.
+func agentUpdateRoot(settings configuration) (func() (*agentupdate.Root, error), uint64, error) {
+	if settings.updateRootFile == "" {
+		return nil, 0, nil
+	}
+	read := func() (*agentupdate.Root, error) {
+		content, err := os.ReadFile(settings.updateRootFile)
+		if err != nil {
+			return nil, fmt.Errorf("read the agent update root: %w", err)
+		}
+		return agentupdate.Anchor(content, time.Now())
+	}
+	held, err := read()
+	if err != nil {
+		return nil, 0, err
+	}
+	return read, held.Version(), nil
 }
 
 func policySource(path string) control.Source {

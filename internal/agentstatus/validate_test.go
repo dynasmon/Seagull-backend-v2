@@ -63,6 +63,15 @@ func report() *agentv1.Status {
 			PolicyExpiresAt: timestamppb.New(reported.Add(30 * 24 * time.Hour)),
 		},
 		Privileges: &agentv1.Status_Privileges{User: "997", Groups: []string{"997", "999"}, NoNewPrivileges: true, Seccomp: "filter"},
+		Update: &agentv1.Status_Update{
+			Stage:          agentv1.Status_Update_STAGE_FAILED,
+			Version:        "v0.2.0",
+			CatalogVersion: 3,
+			RootVersion:    2,
+			Since:          timestamppb.New(reported.Add(-time.Minute)),
+			Failure:        agentv1.Status_Update_FAILURE_UNREACHABLE,
+			Reason:         "the platform does not answer",
+		},
 	}
 }
 
@@ -77,10 +86,10 @@ func TestAWellFormedReportIsAdmitted(t *testing.T) {
 		t.Fatalf("a well formed report was refused: %v", err)
 	}
 	unenrolled := mutate(func(r *agentv1.Status) {
-		r.Credential, r.Configuration.PolicyId, r.Configuration.PolicyRevision = nil, "", 0
+		r.Credential, r.Configuration.PolicyId, r.Configuration.PolicyRevision, r.Update = nil, "", 0, nil
 	})
 	if err := Validate(unenrolled, reported, window); err != nil {
-		t.Fatalf("a report without a credential or a policy was refused: %v", err)
+		t.Fatalf("a report without a credential, a policy or an update was refused: %v", err)
 	}
 }
 
@@ -124,8 +133,17 @@ func TestAReportIsRefusedNamingTheFieldAtFault(t *testing.T) {
 		"long capability": {mutate(func(r *agentv1.Status) {
 			r.Privileges.Capabilities = []string{strings.Repeat("C", MaxCapabilityLength+1)}
 		}), "privileges.capabilities[0]"},
-		"reported from the future": {mutate(func(r *agentv1.Status) { r.ReportedAt = timestamppb.New(reported.Add(time.Hour)) }), "reported_at"},
-		"reported too long ago":    {mutate(func(r *agentv1.Status) { r.ReportedAt = timestamppb.New(reported.Add(-48 * time.Hour)) }), "reported_at"},
+		"unspecified update stage": {mutate(func(r *agentv1.Status) { r.Update.Stage = agentv1.Status_Update_STAGE_UNSPECIFIED }), "update.stage"},
+		"undeclared update stage":  {mutate(func(r *agentv1.Status) { r.Update.Stage = agentv1.Status_Update_Stage(42) }), "update.stage"},
+		"no update version":        {mutate(func(r *agentv1.Status) { r.Update.Version = "" }), "update.version"},
+		"long update version": {mutate(func(r *agentv1.Status) {
+			r.Update.Version = "v" + strings.Repeat("1", MaxVersionLength)
+		}), "update.version"},
+		"no update since":           {mutate(func(r *agentv1.Status) { r.Update.Since = nil }), "update.since"},
+		"undeclared update failure": {mutate(func(r *agentv1.Status) { r.Update.Failure = agentv1.Status_Update_Failure(42) }), "update.failure"},
+		"long update reason":        {mutate(func(r *agentv1.Status) { r.Update.Reason = long }), "update.reason"},
+		"reported from the future":  {mutate(func(r *agentv1.Status) { r.ReportedAt = timestamppb.New(reported.Add(time.Hour)) }), "reported_at"},
+		"reported too long ago":     {mutate(func(r *agentv1.Status) { r.ReportedAt = timestamppb.New(reported.Add(-48 * time.Hour)) }), "reported_at"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := Validate(one.report, reported, window)

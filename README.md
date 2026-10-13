@@ -140,6 +140,26 @@ roll one back. See
 go run ./tools/policysign -key signer.pem -policy policy.json -tenant default -lifetime 720h -output publication.pb
 ```
 
+### Agent updates
+
+Which releases agents may install is authorized off the platform too, by the
+roles of a root after The Update Framework: the root role signs the next root and
+the catalog role signs a catalog of every release agents may install, each with
+the digest and size of its package. The platform holds no key of either. It
+verifies what it is given, keeps the packages a catalog names, and hands an agent
+the roots, the newest catalog and the version it wants that agent to run, on the
+listener the agent renews on; the agent verifies all of it again from the root it
+was provisioned with. Which agent runs which release is the platform's decision
+and never signed, so a taken control plane can withhold an update and cannot
+make an agent install anything an operator did not sign, or go back past what a
+release allows. See
+[ADR 31](docs/decisions/0031-an-agent-release-is-authorized-off-the-platform.md).
+
+```bash
+go run ./tools/updatesign root -version 1 -key root.pem -root-key root.pub -catalog-key catalog.pub -envelope update-root.pb
+go run ./tools/updatesign catalog -catalog catalog.json -package v0.2.0=seagull-agent_0.2.0-1_amd64.deb -key catalog.pem -root update-root.pb -output catalog.pb
+```
+
 ### Asset inventory
 
 What an asset has is a record kind of its own, on a contract, a topic, a store
@@ -310,7 +330,7 @@ Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 | `status-projector` | Keeps the newest report each agent sent of itself, one row per agent, under a group and a quarantine of its own, so a status store outage costs how fresh liveness is and never telemetry. |
 | `advisory-importer` | Follows the vulnerability feeds a deployment names, translates each changed record into an advisory carrying its provenance, and publishes it with the freshness of the feed. The one process that reaches the internet; it holds no store and names no asset. |
 | `advisory-writer` | Keeps every version of every advisory and every attempt to follow a feed, under a group and a quarantine of its own. |
-| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry with how recently each agent reported, the authority that signs an agent's certificate, and the signed policies agents are handed. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates and asking for their policy on a second one. |
+| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry with how recently each agent reported, the authority that signs an agent's certificate, the signed policies agents are handed, and the signed catalog of releases agents may install with their packages. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates and asking for their policy and their updates on a second one. |
 | `query-api` | The read plane, and the only reader of the analytical store. |
 | `backbone-migrator`, `store-migrator`, `control-migrator` | Apply the topic topology, the analytical schema and the relational schema, then exit. Nothing migrates on the way to serving traffic. |
 
@@ -470,6 +490,7 @@ container without going through the environment. The settings that matter most:
 | `SEAGULL_CONTROL_API_AGENT_CERT_LIFETIME` | How long an issued agent certificate is valid. Short is the answer to a stolen key nobody has revoked, and renewal is what makes short affordable. |
 | `SEAGULL_CONTROL_API_RENEWAL_ADDRESS`, `SEAGULL_CONTROL_API_RENEWAL_TLS_CERT`, `SEAGULL_CONTROL_API_RENEWAL_TLS_KEY`, `SEAGULL_CONTROL_API_AGENT_CA` | The agent-facing listener an agent renews on and asks for its policy on, in the agent trust domain rather than the operator one. |
 | `SEAGULL_CONTROL_API_AGENT_POLICY_SIGNERS` | The public keys an agent policy must be signed under. Read at each publication; unset, the plane publishes no policy. |
+| `SEAGULL_CONTROL_API_AGENT_UPDATE_ROOT` | The update root every agent is provisioned with, as a signed envelope. Read whenever it is needed; unset, the plane takes and hands out no update. |
 | `SEAGULL_BACKBONE_AGENTS_TOPIC` | Where the control plane says what it decided about an agent and the gateway reads it. Compacted, keyed by the agent. |
 | `SEAGULL_CONTROL_TELEMETRY_STORE_ADDRESS` | Where the control plane reads when an agent was last heard from. It writes nothing there. |
 | `SEAGULL_CONTROL_API_SESSION_KEY` | Key sessions are signed with; drawn at random when unset. |
@@ -515,7 +536,8 @@ drops a batch it had already answered for.
 Vulnerability matching and response actions are not implemented — advisories are
 read and kept, and nothing compares them with an asset yet — no collector sends
 inventory yet — `tools/devprobe -inventory` is the only producer — and
-Sigma import covers one class of event. Detection is stateless unless a rule asks
+Sigma import covers one class of event. An agent release is assigned agent by
+agent, with no staged rollout yet. Detection is stateless unless a rule asks
 otherwise: a rule that counts or orders its events reads a bounded window of the
 backbone in event time, which is what keeps both replayable.
 

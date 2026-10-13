@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentpolicy"
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentupdate"
 	"github.com/dynasmon/Seagull-backend-v2/internal/pki"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/httpx"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/ratelimit"
@@ -42,6 +43,9 @@ type ServerOptions struct {
 	Policies        AgentPolicies
 	PolicySigners   func() (*agentpolicy.Signers, error)
 	PolicyLimiter   *ratelimit.Limiter
+	Updates         AgentUpdates
+	UpdateRoot      func() (*agentupdate.Root, error)
+	UpdateLimiter   *ratelimit.Limiter
 	Metrics         *Metrics
 	Instrumentation *httpx.Instrumentation
 	Logger          *slog.Logger
@@ -74,6 +78,11 @@ type Server struct {
 	policies      AgentPolicies
 	policySigners func() (*agentpolicy.Signers, error)
 	policyPulls   *ratelimit.Limiter
+
+	updates     AgentUpdates
+	updateRoot  func() (*agentupdate.Root, error)
+	updatePulls *ratelimit.Limiter
+	downloads   chan struct{}
 }
 
 type route struct {
@@ -163,6 +172,11 @@ func newServer(options ServerOptions) (*Server, error) {
 		policies:      options.Policies,
 		policySigners: options.PolicySigners,
 		policyPulls:   options.PolicyLimiter,
+
+		updates:     options.Updates,
+		updateRoot:  options.UpdateRoot,
+		updatePulls: options.UpdateLimiter,
+		downloads:   make(chan struct{}, MaxDownloads),
 	}, nil
 }
 
@@ -209,7 +223,7 @@ func (s *Server) routes() []route {
 		{http.MethodGet, SessionPath, "session_describe", Session(), s.describeSession()},
 		{http.MethodDelete, SessionPath, "session_revoke", Session(), s.revokeSession()},
 		{http.MethodGet, SessionsPath, "session_list", Session(), s.listSessions()},
-	}, slices.Concat(rulesetRoutes(s), alertRoutes(s), incidentRoutes(s), agentRoutes(s), certificateRoutes(s), policyRoutes(s))...)
+	}, slices.Concat(rulesetRoutes(s), alertRoutes(s), incidentRoutes(s), agentRoutes(s), certificateRoutes(s), policyRoutes(s), updateRoutes(s))...)
 }
 
 func (s *Server) descriptor() http.Handler {

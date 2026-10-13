@@ -500,6 +500,7 @@ detection away from somebody's triage.
 | `SEAGULL_CONTROL_API_AGENT_UPDATE_INTERVAL` | `30s` | how often one agent may ask whether to update or for a package |
 | `SEAGULL_CONTROL_API_AGENT_UPDATE_BURST` | `4` | such requests one agent may make at once above that |
 | `SEAGULL_CONTROL_API_TRACKED_UPDATE_AGENTS` | `8192` | agents whose requests about updates are counted at once |
+| `SEAGULL_CONTROL_API_AGENT_ROLLOUT_INTERVAL` | `30s` | how often the control plane reads how far every rollout in force went, and opens a wave or pauses one on what it read; between 5 seconds and 10 minutes. Read only where an update root is configured |
 
 The control plane authenticates a caller by certificate, so it has no plaintext
 mode and no mode without a caller authority: without one there is nobody to be
@@ -762,6 +763,44 @@ agent is disabled or revoked because it went quiet. A page carries liveness and
 
 **Quarantine.** `security.agents.status.quarantine`, on the same terms as the
 other quarantines.
+
+## Agent rollouts
+
+A rollout moves the agents of a tenant, or a list of at most 10,000 of them, to a
+release the newest catalog names, through between 1 and 16 waves. A wave names
+at most 100 agents one by one, as a canary, or opens a share of the rollout in
+percent; an agent's place is the one the contract states, so it never changes
+for the rollout's life. A tenant has one rollout in force at most, and starting a
+rollout supersedes the one in force. A release assigned to an agent one by one
+outweighs its tenant's rollout.
+
+| Route | Needs | Answers |
+|---|---|---|
+| `POST /v1/agents/update/rollouts` | `agents:write` in the tenant | `201` with the `RolloutRecord`, active at its first wave |
+| `POST /v1/agents/update/rollouts/changes` | `agents:write` in the tenant | `200` with the rollout as the `RolloutChange` left it |
+| `POST /v1/agents/update/rollouts/search` | `agents:read` | a `RolloutPage`, newest first within each tenant, without the agents a rollout names |
+| `GET /v1/agents/update/rollouts/{tenant}/{rollout}` | `agents:read` in the tenant | the `RolloutRecord`, with the agents it names |
+
+A rollout naming a version the newest catalog does not name is refused with
+`release_not_in_catalog`, one naming an agent the tenant does not hold with
+`rollout_names_unregistered_agents`, a malformed one with `malformed_rollout`, a
+change that does not apply with `409 rollout_change_not_applicable`, and an
+unknown rollout with `404 unknown_rollout`.
+
+Every `SEAGULL_CONTROL_API_AGENT_ROLLOUT_INTERVAL`, the control plane reads every
+rollout in force: the agents of its tenant the registry still listens to, those
+its open waves reach, and their newest status report, a thousand at a time. It
+records what it read as the rollout's progress, then pauses an active rollout
+whose failing agents reached its `failures`, or opens the next wave once the open
+one ran for its soak and enough agents run the release. A reading is written only
+while the rollout stands where it was read. Resuming takes the agents last read
+as failing as known.
+
+| Metric | Labels |
+|---|---|
+| `seagull_control_agent_rollouts_in_force` | |
+| `seagull_control_agent_rollout_readings_total` | `outcome`: `read`, `overtaken` (an operator changed the rollout meanwhile), `unreadable` |
+| `seagull_control_agent_rollout_gates_total` | `step`: `opened`, `paused` |
 
 ## The vulnerability intelligence store
 

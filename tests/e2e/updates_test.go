@@ -29,7 +29,8 @@ import (
 
 // What the PostgreSQL store enforces, held in memory: roots and catalogs only
 // move forward, a catalog names only packages it was given, and a package is
-// handed only to an agent assigned a version the newest catalog names it for.
+// handed only to an agent asked to run a version the newest catalog names it
+// for, by an assignment or by its tenant's rollout.
 type publishedUpdates struct {
 	mutex    sync.Mutex
 	agents   *registeredAgents
@@ -37,6 +38,7 @@ type publishedUpdates struct {
 	packages map[string][]byte
 	catalogs []agentupdate.AcceptedCatalog
 	assigned map[string]string
+	rollouts *startedRollouts
 }
 
 func newPublishedUpdates(agents *registeredAgents) *publishedUpdates {
@@ -126,8 +128,33 @@ func (p *publishedUpdates) Assign(_ context.Context, accepted agentupdate.Accept
 	return accepted.Record, nil
 }
 
+func (p *publishedUpdates) names(version string) bool {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	return p.newest() != nil && p.newest().Names(version)
+}
+
+func (p *publishedUpdates) assignedTo(agentID string) string {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	return p.assigned[agentID]
+}
+
+// What an agent is asked to run: its assignment, or else what its tenant's
+// rollout asks of it.
+func (p *publishedUpdates) wanted(tenant, agentID string) string {
+	var (
+		rollout *updatev1.RolloutRecord
+		member  bool
+	)
+	if p.rollouts != nil {
+		rollout, member = p.rollouts.inForce(tenant, agentID)
+	}
+	return agentupdate.Wanted(p.assignedTo(agentID), rollout, member, agentID)
+}
+
 func (p *publishedUpdates) Served(ctx context.Context, agentID string, after uint64) (agentupdate.Served, error) {
-	_, state, known := p.state(agentID)
+	tenant, state, known := p.state(agentID)
 	if !known {
 		return agentupdate.Served{}, agent.ErrUnknown
 	}
@@ -135,9 +162,10 @@ func (p *publishedUpdates) Served(ctx context.Context, agentID string, after uin
 	if err != nil {
 		return agentupdate.Served{}, err
 	}
+	version := p.wanted(tenant, agentID)
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
-	served := agentupdate.Served{State: state, Roots: roots, Version: p.assigned[agentID]}
+	served := agentupdate.Served{State: state, Roots: roots, Version: version}
 	if newest := p.newest(); newest != nil {
 		served.Catalog = newest.Served()
 	}
@@ -145,16 +173,17 @@ func (p *publishedUpdates) Served(ctx context.Context, agentID string, after uin
 }
 
 func (p *publishedUpdates) Package(_ context.Context, agentID string, digest []byte) (agentupdate.ServedPackage, error) {
-	_, state, known := p.state(agentID)
+	tenant, state, known := p.state(agentID)
 	if !known {
 		return agentupdate.ServedPackage{}, agent.ErrUnknown
 	}
 	if !state.Admits() {
 		return agentupdate.ServedPackage{State: state}, nil
 	}
+	version := p.wanted(tenant, agentID)
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
-	if newest := p.newest(); newest != nil && newest.Names(p.assigned[agentID]) {
+	if newest := p.newest(); newest != nil && newest.Names(version) {
 		for _, release := range newest.Releases() {
 			if bytes.Equal(release.GetPayload().GetSha256(), digest) {
 				return agentupdate.ServedPackage{State: state, Content: p.packages[hex.EncodeToString(digest)]}, nil

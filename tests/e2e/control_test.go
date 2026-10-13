@@ -17,6 +17,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentstatus"
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentupdate"
 	"github.com/dynasmon/Seagull-backend-v2/internal/authz"
 	"github.com/dynasmon/Seagull-backend-v2/internal/control"
@@ -114,6 +115,8 @@ type controlPlane struct {
 	updateKey      *ecdsa.PrivateKey
 	updateRoot     []byte
 	updates        *publishedUpdates
+	rollouts       *startedRollouts
+	reported       *reportedStatus
 	stopped        chan error
 }
 
@@ -201,6 +204,10 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 	}
 	updateKey, updateRoot := firstUpdateRoot(t)
 	updates := newPublishedUpdates(registered)
+	rollouts := newStartedRollouts(registered, updates)
+	updates.rollouts = rollouts
+	reported := &reportedStatus{newest: map[string]agentstatus.Report{}}
+	anchor := func() (*agentupdate.Root, error) { return agentupdate.Anchor(updateRoot, time.Now()) }
 
 	options := control.ServerOptions{
 		Address:         "127.0.0.1:0",
@@ -221,7 +228,8 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 		Policies:        newPublishedPolicies(registered),
 		PolicySigners:   signersOf(t, policyKey),
 		Updates:         updates,
-		UpdateRoot:      func() (*agentupdate.Root, error) { return agentupdate.Anchor(updateRoot, time.Now()) },
+		UpdateRoot:      anchor,
+		Rollouts:        rollouts,
 		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
@@ -239,8 +247,16 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 	if err != nil {
 		t.Fatalf("build the renewal listener: %v", err)
 	}
+	evaluator, err := control.NewRolloutEvaluator(control.RolloutEvaluatorOptions{
+		Rollouts: rollouts, Updates: updates, UpdateRoot: anchor, Reports: reported,
+		Metrics: instruments, Logger: platform.Logger(), Every: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("build the rollout evaluator: %v", err)
+	}
 	platform.Add(listener)
 	platform.Add(renewals)
+	platform.Add(evaluator)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	running := &controlPlane{
@@ -256,6 +272,8 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 		updateKey:      updateKey,
 		updateRoot:     updateRoot,
 		updates:        updates,
+		rollouts:       rollouts,
+		reported:       reported,
 		stopped:        make(chan error, 1),
 	}
 	go func() { running.stopped <- platform.Run(ctx) }()

@@ -28,6 +28,9 @@ const (
 	StatusPath  = "/v1/status"
 	StatusRoute = "POST " + StatusPath
 
+	AssessmentsPath  = "/v1/assessments"
+	AssessmentsRoute = "POST " + AssessmentsPath
+
 	ContentType = "application/x-protobuf"
 
 	CodeAtCapacity    = "gateway_at_capacity"
@@ -69,6 +72,16 @@ type StatusHandlerOptions struct {
 	Limiter        *ratelimit.Limiter
 	Capacity       *Capacity
 	Metrics        *StatusMetrics
+	MaxBodyBytes   int64
+	PublishTimeout time.Duration
+}
+
+type AssessmentHandlerOptions struct {
+	Admitter       *AssessmentAdmitter
+	Roster         Roster
+	Limiter        *ratelimit.Limiter
+	Capacity       *Capacity
+	Metrics        *AssessmentMetrics
 	MaxBodyBytes   int64
 	PublishTimeout time.Duration
 }
@@ -126,6 +139,22 @@ func NewStatusHandler(options StatusHandlerOptions) (*Handler, error) {
 		return nil, errors.New("the status handler needs metrics")
 	}
 	return newHandler(statusStream{admitter: options.Admitter, metrics: options.Metrics}, gate{
+		roster:         options.Roster,
+		limiter:        options.Limiter,
+		capacity:       options.Capacity,
+		maxBodyBytes:   options.MaxBodyBytes,
+		publishTimeout: options.PublishTimeout,
+	})
+}
+
+func NewAssessmentHandler(options AssessmentHandlerOptions) (*Handler, error) {
+	if options.Admitter == nil {
+		return nil, errors.New("the assessment handler needs an admitter")
+	}
+	if options.Metrics == nil {
+		return nil, errors.New("the assessment handler needs metrics")
+	}
+	return newHandler(assessmentStream{admitter: options.Admitter, metrics: options.Metrics}, gate{
 		roster:         options.Roster,
 		limiter:        options.Limiter,
 		capacity:       options.Capacity,

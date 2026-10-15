@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentpolicy"
+	assessmentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/assessment/v1"
 	policyv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/policy/v1"
 )
 
@@ -37,6 +38,7 @@ func complete() *policyv1.Policy {
 			{Module: policyv1.Module_MODULE_INVENTORY, Interval: durationpb.New(6 * time.Hour)},
 			{Module: policyv1.Module_MODULE_NETWORK, Collection: policyv1.Collection_COLLECTION_DISABLED, Interval: durationpb.New(30 * time.Second)},
 			files([]string{"/etc", "/usr/bin"}, []string{"/etc/machine-id", "*.swp"}),
+			{Module: policyv1.Module_MODULE_ASSESSMENT, Collection: policyv1.Collection_COLLECTION_ENABLED, Interval: durationpb.New(12 * time.Hour)},
 		},
 		Budgets: &policyv1.Budgets{
 			SpoolMaxBytes:               256 << 20,
@@ -50,6 +52,14 @@ func complete() *policyv1.Policy {
 			MaxScanBytesPerSecond:       4 << 20,
 			MaxConcurrentUploads:        1,
 		},
+		Assessment: &assessmentv1.Checklist{Checks: []*assessmentv1.Check{
+			{CheckId: "ssh.root-login", Title: "Nobody logs in as root over ssh", Test: &assessmentv1.Check_Directive{Directive: &assessmentv1.DirectiveTest{
+				Source: assessmentv1.DirectiveTest_SOURCE_SSHD, Name: "PermitRootLogin", Allowed: []string{"no"},
+			}}},
+			{CheckId: "telnetd", Test: &assessmentv1.Check_Package{Package: &assessmentv1.PackageTest{
+				Name: "telnetd", Presence: assessmentv1.Presence_PRESENCE_FORBIDDEN,
+			}}},
+		}},
 	}
 	return policy
 }
@@ -125,6 +135,21 @@ func TestAPolicyOutsideTheContractIsRefusedNamingWhatIsWrong(t *testing.T) {
 		"a long network": {func(p *policyv1.Policy) {
 			p.Settings.Modules[2].Interval = durationpb.New(2 * time.Hour)
 		}, "between 10s and 1h0m0s"},
+		"a long assessment": {func(p *policyv1.Policy) {
+			p.Settings.Modules[4].Interval = durationpb.New(48 * time.Hour)
+		}, "between 1m0s and 24h0m0s"},
+		"paths for the assessment": {func(p *policyv1.Policy) {
+			p.Settings.Modules[4].Paths = &policyv1.Paths{Paths: []string{"/etc"}}
+		}, "only the files module"},
+		"an empty checklist": {func(p *policyv1.Policy) {
+			p.Settings.Assessment.Checks = nil
+		}, "settings.assessment.checks name nothing"},
+		"a check without a test": {func(p *policyv1.Policy) {
+			p.Settings.Assessment.Checks[1].Test = nil
+		}, "settings.assessment.checks[1].test"},
+		"a check named twice": {func(p *policyv1.Policy) {
+			p.Settings.Assessment.Checks[1].CheckId = "ssh.root-login"
+		}, "settings.assessment.checks[1].check_id"},
 		"an invalid interval": {func(p *policyv1.Policy) {
 			p.Settings.Modules[1].Interval = &durationpb.Duration{Seconds: 1, Nanos: -1}
 		}, "not a duration"},

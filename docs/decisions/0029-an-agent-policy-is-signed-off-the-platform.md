@@ -122,7 +122,11 @@ watches and leaves out, and budgets. A budget lowers the ceiling the agent's own
 configuration sets and never raises it, and nothing in a policy names the
 platform, what the agent trusts, its identity or its timeouts. The contract
 states every bound, the platform refuses a policy outside them, and the agent
-refuses one whose configuration it would not run on.
+refuses one whose configuration it would not run on. A policy also carries the
+checks the agents it names assess their hosts against, which no agent's own
+configuration names, as
+[ADR 33](0033-a-posture-is-the-newest-assessment-of-checks-an-operator-signed.md)
+decides.
 
 ## What this deliberately does not do
 

@@ -16,6 +16,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/control"
 	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
+	assessmentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/assessment/v1"
 )
 
 // Enough of a registry to prove the routes: what the listener owns is who may
@@ -410,7 +411,21 @@ func TestTheAnnouncerCarriesWhatTheBackboneRefusedEarlier(t *testing.T) {
 type stubLiveness struct {
 	seen      map[string]time.Time
 	reported  map[string]agentstatus.Report
+	assessed  map[string]*assessmentv1.Assessment
 	unreached error
+}
+
+func (s *stubLiveness) Postures(_ context.Context, agents, tenants []string) (map[string]*assessmentv1.Assessment, error) {
+	if s.unreached != nil {
+		return nil, s.unreached
+	}
+	answered := map[string]*assessmentv1.Assessment{}
+	for _, agentID := range agents {
+		if held, known := s.assessed[agentID]; known && len(tenants) > 0 {
+			answered[agentID] = held
+		}
+	}
+	return answered, nil
 }
 
 func (s *stubLiveness) Newest(_ context.Context, agents, tenants []string) (map[string]agentstatus.Report, error) {
@@ -537,5 +552,49 @@ func TestAStatusStoreThatDoesNotAnswerLeavesTheAgentReadableWithoutALiveness(t *
 	}
 	if one.GetLiveness() != agentv1.Liveness_LIVENESS_UNSPECIFIED || one.GetLastReported() != nil || one.GetStatus() != nil {
 		t.Fatal("a status nobody could read was answered anyway")
+	}
+}
+
+func TestOnlyReadingOneAgentCarriesItsPosture(t *testing.T) {
+	h := newHarness(t, nil)
+	assessed := fixtures.Posture{AgentID: "web-01", Revision: 4}.Assessment()
+	handler := listenerReading(t, h, newStubAgents(), &stubAdmissions{}, &stubLiveness{
+		assessed: map[string]*assessmentv1.Assessment{"web-01": assessed},
+	})
+	operator := session(t, handler, "dev-admin")
+
+	response := call(t, handler, http.MethodPost, "/v1/agents/search", "dev-admin", operator, &agentv1.Query{})
+	var page agentv1.Page
+	if err := proto.Unmarshal(response.Body.Bytes(), &page); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("searching agents answered %d: %v", response.Code, err)
+	}
+	for _, listed := range page.GetAgents() {
+		if listed.GetAssessment() != nil {
+			t.Errorf("a page carried the posture of %s", listed.GetAgentId())
+		}
+	}
+
+	response = call(t, handler, http.MethodGet, "/v1/agents/web-01", "dev-admin", operator, nil)
+	var one agentv1.Agent
+	if err := proto.Unmarshal(response.Body.Bytes(), &one); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("reading an agent answered %d: %v", response.Code, err)
+	}
+	if !proto.Equal(one.GetAssessment(), assessed) {
+		t.Error("reading one agent did not carry the newest assessment it made")
+	}
+}
+
+func TestAnAssessmentStoreThatDoesNotAnswerLeavesTheAgentReadableWithoutAPosture(t *testing.T) {
+	h := newHarness(t, nil)
+	handler := listenerReading(t, h, newStubAgents(), &stubAdmissions{},
+		&stubLiveness{unreached: errors.New("the assessment store is unreachable")})
+
+	response := call(t, handler, http.MethodGet, "/v1/agents/web-01", "dev-admin", session(t, handler, "dev-admin"), nil)
+	var one agentv1.Agent
+	if err := proto.Unmarshal(response.Body.Bytes(), &one); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("an unreachable assessment store made an agent unreadable: %d %v", response.Code, err)
+	}
+	if one.GetAssessment() != nil {
+		t.Fatal("a posture nobody could read was answered anyway")
 	}
 }

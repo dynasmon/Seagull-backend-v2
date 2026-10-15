@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
+	"github.com/dynasmon/Seagull-backend-v2/internal/assessment"
 	policyv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/policy/v1"
 )
 
@@ -41,10 +42,11 @@ type ceiling struct {
 
 var (
 	intervals = map[policyv1.Module]span{
-		policyv1.Module_MODULE_INVENTORY: {least: time.Minute, most: 24 * time.Hour},
-		policyv1.Module_MODULE_PROCESSES: {least: time.Minute, most: 24 * time.Hour},
-		policyv1.Module_MODULE_FILES:     {least: time.Minute, most: 24 * time.Hour},
-		policyv1.Module_MODULE_NETWORK:   {least: 10 * time.Second, most: time.Hour},
+		policyv1.Module_MODULE_INVENTORY:  {least: time.Minute, most: 24 * time.Hour},
+		policyv1.Module_MODULE_PROCESSES:  {least: time.Minute, most: 24 * time.Hour},
+		policyv1.Module_MODULE_FILES:      {least: time.Minute, most: 24 * time.Hour},
+		policyv1.Module_MODULE_NETWORK:    {least: 10 * time.Second, most: time.Hour},
+		policyv1.Module_MODULE_ASSESSMENT: {least: time.Minute, most: 24 * time.Hour},
 	}
 	unwatched = []string{"/proc", "/sys", "/dev", "/tmp", "/var/tmp"}
 	spoolAge  = span{least: time.Hour, most: 720 * time.Hour}
@@ -150,6 +152,11 @@ func settings(found *problems, held *policyv1.Settings) {
 		scope(found, name, named, module)
 	}
 	budgets(found, held.GetBudgets())
+	if checklist := held.GetAssessment(); checklist != nil {
+		for _, problem := range assessment.ValidateChecklist(checklist) {
+			found.add(fmt.Errorf("settings.assessment.%w", problem))
+		}
+	}
 }
 
 func interval(found *problems, name string, module policyv1.Module, every *durationpb.Duration) {

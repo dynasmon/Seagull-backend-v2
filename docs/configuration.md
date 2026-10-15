@@ -50,6 +50,7 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_GATEWAY_MAX_EVENTS_PER_BATCH` | `1000` | ceiling on events in one batch |
 | `SEAGULL_GATEWAY_MAX_RECORDS_PER_BATCH` | `64` | ceiling on inventory records in one batch, alongside the contract's 20,000 items |
 | `SEAGULL_GATEWAY_MAX_REPORTS_PER_BATCH` | `16` | ceiling on status reports in one batch, at most the contract's 16 |
+| `SEAGULL_GATEWAY_MAX_ASSESSMENTS_PER_BATCH` | `16` | ceiling on assessments in one batch, at most the contract's 16 |
 | `SEAGULL_GATEWAY_PUBLISH_TIMEOUT` | `10s` | budget for making a batch durable |
 | `SEAGULL_GATEWAY_RATE_PER_SECOND` | `200` | per-agent batch budget, `0` disables it |
 | `SEAGULL_GATEWAY_RATE_BURST` | `400` | per-agent burst |
@@ -63,6 +64,8 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_INVENTORY_MAX_AGE` | `720h` | how old a scan may be and still be admitted |
 | `SEAGULL_STATUS_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock a status report may be |
 | `SEAGULL_STATUS_MAX_AGE` | `168h` | how old a status report may be and still be admitted |
+| `SEAGULL_ASSESSMENT_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock an assessment may be |
+| `SEAGULL_ASSESSMENT_MAX_AGE` | `720h` | how old an assessment may be and still be admitted |
 
 The batch ceiling is measured, not chosen. No event in a batch is published until
 every event in it has been decoded and validated, so a larger batch is a larger
@@ -71,14 +74,15 @@ thousand the gateway sustains 727k events/s with a p99 of 139ms; at ten thousand
 it sustains 300k with a p99 of three seconds. `make test-load` is where those
 numbers come from.
 
-The gateway serves three routes on one listener: `POST /v1/events`,
-`POST /v1/inventory` and `POST /v1/status`. They stand behind the same
-certificate, the same registry answer, the same rate limiter and the same
-capacity bound, so a collector cannot buy a second budget by sending inventory or
-a status report. A scan may be older than an event may be, because an asset that
-was offline for a fortnight sends what it saw while it was. A status report is
-admitted on the event window: liveness is measured from when the platform
-received a report, never from when the agent says it wrote it.
+The gateway serves four routes on one listener: `POST /v1/events`,
+`POST /v1/inventory`, `POST /v1/status` and `POST /v1/assessments`. They stand
+behind the same certificate, the same registry answer, the same rate limiter and
+the same capacity bound, so a collector cannot buy a second budget by sending
+inventory, a status report or an assessment. A scan may be older than an event
+may be, because an asset that was offline for a fortnight sends what it saw while
+it was, and so may an assessment, which an agent keeps until the platform holds
+it. A status report is admitted on the event window: liveness is measured from
+when the platform received a report, never from when the agent says it wrote it.
 
 ### The backbone, shared by both halves of the data plane and the migrator
 
@@ -105,6 +109,12 @@ received a report, never from when the agent says it wrote it.
 | `SEAGULL_BACKBONE_STATUS_QUARANTINE_TOPIC` | `security.agents.status.quarantine` | reports the status projector refused |
 | `SEAGULL_BACKBONE_STATUS_QUARANTINE_PARTITIONS` | `1` | |
 | `SEAGULL_BACKBONE_STATUS_QUARANTINE_RETENTION` | `720h` | |
+| `SEAGULL_BACKBONE_ASSESSMENTS_TOPIC` | `security.assessments` | every assessment agents made of their hosts |
+| `SEAGULL_BACKBONE_ASSESSMENTS_PARTITIONS` | `3` | how far per-agent ordering spreads |
+| `SEAGULL_BACKBONE_ASSESSMENTS_RETENTION` | `720h` | how far back the assessments can be read again |
+| `SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_TOPIC` | `security.assessments.quarantine` | assessments the assessment projector refused |
+| `SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_PARTITIONS` | `1` | |
+| `SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_RETENTION` | `720h` | |
 | `SEAGULL_BACKBONE_QUARANTINE_PARTITIONS` | `3` | |
 | `SEAGULL_BACKBONE_QUARANTINE_RETENTION` | `720h` | |
 | `SEAGULL_BACKBONE_REPLICAS` | `1` | replication factor of every topic |
@@ -330,6 +340,30 @@ A report is a few kilobytes and a fleet sends one per agent every interval, so a
 batch is counted generously. A store outage costs how fresh liveness is and is
 retried until the batch is durable; a report is never skipped to make progress.
 
+### assessment-projector
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEAGULL_ASSESSMENT_PROJECTOR_CONSUMER_GROUP` | `assessment-projector` | the consumer group that owns the offsets |
+| `SEAGULL_ASSESSMENT_PROJECTOR_BATCH_RECORDS` | `128` | assessments per poll, and per store batch |
+| `SEAGULL_ASSESSMENT_PROJECTOR_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
+| `SEAGULL_ASSESSMENT_PROJECTOR_RETRY_DELAY` | `1s` | first delay before a batch is retried |
+| `SEAGULL_ASSESSMENT_PROJECTOR_RETRY_DELAY_MAX` | `30s` | ceiling the delay backs off to |
+| `SEAGULL_ASSESSMENT_STORE_ADDRESS` | required | the store's native protocol address, `clickhouse:9000` |
+| `SEAGULL_ASSESSMENT_STORE_DATABASE` | `seagull` | the database holding `agent_assessments`, which `control-api` reads through `SEAGULL_CONTROL_TELEMETRY_STORE_*` |
+| `SEAGULL_ASSESSMENT_STORE_USER` | `seagull` | |
+| `SEAGULL_ASSESSMENT_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
+| `SEAGULL_ASSESSMENT_STORE_TIMEOUT` | `30s` | budget for one write attempt, and to dial |
+| `SEAGULL_ASSESSMENT_STORE_TLS` | `true` | verify and encrypt the native connection; development Compose explicitly sets `false` |
+| `SEAGULL_ASSESSMENT_STORE_TLS_CA` | unset | authority the store must chain to; the system pool when unset |
+| `SEAGULL_ASSESSMENT_STORE_TLS_SERVER_NAME` | unset | name the store certificate must carry; the dialled host when unset |
+
+An assessment is at most a few hundred kilobytes and an agent sends one when its
+posture changed and once a day otherwise, so a batch is counted in fewer records
+than a status batch is. A store outage costs how fresh a posture is and is
+retried until the batch is durable; an assessment is never skipped to make
+progress.
+
 ### advisory-importer
 
 | Variable | Default | Meaning |
@@ -485,7 +519,7 @@ detection away from somebody's triage.
 | `SEAGULL_CONTROL_API_ANNOUNCE_INTERVAL` | `30s` | how often it republishes agent decisions the backbone has not taken |
 | `SEAGULL_CONTROL_API_ANNOUNCE_BATCH` | `100` | outstanding decisions carried per sweep |
 | `SEAGULL_CONTROL_API_LIVENESS_HORIZON` | `720h` | how far back it looks for when an agent was last heard from |
-| `SEAGULL_CONTROL_TELEMETRY_STORE_ADDRESS` | required | ClickHouse address, read only, for that one question |
+| `SEAGULL_CONTROL_TELEMETRY_STORE_ADDRESS` | required | ClickHouse address, read only, for those questions |
 | `SEAGULL_CONTROL_TELEMETRY_STORE_DATABASE` | `seagull` | |
 | `SEAGULL_CONTROL_TELEMETRY_STORE_USER` | `seagull` | |
 | `SEAGULL_CONTROL_TELEMETRY_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
@@ -515,12 +549,16 @@ relational store and takes the `SEAGULL_ALERT_STORE_*` settings above.
 It writes the agent topic rather than reading it: what it decided about an agent
 is published there for the gateway, and a decision the backbone did not take is
 carried again on the next sweep. Its connection to the telemetry store answers
-one question — when an agent was last heard from — and writes nothing.
+two questions — when an agent was last heard from, and what its newest status
+report and assessment said — and writes nothing.
 
 It holds the agent policies operators publish and never signs one: the signers
 setting names the public keys a publication must verify under, and an agent asks
 for the newest revision of its tenant that names it on the listener it renews
 on. See [ADR 29](decisions/0029-an-agent-policy-is-signed-off-the-platform.md).
+A policy may carry the checklist its agents assess their hosts against, and every
+check is held to the contract before the policy is accepted; see
+[ADR 33](decisions/0033-a-posture-is-the-newest-assessment-of-checks-an-operator-signed.md).
 
 ### query-api
 
@@ -589,7 +627,7 @@ before its body is read.
 
 ## The backbone topology
 
-Twelve topics, declared once in `internal/broker` and applied by
+Fourteen topics, declared once in `internal/broker` and applied by
 `backbone-migrator`:
 
 | Topic | Partitions | Retention | Why |
@@ -606,6 +644,8 @@ Twelve topics, declared once in `internal/broker` and applied by
 | `security.advisories.quarantine` | 1 | 30 days | records the advisory writer could not store |
 | `security.agents.status` | 3 | compacted, kept | what every agent last said of itself, keyed by the agent, so the newest report of each one is there for a reader that starts long after it was written, and one agent's reports are read in the order they arrived |
 | `security.agents.status.quarantine` | 1 | 30 days | reports the status projector could not store |
+| `security.assessments` | 3 | 30 days | every assessment agents made of their hosts, keyed by the agent so its assessments are read in the order they arrived; not compacted, because the ones before the newest are what a posture was |
+| `security.assessments.quarantine` | 1 | 30 days | assessments the assessment projector could not store |
 
 **Partitions and replication are refused, never converged.** Records are keyed
 by `agent_id`, so growing the partition count moves an agent to a different
@@ -762,6 +802,26 @@ agent is disabled or revoked because it went quiet. A page carries liveness and
 `last_reported`; the report itself is carried when one agent is read.
 
 **Quarantine.** `security.agents.status.quarantine`, on the same terms as the
+other quarantines.
+
+## The assessment projection
+
+One table, `agent_assessments`, holds every assessment agents made of their
+hosts, written by `assessment-projector` from `security.assessments`. It is one
+row per assessment, a `ReplacingMergeTree` ordered by
+`(tenant_id, agent_id, assessed_at, assessment_id)` and versioned by
+`ingest_time`, so an assessment published twice merges into one row.
+`assessment` holds the assessment exactly as the gateway published it; the
+columns beside it name its policy and revision and count how many of its checks
+passed, failed, erred, were unsupported or did not apply. It is partitioned by
+the month of `assessed_at` and bounded by a TTL of a year on it.
+
+An agent's posture is its newest assessment by `assessed_at`. `control-api`
+carries it as `Agent.assessment` when one agent is read, within the tenants the
+caller holds, and leaves it out of a page. A store that does not answer costs the
+caller the posture and never the agent.
+
+**Quarantine.** `security.assessments.quarantine`, on the same terms as the
 other quarantines.
 
 ## Agent rollouts

@@ -111,7 +111,9 @@ read back with the rest.
 
 **No rollout.** An assignment names agents one by one. Cohorts, percentages,
 canaries and pauses are AG-033 and the rest of BE-059; they decide assignments
-and change nothing an agent verifies.
+and change nothing an agent verifies, as
+[ADR 32](0032-a-rollout-opens-a-release-wave-by-wave-and-pauses-on-what-agents-report.md)
+decides.
 
 **No compatibility window.** Which agent releases a backend release supports is
 BE-056's.

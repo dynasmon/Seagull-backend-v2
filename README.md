@@ -155,6 +155,17 @@ make an agent install anything an operator did not sign, or go back past what a
 release allows. See
 [ADR 31](docs/decisions/0031-an-agent-release-is-authorized-off-the-platform.md).
 
+A release reaches a tenant's agents through a rollout: waves an operator orders,
+a canary named agent by agent and shares of the rest, each agent at a place drawn
+from the rollout and its own identifier, so reconnecting, renewing or rotating its
+key never moves it. The control plane reads the status the agents it reached
+report, opens the next wave once the open one soaked with enough of them running
+the release, and pauses the rollout once as many failed it — went back from it,
+or could not verify, install or run it — as the rollout allows; an agent that
+cannot reach the platform has not failed it, and a paused rollout asks nothing of
+any agent. See
+[ADR 32](docs/decisions/0032-a-rollout-opens-a-release-wave-by-wave-and-pauses-on-what-agents-report.md).
+
 ```bash
 go run ./tools/updatesign root -version 1 -key root.pem -root-key root.pub -catalog-key catalog.pub -envelope update-root.pb
 go run ./tools/updatesign catalog -catalog catalog.json -package v0.2.0=seagull-agent_0.2.0-1_amd64.deb -key catalog.pem -root update-root.pb -output catalog.pb
@@ -536,9 +547,9 @@ drops a batch it had already answered for.
 Vulnerability matching and response actions are not implemented — advisories are
 read and kept, and nothing compares them with an asset yet — no collector sends
 inventory yet — `tools/devprobe -inventory` is the only producer — and
-Sigma import covers one class of event. An agent release is assigned agent by
-agent, with no staged rollout yet. Detection is stateless unless a rule asks
-otherwise: a rule that counts or orders its events reads a bounded window of the
+Sigma import covers one class of event. A rollout reaches a tenant or a list of
+agents, never a group, since the registry has none. Detection is stateless unless
+a rule asks otherwise: a rule that counts or orders its events reads a bounded window of the
 backbone in event time, which is what keeps both replayable.
 
 ## License

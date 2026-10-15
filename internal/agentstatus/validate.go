@@ -10,6 +10,7 @@ import (
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
+	updatev1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/update/v1"
 )
 
 func Validate(report *agentv1.Status, now time.Time, policy event.Policy) error {
@@ -73,7 +74,10 @@ func ValidateContract(report *agentv1.Status) error {
 	if err := validatePrivileges(report.GetPrivileges()); err != nil {
 		return err
 	}
-	return validateUpdate(report.GetUpdate())
+	if err := validateUpdate(report.GetUpdate()); err != nil {
+		return err
+	}
+	return validateCompatibility(report.GetCompatibility())
 }
 
 func admissible(reported, now time.Time, policy event.Policy) error {
@@ -287,6 +291,21 @@ func validateUpdate(update *agentv1.Status_Update) error {
 		return err
 	}
 	return text("update.reason", update.GetReason(), MaxReasonLength, false)
+}
+
+// An agent that predates saying what it speaks reports none of it, and one
+// that says so is held to the same bounds as its build.
+func validateCompatibility(compatibility *agentv1.Status_Compatibility) error {
+	if compatibility == nil {
+		return nil
+	}
+	if err := text("compatibility.contracts", compatibility.GetContracts(), MaxVersionLength, false); err != nil {
+		return err
+	}
+	if updates := compatibility.GetUpdates(); updates != nil {
+		return named("compatibility.updates.format", int32(updates.GetFormat()), updatev1.Format_name)
+	}
+	return nil
 }
 
 func listed(field string, values []string, most, longest int) error {

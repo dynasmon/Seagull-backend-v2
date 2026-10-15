@@ -197,6 +197,7 @@ func controlAPI(ctx context.Context) error {
 		UpdateRoot: updateRoot,
 		UpdateLimiter: ratelimit.NewLimiter(
 			settings.updatePullsPerSecond, settings.updatePullBurst, settings.trackedUpdateAgents),
+		Rollouts:        raised.AgentRollouts(),
 		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
@@ -238,6 +239,7 @@ func controlAPI(ctx context.Context) error {
 		slog.Duration("agent_certificate_lifetime", settings.certificateLife),
 		slog.Int("agent_policy_signers", accepted),
 		slog.Uint64("agent_update_root", anchored),
+		slog.Duration("agent_rollout_interval", settings.rolloutEvery),
 	)
 
 	platform.Health().Register("backbone", published.publisher.Ping)
@@ -248,6 +250,21 @@ func controlAPI(ctx context.Context) error {
 	platform.Add(renewals)
 	platform.Add(announcer)
 	platform.Add(sweeper{sessions: sessions, every: settings.sessionLife})
+	if updateRoot != nil {
+		evaluator, err := control.NewRolloutEvaluator(control.RolloutEvaluatorOptions{
+			Rollouts:   raised.AgentRollouts(),
+			Updates:    raised.AgentUpdates(),
+			UpdateRoot: updateRoot,
+			Reports:    seen,
+			Metrics:    instruments,
+			Logger:     platform.Logger(),
+			Every:      settings.rolloutEvery,
+		})
+		if err != nil {
+			return err
+		}
+		platform.Add(evaluator)
+	}
 
 	return platform.Run(ctx)
 }

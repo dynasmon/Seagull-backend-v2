@@ -46,6 +46,7 @@ type ServerOptions struct {
 	Updates         AgentUpdates
 	UpdateRoot      func() (*agentupdate.Root, error)
 	UpdateLimiter   *ratelimit.Limiter
+	Rollouts        AgentRollouts
 	Metrics         *Metrics
 	Instrumentation *httpx.Instrumentation
 	Logger          *slog.Logger
@@ -83,6 +84,7 @@ type Server struct {
 	updateRoot  func() (*agentupdate.Root, error)
 	updatePulls *ratelimit.Limiter
 	downloads   chan struct{}
+	rollouts    AgentRollouts
 }
 
 type route struct {
@@ -177,6 +179,7 @@ func newServer(options ServerOptions) (*Server, error) {
 		updateRoot:  options.UpdateRoot,
 		updatePulls: options.UpdateLimiter,
 		downloads:   make(chan struct{}, MaxDownloads),
+		rollouts:    options.Rollouts,
 	}, nil
 }
 
@@ -223,7 +226,7 @@ func (s *Server) routes() []route {
 		{http.MethodGet, SessionPath, "session_describe", Session(), s.describeSession()},
 		{http.MethodDelete, SessionPath, "session_revoke", Session(), s.revokeSession()},
 		{http.MethodGet, SessionsPath, "session_list", Session(), s.listSessions()},
-	}, slices.Concat(rulesetRoutes(s), alertRoutes(s), incidentRoutes(s), agentRoutes(s), certificateRoutes(s), policyRoutes(s), updateRoutes(s))...)
+	}, slices.Concat(rulesetRoutes(s), alertRoutes(s), incidentRoutes(s), agentRoutes(s), certificateRoutes(s), policyRoutes(s), updateRoutes(s), rolloutRoutes(s))...)
 }
 
 func (s *Server) descriptor() http.Handler {

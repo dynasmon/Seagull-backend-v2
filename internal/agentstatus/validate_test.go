@@ -13,6 +13,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
+	updatev1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/update/v1"
 )
 
 var reported = time.Date(2026, time.October, 11, 12, 0, 0, 0, time.UTC)
@@ -72,6 +73,17 @@ func report() *agentv1.Status {
 			Failure:        agentv1.Status_Update_FAILURE_UNREACHABLE,
 			Reason:         "the platform does not answer",
 		},
+		Compatibility: &agentv1.Status_Compatibility{
+			Contracts:              "v0.18.0",
+			ProtocolVersion:        1,
+			EventSchemaVersion:     1,
+			InventorySchemaVersion: 1,
+			PolicySchemaVersion:    1,
+			UpdateSchemaVersion:    1,
+			Updates: &agentv1.Status_Updates{
+				Enabled: true, Format: updatev1.Format_FORMAT_DEB, StateGeneration: 1, RootVersion: 2, CatalogVersion: 3,
+			},
+		},
 	}
 }
 
@@ -90,6 +102,14 @@ func TestAWellFormedReportIsAdmitted(t *testing.T) {
 	})
 	if err := Validate(unenrolled, reported, window); err != nil {
 		t.Fatalf("a report without a credential, a policy or an update was refused: %v", err)
+	}
+	earlier := mutate(func(r *agentv1.Status) { r.Compatibility = nil })
+	if err := Validate(earlier, reported, window); err != nil {
+		t.Fatalf("a report from an agent that predates saying what it speaks was refused: %v", err)
+	}
+	unupdated := mutate(func(r *agentv1.Status) { r.Compatibility.Contracts, r.Compatibility.Updates = "", nil })
+	if err := Validate(unupdated, reported, window); err != nil {
+		t.Fatalf("a report naming no contracts and no way to update was refused: %v", err)
 	}
 }
 
@@ -142,8 +162,12 @@ func TestAReportIsRefusedNamingTheFieldAtFault(t *testing.T) {
 		"no update since":           {mutate(func(r *agentv1.Status) { r.Update.Since = nil }), "update.since"},
 		"undeclared update failure": {mutate(func(r *agentv1.Status) { r.Update.Failure = agentv1.Status_Update_Failure(42) }), "update.failure"},
 		"long update reason":        {mutate(func(r *agentv1.Status) { r.Update.Reason = long }), "update.reason"},
-		"reported from the future":  {mutate(func(r *agentv1.Status) { r.ReportedAt = timestamppb.New(reported.Add(time.Hour)) }), "reported_at"},
-		"reported too long ago":     {mutate(func(r *agentv1.Status) { r.ReportedAt = timestamppb.New(reported.Add(-48 * time.Hour)) }), "reported_at"},
+		"long contracts release": {mutate(func(r *agentv1.Status) {
+			r.Compatibility.Contracts = "v" + strings.Repeat("1", MaxVersionLength)
+		}), "compatibility.contracts"},
+		"undeclared update format": {mutate(func(r *agentv1.Status) { r.Compatibility.Updates.Format = updatev1.Format(42) }), "compatibility.updates.format"},
+		"reported from the future": {mutate(func(r *agentv1.Status) { r.ReportedAt = timestamppb.New(reported.Add(time.Hour)) }), "reported_at"},
+		"reported too long ago":    {mutate(func(r *agentv1.Status) { r.ReportedAt = timestamppb.New(reported.Add(-48 * time.Hour)) }), "reported_at"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := Validate(one.report, reported, window)

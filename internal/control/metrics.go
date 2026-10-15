@@ -35,6 +35,9 @@ type Metrics struct {
 	authorized  *prometheus.CounterVec
 	offered     *prometheus.CounterVec
 	downloaded  *prometheus.CounterVec
+	inForce     prometheus.Gauge
+	readings    *prometheus.CounterVec
+	gated       *prometheus.CounterVec
 }
 
 func NewMetrics(registry *metrics.Registry) *Metrics {
@@ -189,6 +192,24 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "agent_packages_served_total",
 			Help:      "Agents asking for the package of a release, by what they were answered.",
 		}, []string{"outcome"}),
+		inForce: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "agent_rollouts_in_force",
+			Help:      "Rollouts active or paused, as the platform last read them.",
+		}),
+		readings: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "agent_rollout_readings_total",
+			Help:      "Readings of how far a rollout in force went, by what came of them.",
+		}, []string{"outcome"}),
+		gated: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "agent_rollout_gates_total",
+			Help:      "Waves the platform opened and rollouts it paused, on what it read of the agents they reached.",
+		}, []string{"step"}),
 	}
 
 	registry.MustRegister(
@@ -200,6 +221,7 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 		instruments.signed, instruments.renewed,
 		instruments.instructed, instruments.handed,
 		instruments.authorized, instruments.offered, instruments.downloaded,
+		instruments.inForce, instruments.readings, instruments.gated,
 	)
 	return instruments
 }
@@ -344,5 +366,23 @@ func (m *Metrics) updateOffered(outcome string) {
 func (m *Metrics) packageServed(outcome string) {
 	if m != nil {
 		m.downloaded.WithLabelValues(outcome).Inc()
+	}
+}
+
+func (m *Metrics) rolloutsInForce(count int) {
+	if m != nil {
+		m.inForce.Set(float64(count))
+	}
+}
+
+func (m *Metrics) rolloutRead(outcome string) {
+	if m != nil {
+		m.readings.WithLabelValues(outcome).Inc()
+	}
+}
+
+func (m *Metrics) rolloutGated(step string) {
+	if m != nil {
+		m.gated.WithLabelValues(step).Inc()
 	}
 }

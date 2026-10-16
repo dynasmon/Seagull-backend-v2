@@ -442,3 +442,39 @@ func TestStatusIsAStreamOfItsOwnThatKeepsTheNewestReportOfEachAgent(t *testing.T
 		}
 	}
 }
+
+func TestAssessmentsAreAStreamOfTheirOwnThatKeepsEveryOne(t *testing.T) {
+	topology := declared(t, map[string]string{
+		"SEAGULL_BACKBONE_ASSESSMENTS_PARTITIONS":            "6",
+		"SEAGULL_BACKBONE_ASSESSMENTS_RETENTION":             "240h",
+		"SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_TOPIC":      "tenant.assessments.refused",
+		"SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_RETENTION":  "72h",
+		"SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_PARTITIONS": "2",
+	})
+
+	assessments := topology.Assessments
+	if assessments.Name != "security.assessments" || assessments.Partitions != 6 {
+		t.Errorf("the assessments topic is %s over %d partitions", assessments.Name, assessments.Partitions)
+	}
+	for _, other := range []Topic{topology.Events, topology.Inventory, topology.Status} {
+		if assessments.Name == other.Name {
+			t.Errorf("assessments share %s", other.Name)
+		}
+	}
+	if assessments.Cleanup != cleanupDelete || assessments.Retention != 240*time.Hour {
+		t.Errorf("the assessments topic is cleaned up by %q with a retention of %s, and it keeps every assessment for its retention",
+			assessments.Cleanup, assessments.Retention)
+	}
+	if quarantine := topology.AssessmentsQuarantine; quarantine.Name != "tenant.assessments.refused" ||
+		quarantine.Cleanup != cleanupDelete || quarantine.Partitions != 2 || quarantine.Retention != 72*time.Hour {
+		t.Errorf("the assessments quarantine is %+v", quarantine)
+	}
+	for _, topic := range []Topic{topology.Assessments, topology.AssessmentsQuarantine} {
+		if err := topic.Validate(); err != nil {
+			t.Errorf("the shipped %s is refused: %v", topic.Name, err)
+		}
+		if !slices.ContainsFunc(topology.Topics(), func(applied Topic) bool { return applied.Name == topic.Name }) {
+			t.Errorf("%s is not in the topology the migrator applies, so the processes that need it would refuse to serve", topic.Name)
+		}
+	}
+}

@@ -39,18 +39,20 @@ type Topic struct {
 }
 
 type Topology struct {
-	Events               Topic
-	Quarantine           Topic
-	Detections           Topic
-	DetectionsQuarantine Topic
-	Inventory            Topic
-	InventoryQuarantine  Topic
-	Advisories           Topic
-	AdvisoriesQuarantine Topic
-	Rulesets             Topic
-	Agents               Topic
-	Status               Topic
-	StatusQuarantine     Topic
+	Events                Topic
+	Quarantine            Topic
+	Detections            Topic
+	DetectionsQuarantine  Topic
+	Inventory             Topic
+	InventoryQuarantine   Topic
+	Advisories            Topic
+	AdvisoriesQuarantine  Topic
+	Rulesets              Topic
+	Agents                Topic
+	Status                Topic
+	StatusQuarantine      Topic
+	Assessments           Topic
+	AssessmentsQuarantine Topic
 }
 
 // Refused records and detections are both kept far longer than admitted events:
@@ -168,6 +170,27 @@ func LoadTopology(parser *config.Parser) Topology {
 			Compression: compressionZstd,
 			MinInSync:   minInSync,
 		},
+		// Every assessment and not the newest of each agent, unlike status: an
+		// agent keeps an assessment until the platform holds it so that what a
+		// posture was can be read back, and a compacted topic would drop that.
+		Assessments: Topic{
+			Name:        parser.String("SEAGULL_BACKBONE_ASSESSMENTS_TOPIC", "security.assessments"),
+			Partitions:  int32(parser.Int("SEAGULL_BACKBONE_ASSESSMENTS_PARTITIONS", 3, 1, 1_000)),
+			Replicas:    replicas,
+			Retention:   parser.Duration("SEAGULL_BACKBONE_ASSESSMENTS_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:     cleanupDelete,
+			Compression: compressionZstd,
+			MinInSync:   minInSync,
+		},
+		AssessmentsQuarantine: Topic{
+			Name:        parser.String("SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_TOPIC", "security.assessments.quarantine"),
+			Partitions:  int32(parser.Int("SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_PARTITIONS", 1, 1, 1_000)),
+			Replicas:    replicas,
+			Retention:   parser.Duration("SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:     cleanupDelete,
+			Compression: compressionZstd,
+			MinInSync:   minInSync,
+		},
 	}
 }
 
@@ -179,6 +202,7 @@ func (t Topology) Topics() []Topic {
 		t.Advisories, t.AdvisoriesQuarantine,
 		t.Rulesets, t.Agents,
 		t.Status, t.StatusQuarantine,
+		t.Assessments, t.AssessmentsQuarantine,
 	}
 }
 

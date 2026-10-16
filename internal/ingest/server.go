@@ -16,6 +16,7 @@ type ServerOptions struct {
 	Handler         *Handler
 	Inventory       *Handler
 	Status          *Handler
+	Assessments     *Handler
 	Instrumentation *httpx.Instrumentation
 	Logger          *slog.Logger
 	ReadTimeout     time.Duration
@@ -39,6 +40,9 @@ func NewServer(options ServerOptions) (*httpx.Server, error) {
 	}
 	if options.Status != nil {
 		mux.Handle(StatusRoute, options.Instrumentation.Handle("ingest_status", options.Status))
+	}
+	if options.Assessments != nil {
+		mux.Handle(AssessmentsRoute, options.Instrumentation.Handle("ingest_assessments", options.Assessments))
 	}
 
 	return httpx.NewServer(httpx.ServerOptions{

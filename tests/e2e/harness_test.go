@@ -24,6 +24,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/tlsx"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
+	assessmentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/assessment/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
 	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
@@ -33,6 +34,7 @@ type backbone struct {
 	published []*eventv1.Event
 	inventory []*inventoryv1.Record
 	status    []*agentv1.Status
+	assessed  []*assessmentv1.Assessment
 	failure   error
 	release   chan struct{}
 	entered   chan struct{}
@@ -73,6 +75,14 @@ func (b *backbone) PublishStatus(_ context.Context, reports []*agentv1.Status) e
 	return nil
 }
 
+func (b *backbone) PublishAssessments(_ context.Context, assessments []*assessmentv1.Assessment) error {
+	if b.failure != nil {
+		return b.failure
+	}
+	b.assessed = append(b.assessed, assessments...)
+	return nil
+}
+
 type gateway struct {
 	address    string
 	opsAddress string
@@ -88,6 +98,7 @@ type gatewayOptions struct {
 	maxEventsPerBatch   int
 	maxRecordsPerBatch  int
 	maxReportsPerBatch  int
+	maxAssessments      int
 	ratePerSecond       float64
 	rateBurst           int
 	maxInflightBytes    int64
@@ -110,6 +121,9 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	}
 	if options.maxReportsPerBatch == 0 {
 		options.maxReportsPerBatch = 16
+	}
+	if options.maxAssessments == 0 {
+		options.maxAssessments = 16
 	}
 	if options.maxInflightBytes == 0 {
 		options.maxInflightBytes = 64 << 20
@@ -242,12 +256,36 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		t.Fatalf("build status handler: %v", err)
 	}
 
+	assessed := ingest.NewAssessmentMetrics(platform.Metrics())
+	assessor, err := ingest.NewAssessmentAdmitter(options.backbone, ingest.AssessmentPolicy{
+		Gateway:                "gateway-test",
+		MaxAssessmentsPerBatch: options.maxAssessments,
+		Assessment:             event.Policy{MaxClockSkew: 5 * time.Minute, MaxAge: 720 * time.Hour},
+	}, assessed)
+	if err != nil {
+		t.Fatalf("build assessment admitter: %v", err)
+	}
+
+	assessments, err := ingest.NewAssessmentHandler(ingest.AssessmentHandlerOptions{
+		Admitter:       assessor,
+		Roster:         options.roster,
+		Limiter:        limiter,
+		Capacity:       capacity,
+		Metrics:        assessed,
+		MaxBodyBytes:   options.maxBodyBytes,
+		PublishTimeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("build assessment handler: %v", err)
+	}
+
 	listener, err := ingest.NewServer(ingest.ServerOptions{
 		Address:         "127.0.0.1:0",
 		TLS:             mutual,
 		Handler:         handler,
 		Inventory:       inventory,
 		Status:          status,
+		Assessments:     assessments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
 		ReadTimeout:     10 * time.Second,
@@ -364,6 +402,8 @@ func (g *gateway) inventoryURL() string { return "https://" + g.address + ingest
 
 func (g *gateway) statusURL() string { return "https://" + g.address + ingest.StatusPath }
 
+func (g *gateway) assessmentsURL() string { return "https://" + g.address + ingest.AssessmentsPath }
+
 func (g *gateway) post(t *testing.T, client *http.Client, contentType string, body []byte) (*http.Response, []byte) {
 	t.Helper()
 	return g.postTo(t, client, g.url(), contentType, body)
@@ -416,6 +456,15 @@ func (g *gateway) sendStatus(t *testing.T, client *http.Client, batch *agentv1.S
 		t.Fatalf("encode status batch: %v", err)
 	}
 	return g.postTo(t, client, g.statusURL(), ingest.ContentType, encoded)
+}
+
+func (g *gateway) sendAssessments(t *testing.T, client *http.Client, batch *assessmentv1.AssessmentBatch) (*http.Response, []byte) {
+	t.Helper()
+	encoded, err := proto.Marshal(batch)
+	if err != nil {
+		t.Fatalf("encode assessment batch: %v", err)
+	}
+	return g.postTo(t, client, g.assessmentsURL(), ingest.ContentType, encoded)
 }
 
 func decodeAck(t *testing.T, payload []byte) *ingestv1.BatchAck {

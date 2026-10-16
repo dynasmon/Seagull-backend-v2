@@ -140,6 +140,20 @@ roll one back. See
 go run ./tools/policysign -key signer.pem -policy policy.json -tenant default -lifetime 720h -output publication.pb
 ```
 
+### Agent assessments
+
+A policy may also carry the checks its agents assess their hosts against: typed
+tests with bounded parameters — a path's owner and permissions, the host's
+account files, a kernel parameter or module, a package, a service unit, a
+directive of sshd or login.defs — that read what a host keeps and never run a
+command. The platform holds every check to the contract before it accepts the
+policy. What an agent found travels on a stream of its own, one assessment per
+run answering every check of the revision it names, with `pass`, `fail`,
+`error`, `unsupported` or `not_applicable` and bounded evidence; the platform
+keeps every one, and an agent's posture is its newest, carried when one agent is
+read. See
+[ADR 33](docs/decisions/0033-a-posture-is-the-newest-assessment-of-checks-an-operator-signed.md).
+
 ### Agent updates
 
 Which releases agents may install is authorized off the platform too, by the
@@ -312,6 +326,24 @@ Seagull Agent
           one row per agent        judged when an agent is read, never decided
 ```
 
+What an agent found when it ran the checks of its policy travels on a fourth,
+and every assessment is kept, because the ones before the newest are what a
+posture was:
+
+```text
+Seagull Agent
+      │  mutual TLS · protobuf · POST /v1/assessments, when its posture changed and once a day
+      ▼
+ ingest-gateway ─────▶ Redpanda  security.assessments
+                           │  keyed by the agent, so its assessments stay ordered
+                           ▼
+                  assessment-projector ──▶ security.assessments.quarantine
+                           │
+                           ▼
+     ClickHouse agent_assessments ──▶ control-api: the newest is the agent's posture
+          one row per assessment         carried when one agent is read
+```
+
 What is known to be wrong with software comes from outside, through the one
 process allowed to reach it:
 
@@ -339,9 +371,10 @@ Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 | `alert-writer` | Opens the work a detection at or above a severity floor becomes: an alert for a finding about one event, folded on a declared key, or an incident for a story several events told. It inserts and never updates. |
 | `inventory-projector` | Folds what a collector saw into what an asset currently has, under a group and a quarantine of its own. An item the newest full scan stops naming is no longer current, and nothing is deleted to say so. |
 | `status-projector` | Keeps the newest report each agent sent of itself, one row per agent, under a group and a quarantine of its own, so a status store outage costs how fresh liveness is and never telemetry. |
+| `assessment-projector` | Keeps every assessment agents made of their hosts, one row per assessment, under a group and a quarantine of its own, so an assessment store outage costs how fresh a posture is and never telemetry. |
 | `advisory-importer` | Follows the vulnerability feeds a deployment names, translates each changed record into an advisory carrying its provenance, and publishes it with the freshness of the feed. The one process that reaches the internet; it holds no store and names no asset. |
 | `advisory-writer` | Keeps every version of every advisory and every attempt to follow a feed, under a group and a quarantine of its own. |
-| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry with how recently each agent reported, the authority that signs an agent's certificate, the signed policies agents are handed, and the signed catalog of releases agents may install with their packages. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates and asking for their policy and their updates on a second one. |
+| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry with how recently each agent reported and its posture, the authority that signs an agent's certificate, the signed policies agents are handed, and the signed catalog of releases agents may install with their packages. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates and asking for their policy and their updates on a second one. |
 | `query-api` | The read plane, and the only reader of the analytical store. |
 | `backbone-migrator`, `store-migrator`, `control-migrator` | Apply the topic topology, the analytical schema and the relational schema, then exit. Nothing migrates on the way to serving traffic. |
 

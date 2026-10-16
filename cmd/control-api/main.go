@@ -132,6 +132,12 @@ func controlAPI(ctx context.Context) error {
 	}
 	defer func() { _ = seen.Close() }()
 
+	postures, err := clickhouse.NewAssessmentStore(settings.telemetry)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = postures.Close() }()
+
 	announcer, err := control.NewAnnouncer(control.AnnouncerOptions{
 		Agents:     raised.Agents(),
 		Admissions: admissions,
@@ -182,6 +188,7 @@ func controlAPI(ctx context.Context) error {
 		Admissions:      admissions,
 		Liveness:        seen,
 		Reports:         seen,
+		Postures:        postures,
 		Authority:       authority,
 		TrustBundle:     bundle,
 		CertificateLife: settings.certificateLife,

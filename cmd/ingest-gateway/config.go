@@ -35,6 +35,7 @@ type configuration struct {
 	admissionRules ingest.Policy
 	inventoryRules ingest.InventoryPolicy
 	statusRules    ingest.StatusPolicy
+	assessments    ingest.AssessmentPolicy
 
 	brokers       []string
 	topology      broker.Topology
@@ -102,6 +103,18 @@ func load(parser *config.Parser) (configuration, error) {
 		Report: event.Policy{
 			MaxClockSkew: parser.Duration("SEAGULL_STATUS_MAX_CLOCK_SKEW", 5*time.Minute, time.Second, time.Hour),
 			MaxAge:       parser.Duration("SEAGULL_STATUS_MAX_AGE", 168*time.Hour, time.Minute, 8760*time.Hour),
+		},
+	}
+
+	// An agent keeps every assessment that changed something until the platform
+	// holds it, so one offline as long as an inventory scan may be sends what it
+	// found while it was.
+	loaded.assessments = ingest.AssessmentPolicy{
+		Gateway:                gateway,
+		MaxAssessmentsPerBatch: parser.Int("SEAGULL_GATEWAY_MAX_ASSESSMENTS_PER_BATCH", 16, 1, 16),
+		Assessment: event.Policy{
+			MaxClockSkew: parser.Duration("SEAGULL_ASSESSMENT_MAX_CLOCK_SKEW", 5*time.Minute, time.Second, time.Hour),
+			MaxAge:       parser.Duration("SEAGULL_ASSESSMENT_MAX_AGE", 720*time.Hour, time.Minute, 8760*time.Hour),
 		},
 	}
 

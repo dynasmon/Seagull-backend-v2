@@ -78,11 +78,23 @@ func gateway(ctx context.Context) error {
 	}
 	defer reports.Close()
 
+	findings, err := broker.NewAssessments(broker.Config{
+		Brokers:  settings.brokers,
+		Topic:    settings.topology.Assessments.Name,
+		ClientID: settings.assessments.Gateway,
+		Security: settings.security,
+	})
+	if err != nil {
+		return err
+	}
+	defer findings.Close()
+
 	// The topology is applied by backbone-migrator, never here. This only refuses
 	// to serve agents when a topic it would publish to is missing or reshaped.
 	topologyCtx, cancel := context.WithTimeout(ctx, settings.publishTimeout)
 	defer cancel()
-	drift, err := publisher.VerifyTopics(topologyCtx, settings.topology.Events, settings.topology.Inventory, settings.topology.Status)
+	drift, err := publisher.VerifyTopics(topologyCtx,
+		settings.topology.Events, settings.topology.Inventory, settings.topology.Status, settings.topology.Assessments)
 	if err != nil {
 		return err
 	}
@@ -110,6 +122,12 @@ func gateway(ctx context.Context) error {
 
 	statusInstruments := ingest.NewStatusMetrics(platform.Metrics())
 	statusAdmitter, err := ingest.NewStatusAdmitter(reports, settings.statusRules, statusInstruments)
+	if err != nil {
+		return err
+	}
+
+	assessmentInstruments := ingest.NewAssessmentMetrics(platform.Metrics())
+	assessmentAdmitter, err := ingest.NewAssessmentAdmitter(findings, settings.assessments, assessmentInstruments)
 	if err != nil {
 		return err
 	}
@@ -165,12 +183,26 @@ func gateway(ctx context.Context) error {
 		return err
 	}
 
+	assessmentHandler, err := ingest.NewAssessmentHandler(ingest.AssessmentHandlerOptions{
+		Admitter:       assessmentAdmitter,
+		Roster:         admitted.held,
+		Limiter:        limiter,
+		Capacity:       capacity,
+		Metrics:        assessmentInstruments,
+		MaxBodyBytes:   settings.maxBodyBytes,
+		PublishTimeout: settings.publishTimeout,
+	})
+	if err != nil {
+		return err
+	}
+
 	listener, err := ingest.NewServer(ingest.ServerOptions{
 		Address:         settings.address,
 		TLS:             mutual,
 		Handler:         handler,
 		Inventory:       inventoryHandler,
 		Status:          statusHandler,
+		Assessments:     assessmentHandler,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
 		ReadTimeout:     settings.readTimeout,
@@ -191,6 +223,7 @@ func gateway(ctx context.Context) error {
 	platform.Health().Register("backbone", publisher.Ping)
 	platform.Health().Register("inventory-backbone", assets.Ping)
 	platform.Health().Register("status-backbone", reports.Ping)
+	platform.Health().Register("assessment-backbone", findings.Ping)
 	platform.Add(admitted.follower(platform.Logger()))
 	platform.Add(listener)
 

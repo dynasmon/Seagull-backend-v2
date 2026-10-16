@@ -7,6 +7,7 @@ import (
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
+	assessmentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/assessment/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
 	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 )
@@ -95,6 +96,30 @@ func (s statusStream) admit(ctx context.Context, identity agentidentity.Identity
 	}
 
 	carried := outcome{batchID: batch.GetBatchId(), records: len(batch.GetReports())}
+	acknowledgement, err := s.admitter.Admit(ctx, identity, tenant, &batch)
+	if err != nil {
+		return carried, err
+	}
+	carried.acknowledgement = acknowledgement
+	return carried, nil
+}
+
+type assessmentStream struct {
+	admitter *AssessmentAdmitter
+	metrics  *AssessmentMetrics
+}
+
+func (s assessmentStream) name() string { return "assessments" }
+
+func (s assessmentStream) rejected(code string) { s.metrics.batchRejected(code) }
+
+func (s assessmentStream) admit(ctx context.Context, identity agentidentity.Identity, tenant string, payload []byte) (outcome, error) {
+	var batch assessmentv1.AssessmentBatch
+	if err := proto.Unmarshal(payload, &batch); err != nil {
+		return outcome{}, refuseMalformed(s)
+	}
+
+	carried := outcome{batchID: batch.GetBatchId(), records: len(batch.GetAssessments())}
 	acknowledgement, err := s.admitter.Admit(ctx, identity, tenant, &batch)
 	if err != nil {
 		return carried, err

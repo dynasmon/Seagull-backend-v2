@@ -123,6 +123,28 @@ func TestTheCursorResumesAtTheLastRecord(t *testing.T) {
 	}
 }
 
+func TestADetectionPageResumesAtTheLastDetection(t *testing.T) {
+	last := day.Add(-time.Minute)
+	source := &store{detections: []*detectionv1.Detection{
+		{DetectionId: "dddd", EventTime: timestamppb.New(day), Origin: &eventv1.Origin{AgentId: "web-01"}},
+		{DetectionId: "eeee", EventTime: timestamppb.New(last), Origin: &eventv1.Origin{AgentId: "web-02"}},
+	}}
+	built := hunter(t, source)
+
+	page, err := built.Detections(context.Background(), scoped(t, "acme"), asked(nil))
+	if err != nil {
+		t.Fatalf("hunt: %v", err)
+	}
+	if _, err := built.Detections(context.Background(), scoped(t, "acme"),
+		&huntv1.Query{Range: window(time.Hour), Cursor: page.GetNextCursor()}); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	after := source.seen.After()
+	if !after.Set || !slices.Equal(after.Names, []string{"eeee"}) || !after.Time.Equal(last) {
+		t.Errorf("the store was asked to carry on from %+v", after)
+	}
+}
+
 func TestTheReadBudgetIsADeadlineAsWellAsASetting(t *testing.T) {
 	source := &store{linger: time.Minute}
 	built, err := hunt.NewHunter(hunt.HunterOptions{

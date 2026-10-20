@@ -39,7 +39,8 @@ func NewMigrator(configuration Config, logger *slog.Logger) (*Migrator, error) {
 }
 
 // Applied in order and recorded one at a time, so an interrupted run resumes
-// where it stopped — safe only because every statement is idempotent.
+// where it stopped — safe only because every statement is idempotent and a
+// rebuild carries on from whatever state the store was left in.
 func (m *Migrator) Apply(ctx context.Context) ([]string, error) {
 	if err := m.connection.Exec(ctx, createLedger); err != nil {
 		return nil, fmt.Errorf("create %s: %w", ledger, err)
@@ -52,10 +53,8 @@ func (m *Migrator) Apply(ctx context.Context) ([]string, error) {
 
 	applied := make([]string, 0, len(outstanding))
 	for _, entry := range outstanding {
-		for _, statement := range entry.statements {
-			if err := m.connection.Exec(ctx, statement); err != nil {
-				return applied, fmt.Errorf("apply %s: %w", entry, err)
-			}
+		if err := m.apply(ctx, entry); err != nil {
+			return applied, fmt.Errorf("apply %s: %w", entry, err)
 		}
 		if err := m.connection.Exec(ctx,
 			"INSERT INTO "+ledger+" (version, name) VALUES (?, ?)",
@@ -67,6 +66,18 @@ func (m *Migrator) Apply(ctx context.Context) ([]string, error) {
 		m.logger.Info("migration_applied", slog.String("migration", entry.String()))
 	}
 	return applied, nil
+}
+
+func (m *Migrator) apply(ctx context.Context, entry migration) error {
+	if entry.rebuild != nil {
+		return m.rebuild(ctx, entry)
+	}
+	for _, statement := range entry.statements {
+		if err := m.connection.Exec(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (m *Migrator) Ping(ctx context.Context) error {

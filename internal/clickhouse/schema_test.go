@@ -178,3 +178,29 @@ func TestTheLedgerIsNotOneOfTheThingsItRecords(t *testing.T) {
 		}
 	}
 }
+
+func sortingKeyOf(t *testing.T, statement string) string {
+	t.Helper()
+	key, err := declaredSortingKey(statement)
+	if err != nil {
+		t.Fatalf("read the sorting key of %.60s: %v", statement, err)
+	}
+	return key
+}
+
+func TestASortingKeyIsReadTheWayTheStoreReportsIt(t *testing.T) {
+	for _, declared := range []struct{ statement, key string }{
+		{
+			"CREATE TABLE IF NOT EXISTS t (a String) ENGINE = MergeTree ORDER BY (tenant_id,\n    event_time, agent_id,event_id) SETTINGS index_granularity = 8192",
+			"tenant_id, event_time, agent_id, event_id",
+		},
+		{"CREATE TABLE IF NOT EXISTS t (a String) ENGINE = MergeTree ORDER BY event_id", "event_id"},
+	} {
+		if got := sortingKeyOf(t, declared.statement); got != declared.key {
+			t.Errorf("read %q, want %q", got, declared.key)
+		}
+	}
+	if key, err := declaredSortingKey("CREATE TABLE IF NOT EXISTS t (a String) ENGINE = Log"); err == nil {
+		t.Errorf("a table with no sorting key was read as ordered by %q", key)
+	}
+}

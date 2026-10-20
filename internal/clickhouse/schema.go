@@ -20,6 +20,7 @@ type migration struct {
 	version    uint64
 	name       string
 	statements []string
+	rebuild    *rebuild
 }
 
 func (m migration) String() string { return fmt.Sprintf("%04d_%s", m.version, m.name) }
@@ -145,6 +146,17 @@ func declaredColumnsIn(history []migration, table string) ([]string, error) {
 					return nil, fmt.Errorf("read %s: %w", applied, err)
 				}
 			}
+		}
+
+		if applied.rebuild != nil && strings.EqualFold(applied.rebuild.table, table) {
+			if !created {
+				return nil, fmt.Errorf("%s rebuilds %s before it is created", applied, table)
+			}
+			rebuilt, err := declaredColumnsIn([]migration{applied}, applied.rebuild.staging)
+			if err != nil {
+				return nil, err
+			}
+			columns = rebuilt
 		}
 	}
 	if !created {

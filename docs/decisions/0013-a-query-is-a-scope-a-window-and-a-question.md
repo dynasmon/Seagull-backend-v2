@@ -1,5 +1,11 @@
 # 13. A query is a scope, a window and a question
 
+> Amended by [ADR 34](0034-a-stored-event-is-named-by-the-agent-that-sent-it.md):
+> the cursor is the instant and every name the store sorts by after it — the
+> agent and the identifier of an event, the identifier of a detection — and the
+> layout of a position is signed with it, so a cursor of another layout is
+> refused.
+
 ## Context
 
 [ADR 12](0012-storage-is-owned-per-workload.md) made the store a materialisation

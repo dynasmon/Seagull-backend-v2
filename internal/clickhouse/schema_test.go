@@ -204,3 +204,22 @@ func TestASortingKeyIsReadTheWayTheStoreReportsIt(t *testing.T) {
 		t.Errorf("a table with no sorting key was read as ordered by %q", key)
 	}
 }
+
+func TestARebuildIsOneStatementCreatingTheTableItIsRebuiltAs(t *testing.T) {
+	plan := rebuild{table: "security_events", staging: "security_events_rebuild"}
+	create := "CREATE TABLE IF NOT EXISTS security_events_rebuild (event_id String) ENGINE = MergeTree ORDER BY event_id"
+
+	for reason, statements := range map[string][]string{
+		"another table":      {"CREATE TABLE IF NOT EXISTS security_events_other (event_id String) ENGINE = MergeTree ORDER BY event_id"},
+		"a second statement": {create, "ALTER TABLE security_detections ADD COLUMN IF NOT EXISTS process_name String"},
+		"no sorting key":     {"CREATE TABLE IF NOT EXISTS security_events_rebuild (event_id String) ENGINE = Log"},
+		"no statement":       nil,
+	} {
+		if err := plan.check(migration{version: 9, name: "order_security_events_by_agent", statements: statements}); err == nil {
+			t.Errorf("a rebuild with %s was accepted", reason)
+		}
+	}
+	if err := plan.check(migration{version: 9, name: "order_security_events_by_agent", statements: []string{create}}); err != nil {
+		t.Errorf("a rebuild creating its table was refused: %v", err)
+	}
+}

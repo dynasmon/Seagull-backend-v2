@@ -15,6 +15,12 @@ const (
 	noTableToAttach = 390
 )
 
+// A sorting key cannot change in place, so a migration declared here creates the
+// table as it is to be ordered under a name of its own. The migrator copies the
+// live table into it while writers keep writing, exchanges the two names, and
+// copies again whatever reached the old table after the first copy began.
+var rebuilds = map[uint64]rebuild{}
+
 type rebuild struct {
 	table   string
 	staging string

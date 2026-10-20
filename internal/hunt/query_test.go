@@ -2,6 +2,7 @@ package hunt_test
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -246,12 +247,13 @@ func TestACursorBelongsToTheQueryThatIssuedIt(t *testing.T) {
 		t.Fatalf("compile: %v", err)
 	}
 
-	token := built.Next(first, day.Add(-time.Minute), "aaaa-1111")
+	token := built.Next(first, day.Add(-time.Minute), "web-01", "aaaa-1111")
 	resumed, err := built.Compile(hunt.Events, scoped(t, "acme"), &huntv1.Query{Range: window(time.Hour), Cursor: token})
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	if after := resumed.After(); !after.Set || after.ID != "aaaa-1111" || !after.Time.Equal(day.Add(-time.Minute)) {
+	after := resumed.After()
+	if !after.Set || !slices.Equal(after.Names, []string{"web-01", "aaaa-1111"}) || !after.Time.Equal(day.Add(-time.Minute)) {
 		t.Errorf("the query resumed at %+v", after)
 	}
 

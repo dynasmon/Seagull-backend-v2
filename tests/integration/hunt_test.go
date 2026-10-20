@@ -224,7 +224,7 @@ func TestPagingReadsEveryRecordExactlyOnce(t *testing.T) {
 		asked = &huntv1.Query{
 			Range:  asked.GetRange(),
 			Limit:  asked.GetLimit(),
-			Cursor: compiler.Next(query, last.GetTime().GetEventTime().AsTime(), last.GetEventId()),
+			Cursor: compiler.Next(query, last.GetTime().GetEventTime().AsTime(), last.GetOrigin().GetAgentId(), last.GetEventId()),
 		}
 	}
 

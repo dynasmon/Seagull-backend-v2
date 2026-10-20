@@ -19,7 +19,9 @@ const (
 // table as it is to be ordered under a name of its own. The migrator copies the
 // live table into it while writers keep writing, exchanges the two names, and
 // copies again whatever reached the old table after the first copy began.
-var rebuilds = map[uint64]rebuild{}
+var rebuilds = map[uint64]rebuild{
+	9: {table: "security_events", staging: "security_events_rebuild"},
+}
 
 type rebuild struct {
 	table   string

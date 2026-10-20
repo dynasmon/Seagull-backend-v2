@@ -205,6 +205,47 @@ func TestASortingKeyIsReadTheWayTheStoreReportsIt(t *testing.T) {
 	}
 }
 
+func TestARebuiltTableHasTheColumnsOfTheTableItWasRebuiltAs(t *testing.T) {
+	history := []migration{
+		{
+			version: 1,
+			name:    "security_events",
+			statements: []string{`CREATE TABLE IF NOT EXISTS security_events
+(
+    event_id String,
+    obsolete String
+)
+ENGINE = MergeTree
+ORDER BY event_id`},
+		},
+		{
+			version: 2,
+			name:    "order_security_events_by_agent",
+			rebuild: &rebuild{table: "security_events", staging: "security_events_rebuild"},
+			statements: []string{`CREATE TABLE IF NOT EXISTS security_events_rebuild
+(
+    agent_id String,
+    event_id String
+)
+ENGINE = MergeTree
+ORDER BY (agent_id, event_id)`},
+		},
+		{
+			version:    3,
+			name:       "add_process_name",
+			statements: []string{"ALTER TABLE security_events ADD COLUMN IF NOT EXISTS process_name String"},
+		},
+	}
+
+	got, err := declaredColumnsIn(history, table)
+	if err != nil {
+		t.Fatalf("build the final schema: %v", err)
+	}
+	if want := []string{"agent_id", "event_id", "process_name"}; !slices.Equal(got, want) {
+		t.Fatalf("the final columns are %v, want %v", got, want)
+	}
+}
+
 func TestARebuildIsOneStatementCreatingTheTableItIsRebuiltAs(t *testing.T) {
 	plan := rebuild{table: "security_events", staging: "security_events_rebuild"}
 	create := "CREATE TABLE IF NOT EXISTS security_events_rebuild (event_id String) ENGINE = MergeTree ORDER BY event_id"

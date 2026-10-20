@@ -153,6 +153,30 @@ func declaredColumnsIn(history []migration, table string) ([]string, error) {
 	return columns, nil
 }
 
+// Written the way the store reports a sorting key in system.tables, so the key a
+// migration declares and the key a table has can be compared.
+func declaredSortingKey(statement string) (string, error) {
+	tokens, err := sqlTokens(statement)
+	if err != nil {
+		return "", err
+	}
+	for index := 0; index+2 < len(tokens); index++ {
+		if !strings.EqualFold(tokens[index], "ORDER") || !strings.EqualFold(tokens[index+1], "BY") {
+			continue
+		}
+		key := tokens[index+2]
+		if strings.HasPrefix(key, "(") && strings.HasSuffix(key, ")") {
+			key = key[1 : len(key)-1]
+		}
+		parts := strings.Split(key, ",")
+		for part := range parts {
+			parts[part] = strings.Join(strings.Fields(parts[part]), " ")
+		}
+		return strings.Join(parts, ", "), nil
+	}
+	return "", errors.New("the statement declares no sorting key")
+}
+
 func createTableBody(statement, table string) (string, bool) {
 	head, body, found := strings.Cut(statement, "(")
 	if !found {

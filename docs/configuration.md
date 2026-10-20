@@ -686,9 +686,11 @@ no migration. A new event class does need one, which is the friction intended.
 
 **Duplicates.** Delivery is at least once, so a crash between the write and the
 commit replays a batch. The table is a `ReplacingMergeTree` ordered by
-`(tenant_id, event_time, event_id)`, so the replay collapses back to one row —
-but that happens **on merge**, not on insert. A query that must not see a
-duplicate has to ask for it:
+`(tenant_id, event_time, agent_id, event_id)`, so the replay collapses back to
+one row, while two agents that name an event alike keep two — the agent is the
+one the certificate proved, never one the payload chose. Collapsing happens
+**on merge**, not on insert. A query that must not see a duplicate has to ask
+for it:
 
 ```sql
 SELECT count() FROM security_events FINAL WHERE tenant_id = 'acme';
@@ -704,6 +706,19 @@ that every migration it ships is applied, and refuses to run otherwise:
 ```bash
 docker compose -f deploy/compose.yaml run --rm store-migrator
 ```
+
+A sorting key cannot change in place, so a migration that changes one rebuilds
+the table ([ADR 34](decisions/0034-a-stored-event-is-named-by-the-agent-that-sent-it.md)):
+`store-migrator` copies it into a table ordered the new way while the writers
+keep writing, exchanges the two names, waits for the inserts already on their
+way to the old table, copies what reached it after the first copy began, and
+drops it. It logs `table_rebuild_started`, one
+`table_rebuild_partition_copied` per partition, `table_rebuild_exchanged` and
+`table_rebuild_finished`, and a run stopped anywhere carries on from the state
+the store was left in. The store needs room for two copies of the table while
+it runs, and the migrator's account must be able to create, exchange, detach,
+attach and drop tables in its database. Migration 9 rebuilds `security_events`;
+on the development host twenty million events took under a minute.
 
 **Scaling** is horizontal. One `event-writer` is a single sequential loop —
 poll, write, commit — with no worker pool and no buffering, because at 5000-row

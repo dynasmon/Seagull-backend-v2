@@ -5,6 +5,10 @@
 > Amended by [ADR 28](0028-vulnerability-intelligence-is-read-from-its-source.md):
 > vulnerability intelligence is kept per version in ClickHouse, and its source of
 > truth is the feed it was read from rather than anything the platform produced.
+> Amended by [ADR 34](0034-a-stored-event-is-named-by-the-agent-that-sent-it.md):
+> `security_events` is ordered by `(tenant_id, event_time, agent_id, event_id)`,
+> so a replay still collapses but one agent can no longer collapse another's
+> event, and a sorting key changes by a rebuild `store-migrator` carries out.
 
 ## Context
 

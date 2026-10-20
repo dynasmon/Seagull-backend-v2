@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -226,6 +227,38 @@ func TestAReplayedBatchLeavesOneEvent(t *testing.T) {
 		t.Fatalf("the event was not written at all")
 	}
 	t.Logf("three writes left %d parts before a merge, and %d event after FINAL", written, deduplicated)
+}
+
+func TestTwoAgentsNamingAnEventAlikeKeepTwoEvents(t *testing.T) {
+	address := storeAddress(t)
+	store := migratedStore(t, address)
+	owner := tenant(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	at := time.Date(2026, time.August, 17, 13, 0, 0, 0, time.UTC)
+	rows := make([]eventstore.Row, 0, 2)
+	for _, agentID := range []string{"web-01", "web-02"} {
+		record := fixtures.SSHAuthentication{EventID: "dddddddd-4444-4444-8444-dddddddddddd", AgentID: agentID, At: at}.Event()
+		record.Origin.TenantId = owner
+		rows = append(rows, eventstore.Project(record))
+	}
+	for _, row := range rows {
+		if err := store.Store(ctx, []eventstore.Row{row}); err != nil {
+			t.Fatalf("write the event of %s: %v", row.AgentID, err)
+		}
+	}
+
+	var agents []string
+	if err := inspector(t, address).QueryRow(ctx,
+		"SELECT groupArray(agent_id) FROM (SELECT agent_id FROM security_events FINAL WHERE tenant_id = ? ORDER BY agent_id)",
+		owner).Scan(&agents); err != nil {
+		t.Fatalf("read the stored events: %v", err)
+	}
+	if !slices.Equal(agents, []string{"web-01", "web-02"}) {
+		t.Fatalf("two agents sending one identifier at one instant left the events of %v", agents)
+	}
 }
 
 func TestAPoisonRecordIsQuarantinedAndTheRestOfTheBatchIsStored(t *testing.T) {

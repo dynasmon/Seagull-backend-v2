@@ -58,6 +58,17 @@ func load() ([]migration, error) {
 			}
 		}
 		loaded = append(loaded, migration{version: version, name: name, statements: parsed})
+		if plan, found := rebuilds[version]; found {
+			if err := plan.check(loaded[len(loaded)-1]); err != nil {
+				return nil, fmt.Errorf("%s: %w", entry.Name(), err)
+			}
+			loaded[len(loaded)-1].rebuild = &plan
+		}
+	}
+	for version := range rebuilds {
+		if !slices.ContainsFunc(loaded, func(candidate migration) bool { return candidate.version == version }) {
+			return nil, fmt.Errorf("a rebuild is declared for migration %d, which is not embedded", version)
+		}
 	}
 
 	slices.SortFunc(loaded, func(a, b migration) int { return cmp.Compare(a.version, b.version) })

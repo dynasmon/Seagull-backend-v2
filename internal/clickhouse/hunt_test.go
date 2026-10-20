@@ -166,6 +166,17 @@ func TestAPageIsOrderedAndResumedByTheSortKey(t *testing.T) {
 	}
 }
 
+func TestAPositionThatDoesNotNameEveryKeyIsRefused(t *testing.T) {
+	for dataset, names := range map[hunt.Dataset][]string{
+		hunt.Events:     {"aaaa"},
+		hunt.Detections: {"web-01", "dddd"},
+	} {
+		if statement, _, err := compile(resumed(t, dataset, names...)); err == nil {
+			t.Errorf("%s resumed after a position naming %q: %s", dataset, names, statement)
+		}
+	}
+}
+
 func resumed(t *testing.T, dataset hunt.Dataset, names ...string) hunt.Query {
 	t.Helper()
 

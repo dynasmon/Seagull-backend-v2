@@ -31,7 +31,7 @@ func migratedStatusStore(t *testing.T, address string) *clickhouse.StatusStore {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	migrator, err := clickhouse.NewMigrator(storeSettings(address))
+	migrator, err := clickhouse.NewMigrator(storeSettings(address), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("build the migrator: %v", err)
 	}

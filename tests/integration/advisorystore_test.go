@@ -5,6 +5,7 @@ package integration_test
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"testing"
@@ -52,7 +53,7 @@ func migratedAdvisoryStore(t *testing.T, address string) *clickhouse.AdvisorySto
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	migrator, err := clickhouse.NewMigrator(storeSettings(address))
+	migrator, err := clickhouse.NewMigrator(storeSettings(address), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("build the migrator: %v", err)
 	}

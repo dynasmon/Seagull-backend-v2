@@ -2,7 +2,9 @@ package clickhouse
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
@@ -22,14 +24,18 @@ ORDER BY version`
 
 type Migrator struct {
 	connection driver.Conn
+	logger     *slog.Logger
 }
 
-func NewMigrator(configuration Config) (*Migrator, error) {
+func NewMigrator(configuration Config, logger *slog.Logger) (*Migrator, error) {
+	if logger == nil {
+		return nil, errors.New("a migrator needs a logger to report a rebuild on")
+	}
 	connection, err := connect(configuration)
 	if err != nil {
 		return nil, err
 	}
-	return &Migrator{connection: connection}, nil
+	return &Migrator{connection: connection, logger: logger}, nil
 }
 
 // Applied in order and recorded one at a time, so an interrupted run resumes
@@ -58,6 +64,7 @@ func (m *Migrator) Apply(ctx context.Context) ([]string, error) {
 			return applied, fmt.Errorf("record %s as applied: %w", entry, err)
 		}
 		applied = append(applied, entry.String())
+		m.logger.Info("migration_applied", slog.String("migration", entry.String()))
 	}
 	return applied, nil
 }

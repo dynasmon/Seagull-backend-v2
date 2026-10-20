@@ -179,6 +179,23 @@ func TestTheLedgerIsNotOneOfTheThingsItRecords(t *testing.T) {
 	}
 }
 
+func TestAStoredEventIsNamedByTheAgentThatSentIt(t *testing.T) {
+	var key string
+	for _, applied := range migrations {
+		for _, statement := range applied.statements {
+			if _, creates := createTableBody(statement, table); creates {
+				key = sortingKeyOf(t, statement)
+			}
+		}
+		if applied.rebuild != nil && applied.rebuild.table == table {
+			key = sortingKeyOf(t, applied.statements[0])
+		}
+	}
+	if key != "tenant_id, event_time, agent_id, event_id" {
+		t.Fatalf("%s is ordered by %s, so two agents naming an event alike collapse into one row", table, key)
+	}
+}
+
 func sortingKeyOf(t *testing.T, statement string) string {
 	t.Helper()
 	key, err := declaredSortingKey(statement)

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 )
 
@@ -57,12 +58,7 @@ func ParsePart(written string) (Part, error) {
 // only ever compared for equality.
 func (p Part) Of(made *detectionv1.Detection) (string, bool) {
 	if field, evidence := p.Field(); evidence {
-		for _, seen := range made.GetEvidence() {
-			if seen.GetField() == field {
-				return seen.GetHeld(), !seen.GetAbsent()
-			}
-		}
-		return "", false
+		return detection.HeldIn(made, detection.Field(field))
 	}
 
 	switch p {

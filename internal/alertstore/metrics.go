@@ -16,6 +16,7 @@ type Metrics struct {
 	batches   *prometheus.CounterVec
 	skips     *prometheus.CounterVec
 	hidden    *prometheus.CounterVec
+	silent    *prometheus.CounterVec
 	batch     prometheus.Histogram
 	write     prometheus.Histogram
 }
@@ -52,6 +53,12 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "suppressed_total",
 			Help:      "Detections the estate declared it does not want as work, by rule and by the reason written down.",
 		}, []string{"rule", "reason"}),
+		silent: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "alertstore",
+			Name:      "unspoken_key_parts_total",
+			Help:      "Detections folded on a key part they say nothing about, by part: the part keeps no two detections of their rule apart.",
+		}, []string{"part"}),
 		batch: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: "alertstore",
@@ -73,6 +80,7 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 		instruments.batches,
 		instruments.skips,
 		instruments.hidden,
+		instruments.silent,
 		instruments.batch,
 		instruments.write,
 	)
@@ -103,6 +111,8 @@ func (m *Metrics) storiesOpened(outcomes []incident.Outcome) {
 func (m *Metrics) suppressed(rule, reason string) {
 	m.hidden.WithLabelValues(rule, reason).Inc()
 }
+
+func (m *Metrics) unspoken(part alert.Part) { m.silent.WithLabelValues(part.String()).Inc() }
 
 func (m *Metrics) wrote(elapsed time.Duration) { m.write.Observe(elapsed.Seconds()) }
 

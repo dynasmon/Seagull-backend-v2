@@ -5,6 +5,8 @@ package integration_test
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/detectionstore"
 	"github.com/dynasmon/Seagull-backend-v2/internal/eventstore"
 	"github.com/dynasmon/Seagull-backend-v2/internal/hunt"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	huntv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/hunt/v1"
 )
@@ -236,6 +239,74 @@ func TestPagingReadsEveryRecordExactlyOnce(t *testing.T) {
 			t.Errorf("%s was read %d times", id, times)
 		}
 	}
+}
+
+func TestPagingReadsEveryEventOnceWhenAgentsShareIdentifiers(t *testing.T) {
+	address := storeAddress(t)
+	store, reader := migratedStore(t, address), migratedHunter(t, address)
+	built := hunter(t, reader)
+
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+	owner := fmt.Sprintf("shared%d", time.Now().UnixNano())
+	agents := []string{"web-01", "web-02", "web-03"}
+
+	var events []*eventv1.Event
+	for index := range 8 {
+		for _, agentID := range agents {
+			record := admitted(owner, fmt.Sprintf("99999999-2222-4333-8444-%012d", index), "root",
+				base.Add(time.Duration(index/2)*time.Second))
+			record.Origin.AgentId = agentID
+			events = append(events, record)
+		}
+	}
+	keep(t, store, events...)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	scope, err := hunt.NewScope([]string{owner})
+	if err != nil {
+		t.Fatalf("build the scope: %v", err)
+	}
+
+	seen := map[string]int{}
+	asked := &huntv1.Query{Range: within(base.Add(-time.Hour), base.Add(time.Hour)), Limit: 5}
+	for pages := 0; pages < 20; pages++ {
+		page, err := built.Events(ctx, scope, asked)
+		if err != nil {
+			t.Fatalf("read page %d: %v", pages, err)
+		}
+		if len(page.GetEvents()) == 0 {
+			break
+		}
+		for _, record := range page.GetEvents() {
+			seen[record.GetOrigin().GetAgentId()+"/"+record.GetEventId()]++
+		}
+		asked = &huntv1.Query{Range: asked.GetRange(), Limit: asked.GetLimit(), Cursor: page.GetNextCursor()}
+	}
+
+	if len(seen) != len(events) {
+		t.Errorf("paging read %d of %d events", len(seen), len(events))
+	}
+	for name, times := range seen {
+		if times != 1 {
+			t.Errorf("%s was read %d times", name, times)
+		}
+	}
+}
+
+func hunter(t *testing.T, source hunt.Source) *hunt.Hunter {
+	t.Helper()
+
+	built, err := hunt.NewHunter(hunt.HunterOptions{
+		Source:   source,
+		Compiler: huntCompiler(t),
+		Metrics:  hunt.NewMetrics(metrics.New(fmt.Sprintf("integration%d", time.Now().UnixNano()))),
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatalf("build the hunter: %v", err)
+	}
+	return built
 }
 
 // A replayed record is a second row until the parts holding it are merged, and

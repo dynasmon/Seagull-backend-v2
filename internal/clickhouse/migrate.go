@@ -2,7 +2,9 @@ package clickhouse
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
@@ -22,18 +24,23 @@ ORDER BY version`
 
 type Migrator struct {
 	connection driver.Conn
+	logger     *slog.Logger
 }
 
-func NewMigrator(configuration Config) (*Migrator, error) {
+func NewMigrator(configuration Config, logger *slog.Logger) (*Migrator, error) {
+	if logger == nil {
+		return nil, errors.New("a migrator needs a logger to report a rebuild on")
+	}
 	connection, err := connect(configuration)
 	if err != nil {
 		return nil, err
 	}
-	return &Migrator{connection: connection}, nil
+	return &Migrator{connection: connection, logger: logger}, nil
 }
 
 // Applied in order and recorded one at a time, so an interrupted run resumes
-// where it stopped — safe only because every statement is idempotent.
+// where it stopped — safe only because every statement is idempotent and a
+// rebuild carries on from whatever state the store was left in.
 func (m *Migrator) Apply(ctx context.Context) ([]string, error) {
 	if err := m.connection.Exec(ctx, createLedger); err != nil {
 		return nil, fmt.Errorf("create %s: %w", ledger, err)
@@ -46,10 +53,8 @@ func (m *Migrator) Apply(ctx context.Context) ([]string, error) {
 
 	applied := make([]string, 0, len(outstanding))
 	for _, entry := range outstanding {
-		for _, statement := range entry.statements {
-			if err := m.connection.Exec(ctx, statement); err != nil {
-				return applied, fmt.Errorf("apply %s: %w", entry, err)
-			}
+		if err := m.apply(ctx, entry); err != nil {
+			return applied, fmt.Errorf("apply %s: %w", entry, err)
 		}
 		if err := m.connection.Exec(ctx,
 			"INSERT INTO "+ledger+" (version, name) VALUES (?, ?)",
@@ -58,8 +63,21 @@ func (m *Migrator) Apply(ctx context.Context) ([]string, error) {
 			return applied, fmt.Errorf("record %s as applied: %w", entry, err)
 		}
 		applied = append(applied, entry.String())
+		m.logger.Info("migration_applied", slog.String("migration", entry.String()))
 	}
 	return applied, nil
+}
+
+func (m *Migrator) apply(ctx context.Context, entry migration) error {
+	if entry.rebuild != nil {
+		return m.rebuild(ctx, entry)
+	}
+	for _, statement := range entry.statements {
+		if err := m.connection.Exec(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (m *Migrator) Ping(ctx context.Context) error {

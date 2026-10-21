@@ -20,6 +20,7 @@ type migration struct {
 	version    uint64
 	name       string
 	statements []string
+	rebuild    *rebuild
 }
 
 func (m migration) String() string { return fmt.Sprintf("%04d_%s", m.version, m.name) }
@@ -57,6 +58,17 @@ func load() ([]migration, error) {
 			}
 		}
 		loaded = append(loaded, migration{version: version, name: name, statements: parsed})
+		if plan, found := rebuilds[version]; found {
+			if err := plan.check(loaded[len(loaded)-1]); err != nil {
+				return nil, fmt.Errorf("%s: %w", entry.Name(), err)
+			}
+			loaded[len(loaded)-1].rebuild = &plan
+		}
+	}
+	for version := range rebuilds {
+		if !slices.ContainsFunc(loaded, func(candidate migration) bool { return candidate.version == version }) {
+			return nil, fmt.Errorf("a rebuild is declared for migration %d, which is not embedded", version)
+		}
 	}
 
 	slices.SortFunc(loaded, func(a, b migration) int { return cmp.Compare(a.version, b.version) })
@@ -146,11 +158,46 @@ func declaredColumnsIn(history []migration, table string) ([]string, error) {
 				}
 			}
 		}
+
+		if applied.rebuild != nil && strings.EqualFold(applied.rebuild.table, table) {
+			if !created {
+				return nil, fmt.Errorf("%s rebuilds %s before it is created", applied, table)
+			}
+			rebuilt, err := declaredColumnsIn([]migration{applied}, applied.rebuild.staging)
+			if err != nil {
+				return nil, err
+			}
+			columns = rebuilt
+		}
 	}
 	if !created {
 		return nil, fmt.Errorf("no embedded migration creates %s", table)
 	}
 	return columns, nil
+}
+
+// Written the way the store reports a sorting key in system.tables, so the key a
+// migration declares and the key a table has can be compared.
+func declaredSortingKey(statement string) (string, error) {
+	tokens, err := sqlTokens(statement)
+	if err != nil {
+		return "", err
+	}
+	for index := 0; index+2 < len(tokens); index++ {
+		if !strings.EqualFold(tokens[index], "ORDER") || !strings.EqualFold(tokens[index+1], "BY") {
+			continue
+		}
+		key := tokens[index+2]
+		if strings.HasPrefix(key, "(") && strings.HasSuffix(key, ")") {
+			key = key[1 : len(key)-1]
+		}
+		parts := strings.Split(key, ",")
+		for part := range parts {
+			parts[part] = strings.Join(strings.Fields(parts[part]), " ")
+		}
+		return strings.Join(parts, ", "), nil
+	}
+	return "", errors.New("the statement declares no sorting key")
 }
 
 func createTableBody(statement, table string) (string, bool) {

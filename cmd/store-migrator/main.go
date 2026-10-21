@@ -39,18 +39,16 @@ func migrate(ctx context.Context) error {
 		return err
 	}
 
-	migrator, err := clickhouse.NewMigrator(settings.store)
+	migrator, err := clickhouse.NewMigrator(settings.store, logger)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = migrator.Close() }()
 
 	// No deadline: a migration takes as long as it takes, and a signal still stops
-	// it. Partial progress is reported even when the run fails.
+	// it. Each migration is reported as it is recorded, so partial progress shows
+	// even when the run fails.
 	applied, err := migrator.Apply(ctx)
-	for _, name := range applied {
-		logger.Info("migration_applied", slog.String("migration", name))
-	}
 	if err != nil {
 		return err
 	}

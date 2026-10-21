@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -38,7 +39,7 @@ func migratedInventoryStore(t *testing.T, address string) *clickhouse.InventoryS
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	migrator, err := clickhouse.NewMigrator(storeSettings(address))
+	migrator, err := clickhouse.NewMigrator(storeSettings(address), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("build the migrator: %v", err)
 	}

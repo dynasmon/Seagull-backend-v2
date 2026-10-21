@@ -178,3 +178,106 @@ func TestTheLedgerIsNotOneOfTheThingsItRecords(t *testing.T) {
 		}
 	}
 }
+
+func TestAStoredEventIsNamedByTheAgentThatSentIt(t *testing.T) {
+	var key string
+	for _, applied := range migrations {
+		for _, statement := range applied.statements {
+			if _, creates := createTableBody(statement, table); creates {
+				key = sortingKeyOf(t, statement)
+			}
+		}
+		if applied.rebuild != nil && applied.rebuild.table == table {
+			key = sortingKeyOf(t, applied.statements[0])
+		}
+	}
+	if key != "tenant_id, event_time, agent_id, event_id" {
+		t.Fatalf("%s is ordered by %s, so two agents naming an event alike collapse into one row", table, key)
+	}
+}
+
+func sortingKeyOf(t *testing.T, statement string) string {
+	t.Helper()
+	key, err := declaredSortingKey(statement)
+	if err != nil {
+		t.Fatalf("read the sorting key of %.60s: %v", statement, err)
+	}
+	return key
+}
+
+func TestASortingKeyIsReadTheWayTheStoreReportsIt(t *testing.T) {
+	for _, declared := range []struct{ statement, key string }{
+		{
+			"CREATE TABLE IF NOT EXISTS t (a String) ENGINE = MergeTree ORDER BY (tenant_id,\n    event_time, agent_id,event_id) SETTINGS index_granularity = 8192",
+			"tenant_id, event_time, agent_id, event_id",
+		},
+		{"CREATE TABLE IF NOT EXISTS t (a String) ENGINE = MergeTree ORDER BY event_id", "event_id"},
+	} {
+		if got := sortingKeyOf(t, declared.statement); got != declared.key {
+			t.Errorf("read %q, want %q", got, declared.key)
+		}
+	}
+	if key, err := declaredSortingKey("CREATE TABLE IF NOT EXISTS t (a String) ENGINE = Log"); err == nil {
+		t.Errorf("a table with no sorting key was read as ordered by %q", key)
+	}
+}
+
+func TestARebuiltTableHasTheColumnsOfTheTableItWasRebuiltAs(t *testing.T) {
+	history := []migration{
+		{
+			version: 1,
+			name:    "security_events",
+			statements: []string{`CREATE TABLE IF NOT EXISTS security_events
+(
+    event_id String,
+    obsolete String
+)
+ENGINE = MergeTree
+ORDER BY event_id`},
+		},
+		{
+			version: 2,
+			name:    "order_security_events_by_agent",
+			rebuild: &rebuild{table: "security_events", staging: "security_events_rebuild"},
+			statements: []string{`CREATE TABLE IF NOT EXISTS security_events_rebuild
+(
+    agent_id String,
+    event_id String
+)
+ENGINE = MergeTree
+ORDER BY (agent_id, event_id)`},
+		},
+		{
+			version:    3,
+			name:       "add_process_name",
+			statements: []string{"ALTER TABLE security_events ADD COLUMN IF NOT EXISTS process_name String"},
+		},
+	}
+
+	got, err := declaredColumnsIn(history, table)
+	if err != nil {
+		t.Fatalf("build the final schema: %v", err)
+	}
+	if want := []string{"agent_id", "event_id", "process_name"}; !slices.Equal(got, want) {
+		t.Fatalf("the final columns are %v, want %v", got, want)
+	}
+}
+
+func TestARebuildIsOneStatementCreatingTheTableItIsRebuiltAs(t *testing.T) {
+	plan := rebuild{table: "security_events", staging: "security_events_rebuild"}
+	create := "CREATE TABLE IF NOT EXISTS security_events_rebuild (event_id String) ENGINE = MergeTree ORDER BY event_id"
+
+	for reason, statements := range map[string][]string{
+		"another table":      {"CREATE TABLE IF NOT EXISTS security_events_other (event_id String) ENGINE = MergeTree ORDER BY event_id"},
+		"a second statement": {create, "ALTER TABLE security_detections ADD COLUMN IF NOT EXISTS process_name String"},
+		"no sorting key":     {"CREATE TABLE IF NOT EXISTS security_events_rebuild (event_id String) ENGINE = Log"},
+		"no statement":       nil,
+	} {
+		if err := plan.check(migration{version: 9, name: "order_security_events_by_agent", statements: statements}); err == nil {
+			t.Errorf("a rebuild with %s was accepted", reason)
+		}
+	}
+	if err := plan.check(migration{version: 9, name: "order_security_events_by_agent", statements: []string{create}}); err != nil {
+		t.Errorf("a rebuild creating its table was refused: %v", err)
+	}
+}

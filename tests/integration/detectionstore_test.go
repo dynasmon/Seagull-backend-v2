@@ -5,6 +5,7 @@ package integration_test
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ func migratedDetectionStore(t *testing.T, address string) *clickhouse.DetectionS
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	migrator, err := clickhouse.NewMigrator(storeSettings(address))
+	migrator, err := clickhouse.NewMigrator(storeSettings(address), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("build the migrator: %v", err)
 	}

@@ -1,6 +1,7 @@
 package alertfile_test
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ defaults:
 
 rules:
   - id: ssh.failed_password_from_outside
-    key: [rule, agent, "evidence:authentication.source.ip"]
+    key: [rule, agent, "evidence:authentication.network.source.ip"]
     window: 1h
     cooldown: 30m
 
@@ -52,7 +53,9 @@ func detection(rule, agent, source string) *detectionv1.Detection {
 		Rule:        &detectionv1.Rule{Id: rule, Revision: 1},
 		Severity:    detectionv1.Severity_SEVERITY_MEDIUM,
 		Origin:      &eventv1.Origin{TenantId: "acme", AgentId: agent},
-		Evidence:    []*detectionv1.Evidence{{Field: "authentication.source.ip", Held: source}},
+		Evidence: []*detectionv1.Evidence{
+			{Field: "authentication.network.source.ip", Operator: "starts_with", Negated: true, Held: strconv.Quote(source)},
+		},
 	}
 }
 

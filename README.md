@@ -232,7 +232,10 @@ asset in two more, and every version of every advisory the platform has read in
 three more. A consumer advances its position
 only after the work it did is durable, so a crash replays rather than skips. A
 record that can never be stored is quarantined with the reason and its position,
-so one poison record cannot hold up a partition.
+so one poison record cannot hold up a partition. A stored event is named by the
+agent that sent it as well as by its identifier and instant, so a replay
+collapses into one row and no agent can overwrite another's event
+([ADR 34](docs/decisions/0034-a-stored-event-is-named-by-the-agent-that-sent-it.md)).
 
 ### State, restarts and replicas
 

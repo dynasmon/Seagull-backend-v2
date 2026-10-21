@@ -120,16 +120,65 @@ func TestAnAnswerNeverShowsAReplayedRecordTwice(t *testing.T) {
 	}
 }
 
-// Newest first, and resumed by the pair the table is sorted by rather than by a
+// Newest first, and resumed by the key the table is sorted by rather than by a
 // count of records already seen.
 func TestAPageIsOrderedAndResumedByTheSortKey(t *testing.T) {
-	statement, _ := statementFor(t, hunt.Events, nil)
-	if !strings.Contains(statement, "ORDER BY event_time DESC, event_id DESC LIMIT 50") {
-		t.Errorf("a page is not the newest fifty records: %s", statement)
+	for _, expected := range []struct {
+		dataset hunt.Dataset
+		names   []string
+		order   string
+		resumed string
+	}{
+		{
+			hunt.Events, []string{"web-01", "aaaa"},
+			"ORDER BY event_time DESC, agent_id DESC, event_id DESC LIMIT 50",
+			"(event_time, agent_id, event_id) < (fromUnixTimestamp64Milli(?, 'UTC'), ?, ?)",
+		},
+		{
+			hunt.Detections, []string{"dddd"},
+			"ORDER BY event_time DESC, detection_id DESC LIMIT 50",
+			"(event_time, detection_id) < (fromUnixTimestamp64Milli(?, 'UTC'), ?)",
+		},
+	} {
+		t.Run(string(expected.dataset), func(t *testing.T) {
+			statement, _ := statementFor(t, expected.dataset, nil)
+			if !strings.Contains(statement, expected.order) {
+				t.Errorf("a page is not the newest fifty records: %s", statement)
+			}
+			if strings.Contains(statement, ") < (") {
+				t.Errorf("a first page was read as though it were resuming: %s", statement)
+			}
+
+			statement, arguments, err := compile(resumed(t, expected.dataset, expected.names...))
+			if err != nil {
+				t.Fatalf("compile to sql: %v", err)
+			}
+			if !strings.Contains(statement, expected.resumed) {
+				t.Errorf("a resumed page does not carry on from the last record: %s", statement)
+			}
+			bound := arguments[len(arguments)-len(expected.names):]
+			for index, name := range expected.names {
+				if bound[index] != name {
+					t.Errorf("the page resumed after %v", bound)
+				}
+			}
+		})
 	}
-	if strings.Contains(statement, "(event_time, event_id) <") {
-		t.Errorf("a first page was read as though it were resuming: %s", statement)
+}
+
+func TestAPositionThatDoesNotNameEveryKeyIsRefused(t *testing.T) {
+	for dataset, names := range map[hunt.Dataset][]string{
+		hunt.Events:     {"aaaa"},
+		hunt.Detections: {"web-01", "dddd"},
+	} {
+		if statement, _, err := compile(resumed(t, dataset, names...)); err == nil {
+			t.Errorf("%s resumed after a position naming %q: %s", dataset, names, statement)
+		}
 	}
+}
+
+func resumed(t *testing.T, dataset hunt.Dataset, names ...string) hunt.Query {
+	t.Helper()
 
 	compiler, err := hunt.NewCompiler(hunt.CompilerOptions{
 		Limits: hunt.Limits{
@@ -141,26 +190,24 @@ func TestAPageIsOrderedAndResumedByTheSortKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build the compiler: %v", err)
 	}
-	first := query(t, hunt.Events, nil, "acme")
-	scope, _ := hunt.NewScope([]string{"acme"})
-	resumed, err := compiler.Compile(hunt.Events, scope, &huntv1.Query{
-		Range:  &huntv1.TimeRange{Start: timestamppb.New(noon.Add(-time.Hour)), End: timestamppb.New(noon)},
-		Cursor: compiler.Next(first, noon.Add(-time.Minute), "aaaa"),
+	scope, err := hunt.NewScope([]string{"acme"})
+	if err != nil {
+		t.Fatalf("build the scope: %v", err)
+	}
+	window := &huntv1.TimeRange{Start: timestamppb.New(noon.Add(-time.Hour)), End: timestamppb.New(noon)}
+
+	first, err := compiler.Compile(dataset, scope, &huntv1.Query{Range: window})
+	if err != nil {
+		t.Fatalf("compile the first page: %v", err)
+	}
+	built, err := compiler.Compile(dataset, scope, &huntv1.Query{
+		Range:  window,
+		Cursor: compiler.Next(first, noon.Add(-time.Minute), names...),
 	})
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-
-	statement, arguments, err := compile(resumed)
-	if err != nil {
-		t.Fatalf("compile to sql: %v", err)
-	}
-	if !strings.Contains(statement, "(event_time, event_id) < (fromUnixTimestamp64Milli(?, 'UTC'), ?)") {
-		t.Errorf("a resumed page does not carry on from the last record: %s", statement)
-	}
-	if arguments[len(arguments)-1] != "aaaa" {
-		t.Errorf("the page resumed after %v", arguments[len(arguments)-1])
-	}
+	return built
 }
 
 func TestEachOperatorBecomesTheQuestionItAsks(t *testing.T) {

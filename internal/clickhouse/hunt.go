@@ -104,17 +104,19 @@ var huntColumns = map[hunt.Dataset]map[hunt.Field]string{
 	},
 }
 
-// What each dataset is read out of, and the pair its rows are ordered and
-// resumed by. Both tables sort by the instant the thing happened and then by the
-// name of the record, so a page resumes at exactly the pair the last row carried.
+// What each dataset is read out of, and the key its rows are ordered and resumed
+// by: the instant the thing happened, then the names that tell two records of
+// that instant apart. An event is named by the agent that sent it as well as by
+// its own identifier, and a detection's identifier already names its agent, so a
+// page resumes at exactly the record the last row was.
 var huntTables = map[hunt.Dataset]struct {
 	table   string
 	columns []string
 	instant string
-	name    string
+	names   []string
 }{
-	hunt.Events:     {table, storedColumns, "event_time", "event_id"},
-	hunt.Detections: {detectionTable, detectionColumns, "event_time", "detection_id"},
+	hunt.Events:     {table, storedColumns, "event_time", []string{"agent_id", "event_id"}},
+	hunt.Detections: {detectionTable, detectionColumns, "event_time", []string{"detection_id"}},
 }
 
 // The driver renders a bound instant to whole seconds, which would silently drop
@@ -247,9 +249,16 @@ func compile(query hunt.Query) (string, []any, error) {
 	arguments = append(arguments, query.Range().Start.UnixMilli(), query.Range().End.UnixMilli())
 
 	if after := query.After(); after.Set {
-		conditions = append(conditions,
-			"("+dataset.instant+", "+dataset.name+") < ("+instantPlaceholder+", ?)")
-		arguments = append(arguments, after.Time.UnixMilli(), after.ID)
+		if len(after.Names) != len(dataset.names) {
+			return "", nil, fmt.Errorf("a position in %s names %d keys and its table is sorted by %d",
+				query.Dataset(), len(after.Names), len(dataset.names))
+		}
+		conditions = append(conditions, "("+dataset.instant+", "+strings.Join(dataset.names, ", ")+") < ("+
+			instantPlaceholder+strings.Repeat(", ?", len(dataset.names))+")")
+		arguments = append(arguments, after.Time.UnixMilli())
+		for _, name := range after.Names {
+			arguments = append(arguments, name)
+		}
 	}
 
 	if where := query.Where(); where != nil {
@@ -261,9 +270,13 @@ func compile(query hunt.Query) (string, []any, error) {
 		arguments = append(arguments, values...)
 	}
 
-	statement := fmt.Sprintf("SELECT %s FROM %s FINAL WHERE %s ORDER BY %s DESC, %s DESC LIMIT %d",
+	order := []string{dataset.instant + " DESC"}
+	for _, name := range dataset.names {
+		order = append(order, name+" DESC")
+	}
+	statement := fmt.Sprintf("SELECT %s FROM %s FINAL WHERE %s ORDER BY %s LIMIT %d",
 		strings.Join(dataset.columns, ", "), dataset.table, strings.Join(conditions, " AND "),
-		dataset.instant, dataset.name, query.Limit())
+		strings.Join(order, ", "), query.Limit())
 	return statement, arguments, nil
 }
 
@@ -418,6 +431,11 @@ func agreesWithVocabulary() error {
 			return fmt.Errorf("no column is named for any field of %s", dataset)
 		}
 		read := huntTables[dataset]
+		for _, name := range append([]string{read.instant}, read.names...) {
+			if !slices.Contains(read.columns, name) {
+				return fmt.Errorf("%s is ordered by %s, which %s does not have", dataset, name, read.table)
+			}
+		}
 
 		for _, field := range hunt.Fields(dataset) {
 			column, found := mapped[field]

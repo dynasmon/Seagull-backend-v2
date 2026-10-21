@@ -204,8 +204,8 @@ func (c *Compiler) Compile(dataset Dataset, scope Scope, asked *huntv1.Query) (Q
 
 // The token that resumes this query after the record given, or empty when the
 // page was the last one.
-func (c *Compiler) Next(query Query, at time.Time, id string) string {
-	return encodeCursor(c.key, query.fingerprint, at, id)
+func (c *Compiler) Next(query Query, at time.Time, names ...string) string {
+	return encodeCursor(c.key, query.fingerprint, at, names...)
 }
 
 func (c *Compiler) window(asked *huntv1.TimeRange) (TimeRange, error) {

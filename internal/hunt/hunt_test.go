@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -52,6 +53,7 @@ func stored(id string, at time.Time) *eventv1.Event {
 		EventId:    id,
 		EventClass: eventv1.EventClass_EVENT_CLASS_AUTHENTICATION,
 		Time:       &eventv1.Timestamps{EventTime: timestamppb.New(at)},
+		Origin:     &eventv1.Origin{TenantId: "acme", AgentId: "web-01"},
 	}
 }
 
@@ -116,7 +118,29 @@ func TestTheCursorResumesAtTheLastRecord(t *testing.T) {
 		t.Fatalf("resume: %v", err)
 	}
 	after := source.seen.After()
-	if !after.Set || after.ID != "bbbb" || !after.Time.Equal(last) {
+	if !after.Set || !slices.Equal(after.Names, []string{"web-01", "bbbb"}) || !after.Time.Equal(last) {
+		t.Errorf("the store was asked to carry on from %+v", after)
+	}
+}
+
+func TestADetectionPageResumesAtTheLastDetection(t *testing.T) {
+	last := day.Add(-time.Minute)
+	source := &store{detections: []*detectionv1.Detection{
+		{DetectionId: "dddd", EventTime: timestamppb.New(day), Origin: &eventv1.Origin{AgentId: "web-01"}},
+		{DetectionId: "eeee", EventTime: timestamppb.New(last), Origin: &eventv1.Origin{AgentId: "web-02"}},
+	}}
+	built := hunter(t, source)
+
+	page, err := built.Detections(context.Background(), scoped(t, "acme"), asked(nil))
+	if err != nil {
+		t.Fatalf("hunt: %v", err)
+	}
+	if _, err := built.Detections(context.Background(), scoped(t, "acme"),
+		&huntv1.Query{Range: window(time.Hour), Cursor: page.GetNextCursor()}); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	after := source.seen.After()
+	if !after.Set || !slices.Equal(after.Names, []string{"eeee"}) || !after.Time.Equal(last) {
 		t.Errorf("the store was asked to carry on from %+v", after)
 	}
 }

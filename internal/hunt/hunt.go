@@ -66,8 +66,8 @@ func (h *Hunter) Events(ctx context.Context, scope Scope, asked *huntv1.Query) (
 	h.observe(query, len(records), elapsed)
 	page := &huntv1.EventPage{Events: records}
 	if last := len(records) - 1; last >= 0 {
-		page.NextCursor = h.compiler.Next(query,
-			records[last].GetTime().GetEventTime().AsTime(), records[last].GetEventId())
+		page.NextCursor = h.compiler.Next(query, records[last].GetTime().GetEventTime().AsTime(),
+			records[last].GetOrigin().GetAgentId(), records[last].GetEventId())
 	}
 	return page, nil
 }

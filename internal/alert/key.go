@@ -84,6 +84,19 @@ func (p Part) Of(made *detectionv1.Detection) (string, bool) {
 	return "", false
 }
 
+// A part the detection says nothing about holds the same for every detection of
+// its rule, so it keeps none of them apart: the alerts it was declared to
+// separate fold into one.
+func Unspoken(made *detectionv1.Detection, keyed []Part) []Part {
+	var unspoken []Part
+	for _, part := range distinct(keyed) {
+		if field, evidence := part.Field(); evidence && !detection.Speaks(made, detection.Field(field)) {
+			unspoken = append(unspoken, part)
+		}
+	}
+	return unspoken
+}
+
 // Two detections sharing this are the same piece of work. The tenant is always
 // in it and is never declared: an alert that could fold across a tenant boundary
 // is a scope somebody could read past.
@@ -93,9 +106,7 @@ func CorrelationKey(made *detectionv1.Detection, keyed []Part) string {
 
 	write(made.GetOrigin().GetTenantId())
 
-	ordered := slices.Clone(keyed)
-	slices.Sort(ordered)
-	for _, part := range slices.Compact(ordered) {
+	for _, part := range distinct(keyed) {
 		value, held := part.Of(made)
 		write(part.String())
 		if !held {
@@ -105,4 +116,10 @@ func CorrelationKey(made *detectionv1.Detection, keyed []Part) string {
 		write(value)
 	}
 	return hex.EncodeToString(digest.Sum(nil)[:16])
+}
+
+func distinct(keyed []Part) []Part {
+	ordered := slices.Clone(keyed)
+	slices.Sort(ordered)
+	return slices.Compact(ordered)
 }

@@ -38,3 +38,4 @@ rediscovered by reading the code.
 - [32. A rollout opens a release to the agents of a tenant wave by wave, by a place each agent keeps, and pauses on what its agents report](0032-a-rollout-opens-a-release-wave-by-wave-and-pauses-on-what-agents-report.md)
 - [33. An assessment is a record of its own, and an agent's posture is its newest assessment of the checks an operator signed](0033-a-posture-is-the-newest-assessment-of-checks-an-operator-signed.md)
 - [34. A stored event is named by the agent that sent it, and a sorting key changes by a rebuild the migrator carries out](0034-a-stored-event-is-named-by-the-agent-that-sent-it.md)
+- [35. An alert key names a field the event contract declares, and reads what the detection holds in it](0035-an-alert-key-names-a-field-the-contract-declares.md)

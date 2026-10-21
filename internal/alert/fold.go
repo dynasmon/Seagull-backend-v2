@@ -25,13 +25,15 @@ const (
 func (o Outcome) String() string { return string(o) }
 
 // One detection, decided against the tuning and ready for the store: the alert
-// it would raise, the key it folds on, and the two windows the store compares
-// against. Everything here is derived from the detection and the document, so
-// the store adds no policy of its own.
+// it would raise, the key it folds on and the parts of that key it says nothing
+// about, and the two windows the store compares against. Everything here is
+// derived from the detection and the document, so the store adds no policy of
+// its own.
 type Candidate struct {
 	Alert       *alertv1.Alert
 	DetectionID string
 	Key         string
+	Unspoken    []Part
 	At          time.Time
 	Window      time.Duration
 	Cooldown    time.Duration
@@ -53,6 +55,7 @@ func Consider(made *detectionv1.Detection, tuning *Tuning, at time.Time) (Candid
 		Alert:       raised,
 		DetectionID: made.GetDetectionId(),
 		Key:         raised.GetCorrelationKey(),
+		Unspoken:    Unspoken(made, fold.Keyed),
 		At:          Happened(made, at),
 		Window:      fold.Window,
 		Cooldown:    fold.Cooldown,

@@ -18,7 +18,7 @@ defaults:
 # rule that stopped deduplicating. Here the estate says it.
 rules:
   - id: ssh.failed_password_from_outside
-    key: [rule, agent, "evidence:authentication.source.ip"]
+    key: [rule, agent, "evidence:authentication.network.source.ip"]
     window: 1h
     cooldown: 30m
 

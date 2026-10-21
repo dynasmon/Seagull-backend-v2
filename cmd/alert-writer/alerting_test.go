@@ -39,7 +39,7 @@ func TestTheShippedDocumentKeysTheShippedRuleBySource(t *testing.T) {
 	if fold.Window != time.Hour || fold.Cooldown != 30*time.Minute {
 		t.Errorf("it folds on %s / %s", fold.Window, fold.Cooldown)
 	}
-	source := alert.Part(alert.EvidencePrefix + "authentication.source.ip")
+	source := alert.Part(alert.EvidencePrefix + "authentication.network.source.ip")
 	for _, part := range []alert.Part{alert.PartRule, alert.PartAgent, source} {
 		if !contains(fold.Keyed, part) {
 			t.Errorf("the key does not name %s", part)

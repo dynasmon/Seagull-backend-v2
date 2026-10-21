@@ -457,7 +457,7 @@ defaults:
 
 rules:
   - id: ssh.failed_password_from_outside
-    key: [rule, agent, "evidence:authentication.source.ip"]
+    key: [rule, agent, "evidence:authentication.network.source.ip"]
     window: 1h
     cooldown: 30m
 
@@ -477,6 +477,17 @@ first time. `alertstore_alerts_total` counts what became of every detection —
 `raised`, `folded`, `repeated`, `cooled_down` — and `alertstore_suppressed_total`
 is labelled by rule and by the reason written down. See
 [ADR 17](decisions/0017-noise-is-removed-from-the-alert-and-never-from-the-detection.md).
+
+An `evidence:` part names a field of `seagull.event.v1.Event` the way a rule
+does — `authentication.network.source.ip` — and a field the contract does not
+declare is refused with its line and column, so `alert-writer` does not start.
+It reads what the detection holds of the field: what the rule compared, or what
+a counting or ordered rule grouped by, as the event carried it — a selector is
+written `203.0.113.10`, never quoted. A part a detection holds nothing of keeps
+no two detections of its rule apart; the first such detection of each rule is
+logged as `alert_key_part_unspoken`, and every one is counted in
+`alertstore_unspoken_key_parts_total`, by part. See
+[ADR 35](decisions/0035-an-alert-key-names-a-field-the-contract-declares.md).
 
 ### alert-writer, control-api and control-migrator
 

@@ -1,6 +1,7 @@
 package alert_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/alert"
@@ -22,6 +23,51 @@ func countedFrom(source string) *detectionv1.Detection {
 		},
 	}
 	return made
+}
+
+func TestAnEvidencePartNamingAFieldTheContractDoesNotDeclareIsRefused(t *testing.T) {
+	for _, written := range []string{
+		"evidence:authentication.source.ip",
+		"evidence:authentication.network.source",
+		"evidence:time.event_time",
+		"evidence:",
+	} {
+		if part, err := alert.ParsePart(written); err == nil {
+			t.Errorf("%s was read as the part %q", written, part)
+		}
+	}
+
+	_, err := alert.ParsePart("evidence:authentication.source.ip")
+	if !errors.Is(err, alert.ErrUndeclaredField) {
+		t.Errorf("a field the contract does not declare was refused with %v", err)
+	}
+
+	part, err := alert.ParsePart(" evidence:authentication.network.source.ip ")
+	if err != nil || part != bySourceAddress {
+		t.Errorf("a field the contract declares was read as %q with %v", part, err)
+	}
+}
+
+func TestATuningIsRefusedWhereverItNamesAFieldTheContractDoesNotDeclare(t *testing.T) {
+	misspelt := alert.Part("evidence:authentication.source.ip")
+
+	_, err := alert.NewTuning(keyed(alert.PartRule, misspelt), nil, nil)
+	if !errors.Is(err, alert.ErrUndeclaredField) {
+		t.Errorf("a default key naming an undeclared field compiled with %v", err)
+	}
+
+	_, err = alert.NewTuning(keyed(alert.PartRule), map[string]alert.Fold{"r": keyed(alert.PartRule, misspelt)}, nil)
+	if !errors.Is(err, alert.ErrUndeclaredField) {
+		t.Errorf("a per-rule key naming an undeclared field compiled with %v", err)
+	}
+
+	_, err = alert.NewTuning(keyed(alert.PartRule), nil, []alert.Suppression{{
+		When:   alert.Selector{misspelt: {"203.0.113.10"}},
+		Reason: "our own scanner",
+	}})
+	if !errors.Is(err, alert.ErrUndeclaredField) {
+		t.Errorf("a suppression selecting on an undeclared field compiled with %v", err)
+	}
 }
 
 func TestAKeyPartReadsTheAddressACountingRuleGroupedBy(t *testing.T) {

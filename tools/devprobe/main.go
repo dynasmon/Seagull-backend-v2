@@ -53,10 +53,11 @@ func main() {
 	batchID := flag.String("batch-id", "probe-0001", "batch identifier")
 	eventID := flag.String("event-id", "99999999-8888-4777-8666-555555555555", "event identifier")
 	outcome := flag.String("outcome", "failure", "authentication outcome the sample event carries: failure or success")
+	source := flag.String("source", "203.0.113.10", "address the sample event's session came from")
 	assets := flag.Bool("inventory", false, "send an asset inventory snapshot to the gateway instead of an event batch")
 	flag.Parse()
 
-	run := func() error { return probe(*endpoint, *registry, *pki, *batchID, *eventID, *outcome) }
+	run := func() error { return probe(*endpoint, *registry, *pki, *batchID, *eventID, *outcome, *source) }
 	if *huntEndpoint != "" {
 		run = func() error { return ask(*huntEndpoint, *pki, *window) }
 	}
@@ -520,7 +521,7 @@ func speaker(pki, name string) (*http.Client, error) {
 	}, nil
 }
 
-func probe(endpoint, registry, pki, batchID, eventID, outcome string) error {
+func probe(endpoint, registry, pki, batchID, eventID, outcome, source string) error {
 	client, err := speaker(pki, "agent")
 	if err != nil {
 		return err
@@ -531,7 +532,7 @@ func probe(endpoint, registry, pki, batchID, eventID, outcome string) error {
 		}
 	}
 
-	return offer(client, endpoint+ingest.EventsPath, sample(batchID, eventID, outcome), registry != "")
+	return offer(client, endpoint+ingest.EventsPath, sample(batchID, eventID, outcome, source), registry != "")
 }
 
 func survey(endpoint, registry, pki, batchID string) error {
@@ -650,7 +651,7 @@ func subjectOf(path string) (string, error) {
 	return certificate.Subject.CommonName, nil
 }
 
-func sample(batchID, eventID, outcome string) *ingestv1.EventBatch {
+func sample(batchID, eventID, outcome, source string) *ingestv1.EventBatch {
 	now := timestamppb.New(time.Now().UTC())
 	held, reason := eventv1.Outcome_OUTCOME_FAILURE, "failed_password"
 	if outcome == "success" {
@@ -677,11 +678,11 @@ func sample(batchID, eventID, outcome string) *ingestv1.EventBatch {
 				User:          &eventv1.User{Name: "root"},
 				Service:       &eventv1.Service{Name: "sshd", Protocol: "ssh"},
 				Network: &eventv1.Network{
-					Source:      &eventv1.Endpoint{Ip: "203.0.113.10", Port: 54321},
+					Source:      &eventv1.Endpoint{Ip: source, Port: 54321},
 					Destination: &eventv1.Endpoint{Ip: "198.51.100.5", Port: 22},
 					Transport:   eventv1.Transport_TRANSPORT_TCP,
 				},
-				RawRecord: fmt.Sprintf("%s password for root from 203.0.113.10 port 54321 ssh2", outcome),
+				RawRecord: fmt.Sprintf("%s password for root from %s port 54321 ssh2", outcome, source),
 			}},
 		}},
 	}

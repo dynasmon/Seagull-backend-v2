@@ -85,6 +85,7 @@ type Writer struct {
 	writeTimeout  time.Duration
 	retryDelay    time.Duration
 	maxRetryDelay time.Duration
+	told          map[unspokenPart]struct{}
 }
 
 func NewWriter(options WriterOptions) (*Writer, error) {
@@ -124,6 +125,7 @@ func NewWriter(options WriterOptions) (*Writer, error) {
 		writeTimeout:  options.WriteTimeout,
 		retryDelay:    options.RetryDelay,
 		maxRetryDelay: options.MaxRetryDelay,
+		told:          make(map[unspokenPart]struct{}),
 	}, nil
 }
 
@@ -214,6 +216,7 @@ func (w *Writer) consider(records []Record) work {
 			w.skip(record, SkipUnraisable, err.Error())
 			continue
 		}
+		w.unspoken(&decided, candidate.Unspoken)
 		found.alerts = append(found.alerts, candidate)
 	}
 	return found

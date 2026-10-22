@@ -2,6 +2,7 @@ package alert_test
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/alert"
@@ -100,5 +101,37 @@ func TestASuppressionMatchesTextAsTheEventCarriedIt(t *testing.T) {
 	}
 	if _, hidden := tuning.Suppressed(countedFrom("203.0.113.10"), instant(raisedAt)); !hidden {
 		t.Error("a suppression naming the address a count was grouped by did not hide the detection")
+	}
+}
+
+func TestAKeyPartTheDetectionSaysNothingAboutIsReported(t *testing.T) {
+	tuning, err := alert.NewTuning(keyed(alert.PartRule, alert.PartAgent, bySourceAddress), nil, nil)
+	if err != nil {
+		t.Fatalf("compile the tuning: %v", err)
+	}
+
+	silent := decided()
+	silent.Evidence = []*detectionv1.Evidence{{Field: "authentication.outcome", Operator: "equals", Held: "failure"}}
+	considered, err := alert.Consider(silent, tuning, instant(raisedAt))
+	if err != nil {
+		t.Fatalf("consider: %v", err)
+	}
+	if !slices.Equal(considered.Unspoken, []alert.Part{bySourceAddress}) {
+		t.Errorf("a detection saying nothing of the address reported %v as unspoken", considered.Unspoken)
+	}
+
+	absent := decided()
+	absent.Evidence = []*detectionv1.Evidence{{Field: "authentication.network.source.ip", Operator: "starts_with", Negated: true, Absent: true}}
+	for name, made := range map[string]*detectionv1.Detection{
+		"an address the event did not carry": absent,
+		"an address a count was grouped by":  countedFrom("203.0.113.10"),
+	} {
+		considered, err := alert.Consider(made, tuning, instant(raisedAt))
+		if err != nil {
+			t.Fatalf("consider %s: %v", name, err)
+		}
+		if len(considered.Unspoken) != 0 {
+			t.Errorf("%s reported %v as unspoken", name, considered.Unspoken)
+		}
 	}
 }

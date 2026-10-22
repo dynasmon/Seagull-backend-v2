@@ -78,6 +78,11 @@ func NewTuning(defaults Fold, byRule map[string]Fold, suppressions []Suppression
 		if suppression.Rule == "" && len(suppression.When) == 0 {
 			return nil, fmt.Errorf("suppression %d: %w", index+1, ErrNoSelection)
 		}
+		for _, part := range slices.Sorted(maps.Keys(suppression.When)) {
+			if err := part.refusal(); err != nil {
+				return nil, fmt.Errorf("suppression %d: %q %w", index+1, part, err)
+			}
+		}
 	}
 
 	tuning := &Tuning{
@@ -97,8 +102,8 @@ func valid(fold Fold) error {
 		return ErrUnkeyed
 	}
 	for _, part := range fold.Keyed {
-		if !part.Valid() {
-			return fmt.Errorf("%q names nothing an alert can be keyed by", part)
+		if err := part.refusal(); err != nil {
+			return fmt.Errorf("%q %w", part, err)
 		}
 	}
 	return nil

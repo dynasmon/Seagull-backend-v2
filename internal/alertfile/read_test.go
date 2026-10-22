@@ -1,6 +1,8 @@
 package alertfile_test
 
 import (
+	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +22,7 @@ defaults:
 
 rules:
   - id: ssh.failed_password_from_outside
-    key: [rule, agent, "evidence:authentication.source.ip"]
+    key: [rule, agent, "evidence:authentication.network.source.ip"]
     window: 1h
     cooldown: 30m
 
@@ -52,7 +54,9 @@ func detection(rule, agent, source string) *detectionv1.Detection {
 		Rule:        &detectionv1.Rule{Id: rule, Revision: 1},
 		Severity:    detectionv1.Severity_SEVERITY_MEDIUM,
 		Origin:      &eventv1.Origin{TenantId: "acme", AgentId: agent},
-		Evidence:    []*detectionv1.Evidence{{Field: "authentication.source.ip", Held: source}},
+		Evidence: []*detectionv1.Evidence{
+			{Field: "authentication.network.source.ip", Operator: "starts_with", Negated: true, Held: strconv.Quote(source)},
+		},
 	}
 }
 
@@ -119,18 +123,20 @@ func TestASuppressionReadFromTheDocumentHidesExactlyWhatItNames(t *testing.T) {
 
 func TestAMisspeltKeyIsRefusedRatherThanReadAsNothing(t *testing.T) {
 	for name, body := range map[string]string{
-		"an unread top-level key":           "schema_version: 1\nsupressions: []\n",
-		"an unread fold key":                "schema_version: 1\ndefaults:\n  windows: 15m\n",
-		"an unread suppression":             "schema_version: 1\nsuppressions:\n  - rule: r\n    reason: because\n    whn: {}\n",
-		"a part nobody declares":            "schema_version: 1\ndefaults:\n  key: [rule, hostname]\n",
-		"a key without the rule":            "schema_version: 1\ndefaults:\n  key: [agent]\n",
-		"a suppression with no reason":      "schema_version: 1\nsuppressions:\n  - rule: r\n",
-		"a negative window":                 "schema_version: 1\ndefaults:\n  window: -5m\n",
-		"a window that is not one":          "schema_version: 1\ndefaults:\n  window: soon\n",
-		"an until that is not an instant":   "schema_version: 1\nsuppressions:\n  - rule: r\n    reason: because\n    until: next tuesday\n",
-		"an empty selector list":            "schema_version: 1\nsuppressions:\n  - reason: because\n    when:\n      agent: []\n",
-		"a schema this build does not read": "schema_version: 2\n",
-		"no schema at all":                  "defaults:\n  window: 15m\n",
+		"an unread top-level key":               "schema_version: 1\nsupressions: []\n",
+		"an unread fold key":                    "schema_version: 1\ndefaults:\n  windows: 15m\n",
+		"an unread suppression":                 "schema_version: 1\nsuppressions:\n  - rule: r\n    reason: because\n    whn: {}\n",
+		"a part nobody declares":                "schema_version: 1\ndefaults:\n  key: [rule, hostname]\n",
+		"a key without the rule":                "schema_version: 1\ndefaults:\n  key: [agent]\n",
+		"a suppression with no reason":          "schema_version: 1\nsuppressions:\n  - rule: r\n",
+		"a negative window":                     "schema_version: 1\ndefaults:\n  window: -5m\n",
+		"a window that is not one":              "schema_version: 1\ndefaults:\n  window: soon\n",
+		"an until that is not an instant":       "schema_version: 1\nsuppressions:\n  - rule: r\n    reason: because\n    until: next tuesday\n",
+		"an empty selector list":                "schema_version: 1\nsuppressions:\n  - reason: because\n    when:\n      agent: []\n",
+		"a schema this build does not read":     "schema_version: 2\n",
+		"no schema at all":                      "defaults:\n  window: 15m\n",
+		"a key on a field nobody declares":      "schema_version: 1\ndefaults:\n  key: [rule, \"evidence:authentication.source.ip\"]\n",
+		"a selector on a field nobody declares": "schema_version: 1\nsuppressions:\n  - reason: because\n    when:\n      \"evidence:authentication.source.ip\": [203.0.113.10]\n",
 	} {
 		if _, err := read(t, body); err == nil {
 			t.Errorf("%s was accepted", name)
@@ -153,6 +159,36 @@ func TestAFaultSaysWhereInTheDocumentItIs(t *testing.T) {
 	}
 	if !strings.Contains(fault.Error(), "hostname") {
 		t.Errorf("the fault does not name what is wrong: %s", fault)
+	}
+}
+
+func TestAFieldTheContractDoesNotDeclareIsRefusedWhereItIsWritten(t *testing.T) {
+	for name, written := range map[string]struct {
+		body, part string
+		line       int
+	}{
+		"in a key": {
+			body: "schema_version: 1\nrules:\n  - id: r\n    key: [rule, agent, \"evidence:authentication.source.ip\"]\n",
+			part: "rules[0].key[2]",
+			line: 4,
+		},
+		"in a suppression": {
+			body: "schema_version: 1\nsuppressions:\n  - reason: our own scanner\n    when:\n      \"evidence:authentication.source.ip\": [203.0.113.10]\n",
+			part: "suppressions[0].when.evidence:authentication.source.ip",
+			line: 5,
+		},
+	} {
+		_, err := read(t, written.body)
+		var fault *alertfile.Fault
+		if !errors.As(err, &fault) {
+			t.Fatalf("%s: the refusal is %v and not a fault", name, err)
+		}
+		if fault.Part != written.part || fault.Line != written.line || fault.Column == 0 {
+			t.Errorf("%s: the fault points at %s, %d:%d", name, fault.Part, fault.Line, fault.Column)
+		}
+		if !errors.Is(err, alert.ErrUndeclaredField) {
+			t.Errorf("%s: the fault does not say the field is undeclared: %v", name, err)
+		}
 	}
 }
 

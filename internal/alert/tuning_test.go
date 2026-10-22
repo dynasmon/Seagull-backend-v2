@@ -10,6 +10,8 @@ import (
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 )
 
+const bySourceAddress = alert.Part("evidence:authentication.network.source.ip")
+
 func keyed(parts ...alert.Part) alert.Fold {
 	return alert.Fold{Keyed: parts, Window: 15 * time.Minute}
 }
@@ -27,15 +29,15 @@ func TestTheKeyFoldsWhatItNamesAndSplitsWhatItDoesNot(t *testing.T) {
 	first := decided()
 	second := decided()
 	second.DetectionId = "a-different-detection"
-	second.Evidence = []*detectionv1.Evidence{{Field: "authentication.source.ip", Held: "198.51.100.9"}}
-	first.Evidence = []*detectionv1.Evidence{{Field: "authentication.source.ip", Held: "203.0.113.10"}}
+	second.Evidence = []*detectionv1.Evidence{{Field: "authentication.network.source.ip", Held: `"198.51.100.9"`}}
+	first.Evidence = []*detectionv1.Evidence{{Field: "authentication.network.source.ip", Held: `"203.0.113.10"`}}
 
 	byAgent := []alert.Part{alert.PartRule, alert.PartAgent}
 	if alert.CorrelationKey(first, byAgent) != alert.CorrelationKey(second, byAgent) {
 		t.Error("two detections from one agent and one rule did not share a key")
 	}
 
-	bySource := []alert.Part{alert.PartRule, alert.PartAgent, alert.Part("evidence:authentication.source.ip")}
+	bySource := []alert.Part{alert.PartRule, alert.PartAgent, bySourceAddress}
 	if alert.CorrelationKey(first, bySource) == alert.CorrelationKey(second, bySource) {
 		t.Error("two different sources shared a key that names the source")
 	}
@@ -60,11 +62,11 @@ func TestAKeyNeverFoldsAcrossATenantOrARule(t *testing.T) {
 
 func TestAnAbsentEvidenceFieldIsNotTheSameAsAnEmptyOne(t *testing.T) {
 	absent := decided()
-	absent.Evidence = []*detectionv1.Evidence{{Field: "authentication.source.ip", Absent: true}}
+	absent.Evidence = []*detectionv1.Evidence{{Field: "authentication.network.source.ip", Absent: true}}
 	empty := decided()
-	empty.Evidence = []*detectionv1.Evidence{{Field: "authentication.source.ip", Held: ""}}
+	empty.Evidence = []*detectionv1.Evidence{{Field: "authentication.network.source.ip", Held: `""`}}
 
-	parts := []alert.Part{alert.PartRule, alert.Part("evidence:authentication.source.ip")}
+	parts := []alert.Part{alert.PartRule, bySourceAddress}
 	if alert.CorrelationKey(absent, parts) == alert.CorrelationKey(empty, parts) {
 		t.Error("a field the event did not carry keyed the same as one it carried empty")
 	}
@@ -96,7 +98,7 @@ func TestASuppressionSaysWhyAndSelectsSomething(t *testing.T) {
 
 func TestASuppressionMatchesOnTheVocabularyTheKeyUses(t *testing.T) {
 	made := decided()
-	made.Evidence = []*detectionv1.Evidence{{Field: "authentication.source.ip", Held: "203.0.113.10"}}
+	made.Evidence = []*detectionv1.Evidence{{Field: "authentication.network.source.ip", Held: `"203.0.113.10"`}}
 	now := instant(raisedAt)
 
 	tuning := tuned(t, alert.Suppression{
@@ -115,7 +117,7 @@ func TestASuppressionMatchesOnTheVocabularyTheKeyUses(t *testing.T) {
 	}
 
 	bySource := tuned(t, alert.Suppression{
-		When:   alert.Selector{alert.Part("evidence:authentication.source.ip"): {"203.0.113.10", "203.0.113.11"}},
+		When:   alert.Selector{bySourceAddress: {"203.0.113.10", "203.0.113.11"}},
 		Reason: "our own scanner range",
 	})
 	if _, hidden := bySource.Suppressed(made, now); !hidden {

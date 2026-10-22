@@ -3,10 +3,12 @@ package alert
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 )
 
@@ -24,6 +26,8 @@ const (
 
 const EvidencePrefix = "evidence:"
 
+var ErrUndeclaredField = errors.New("names a field the event contract does not declare, which no detection can ever hold")
+
 var parts = []Part{PartRule, PartAgent, PartClass, PartSeverity}
 
 func Parts() []Part { return slices.Clone(parts) }
@@ -35,18 +39,25 @@ func (p Part) Field() (string, bool) {
 	return field, evidence && field != ""
 }
 
-func (p Part) Valid() bool {
-	if _, evidence := p.Field(); evidence {
-		return true
+func (p Part) Valid() bool { return p.refusal() == nil }
+
+func (p Part) refusal() error {
+	if field, evidence := p.Field(); evidence {
+		if _, declared := detection.KindOf(detection.Field(field)); !declared {
+			return ErrUndeclaredField
+		}
+		return nil
 	}
-	return slices.Contains(parts, p)
+	if !slices.Contains(parts, p) {
+		return fmt.Errorf("names nothing an alert can be keyed by; there are %s, or %s<field>", join(parts), EvidencePrefix)
+	}
+	return nil
 }
 
 func ParsePart(written string) (Part, error) {
 	part := Part(strings.TrimSpace(written))
-	if !part.Valid() {
-		return "", fmt.Errorf("%q names nothing an alert can be keyed by; there are %s, or %s<field>",
-			written, join(parts), EvidencePrefix)
+	if err := part.refusal(); err != nil {
+		return "", fmt.Errorf("%q %w", written, err)
 	}
 	return part, nil
 }
@@ -57,12 +68,7 @@ func ParsePart(written string) (Part, error) {
 // only ever compared for equality.
 func (p Part) Of(made *detectionv1.Detection) (string, bool) {
 	if field, evidence := p.Field(); evidence {
-		for _, seen := range made.GetEvidence() {
-			if seen.GetField() == field {
-				return seen.GetHeld(), !seen.GetAbsent()
-			}
-		}
-		return "", false
+		return detection.HeldIn(made, detection.Field(field))
 	}
 
 	switch p {

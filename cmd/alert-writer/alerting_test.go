@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,7 +41,7 @@ func TestTheShippedDocumentKeysTheShippedRuleBySource(t *testing.T) {
 	if fold.Window != time.Hour || fold.Cooldown != 30*time.Minute {
 		t.Errorf("it folds on %s / %s", fold.Window, fold.Cooldown)
 	}
-	source := alert.Part(alert.EvidencePrefix + "authentication.source.ip")
+	source := alert.Part(alert.EvidencePrefix + "authentication.network.source.ip")
 	for _, part := range []alert.Part{alert.PartRule, alert.PartAgent, source} {
 		if !contains(fold.Keyed, part) {
 			t.Errorf("the key does not name %s", part)
@@ -54,6 +56,27 @@ func contains(keyed []alert.Part, part alert.Part) bool {
 		}
 	}
 	return false
+}
+
+func TestADocumentKeyingOnAFieldNobodyDeclaresStopsTheWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alerting.yml")
+	written := "schema_version: 1\nrules:\n  - id: ssh.failed_password_from_outside\n    key: [rule, agent, \"evidence:authentication.source.ip\"]\n"
+	if err := os.WriteFile(path, []byte(written), 0o600); err != nil {
+		t.Fatalf("write the document: %v", err)
+	}
+
+	tuning, err := alerting(path)
+	if err == nil {
+		t.Fatalf("the writer would start on tuning %s", tuning.ID())
+	}
+	if !errors.Is(err, alert.ErrUndeclaredField) {
+		t.Errorf("the writer was stopped for another reason: %v", err)
+	}
+	for _, said := range []string{"alerting.yml:4:", "rules[0].key[2]", "evidence:authentication.source.ip"} {
+		if !strings.Contains(err.Error(), said) {
+			t.Errorf("the refusal does not say %s: %v", said, err)
+		}
+	}
 }
 
 func TestEverySuppressionTheShippedDocumentCarriesSaysWhy(t *testing.T) {

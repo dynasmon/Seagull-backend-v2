@@ -1,5 +1,11 @@
 # 17. Noise is removed from the alert plane, never from the detection stream
 
+> Amended by [ADR 35](0035-an-alert-key-names-a-field-the-contract-declares.md):
+> an `evidence:` part names a field the event contract declares or the document
+> is refused, and it reads what the detection holds of the field — what the rule
+> compared, or what a counting or ordered rule grouped by — as the event carried
+> it.
+
 ## Context
 
 [ADR 16](0016-an-alert-is-a-detection-somebody-owns.md) gave detections a

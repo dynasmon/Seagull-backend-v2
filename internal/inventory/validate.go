@@ -5,6 +5,8 @@ import (
 	"net/netip"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 )
@@ -13,11 +15,19 @@ func Validate(record *inventoryv1.Record, now time.Time, policy event.Policy) er
 	if err := ValidateContract(record); err != nil {
 		return err
 	}
+	if size := proto.Size(record); size > MaxRecordBytes {
+		return &event.Violation{
+			Field:  "record",
+			Reason: fmt.Sprintf("encodes to %d bytes and the ceiling is %d", size, MaxRecordBytes),
+		}
+	}
 	return admissible(record.GetCollectedAt().AsTime(), now, policy)
 }
 
 // Every rule that does not depend on when the record is examined, so a replay
-// reprocesses what it exists to reprocess rather than refusing it for age.
+// reprocesses what it exists to reprocess rather than refusing it for age. What
+// a record weighs is not among them: a record a topic holds was carried, and
+// only admission decides what the backbone is asked to carry.
 func ValidateContract(record *inventoryv1.Record) error {
 	if record == nil {
 		return &event.Violation{Field: "record", Reason: "is missing"}

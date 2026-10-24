@@ -7,11 +7,14 @@ const (
 )
 
 // Every bound below is part of the assessment contract. The store's columns are
-// derived from these numbers; they are not derived from a store.
+// derived from these numbers; they are not derived from a store, and what the
+// backbone carries is derived from the bytes an assessment encodes to as the
+// gateway publishes it.
 const (
 	MaxChecks              = 512
 	MaxResults             = MaxChecks
 	MaxAssessmentsPerBatch = 16
+	MaxAssessmentBytes     = 960 << 10
 
 	MaxCheckIDLength      = 64
 	MaxTitleLength        = 256

@@ -10,9 +10,14 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"github.com/dynasmon/Seagull-backend-v2/internal/devpki"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
+	"github.com/dynasmon/Seagull-backend-v2/internal/inventory"
 	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
+	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
+	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 )
 
 func TestAgentBatchTravelsFromMutualTLSToTheBackbone(t *testing.T) {
@@ -463,5 +468,37 @@ func TestAnInventoryPayloadThatDoesNotDecodeIsRefused(t *testing.T) {
 	}
 	if code := decodeRejection(t, payload).GetCode(); code != string(ingest.CodeMalformedPayload) {
 		t.Fatalf("unexpected code %q", code)
+	}
+}
+
+func TestAnInventoryRecordAboveTheCeilingIsRefusedByItsPositionAndNeverAsUnavailable(t *testing.T) {
+	gateway := startGateway(t, gatewayOptions{maxBodyBytes: 8 << 20})
+	client := gateway.client(t, "web-01")
+
+	heavy := &inventoryv1.Record{
+		RecordId:      "inv-0000000043",
+		SchemaVersion: inventory.SchemaVersion,
+		Kind:          inventoryv1.Kind_KIND_PROCESS,
+		Mode:          inventoryv1.Mode_MODE_SNAPSHOT,
+		CollectedAt:   timestamppb.New(time.Now().UTC().Add(-time.Minute)),
+		Origin:        &eventv1.Origin{},
+		Collection:    &eventv1.Collection{Collector: "processes"},
+	}
+	if !fixtures.Weigh(heavy, inventory.MaxRecordBytes+1) {
+		t.Fatal("no process snapshot weighs one byte above the ceiling")
+	}
+	batch := fixtures.InventoryBatch("inventory-0003", fixtures.PackageScan{}.Record(), heavy)
+
+	response, payload := gateway.sendInventory(t, client, batch)
+
+	if response.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("a record the backbone cannot carry was answered %d, and an agent sends again whatever is not refused: %s", response.StatusCode, payload)
+	}
+	rejection := decodeRejection(t, payload)
+	if rejection.GetCode() != string(ingest.CodeInvalidRecord) || rejection.GetEventIndex() != 1 || rejection.GetField() != "record" {
+		t.Fatalf("the refusal does not name the record it refuses: %+v", rejection)
+	}
+	if len(gateway.backbone.inventory) != 0 {
+		t.Fatal("a batch holding a record the backbone cannot carry reached the backbone")
 	}
 }

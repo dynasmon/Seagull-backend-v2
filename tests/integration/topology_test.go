@@ -39,13 +39,14 @@ func declaredTopic(t *testing.T, addresses []string, partitions int32, retention
 	})
 
 	return broker.Topic{
-		Name:        name,
-		Partitions:  partitions,
-		Replicas:    1,
-		Retention:   retention,
-		Cleanup:     "delete",
-		Compression: "zstd",
-		MinInSync:   1,
+		Name:            name,
+		Partitions:      partitions,
+		Replicas:        1,
+		Retention:       retention,
+		Cleanup:         "delete",
+		Compression:     "zstd",
+		MinInSync:       1,
+		MaxMessageBytes: 1 << 20,
 	}
 }
 
@@ -196,7 +197,7 @@ func TestAGatewayRefusesToServeWithoutTheTopicItPublishesTo(t *testing.T) {
 	topic := declaredTopic(t, addresses, 6, 48*time.Hour)
 
 	publisher, err := broker.NewPublisher(broker.Config{
-		Brokers: addresses, Topic: topic.Name, ClientID: "integration-test",
+		Brokers: addresses, Topic: topic.Name, MaxMessageBytes: topic.MaxMessageBytes, ClientID: "integration-test",
 	})
 	if err != nil {
 		t.Fatalf("build publisher: %v", err)
@@ -233,7 +234,7 @@ func TestVerificationReportsRetentionDriftWithoutRefusingToServe(t *testing.T) {
 	createTopic(t, addresses, topic.Name, 4, "3600000")
 
 	publisher, err := broker.NewPublisher(broker.Config{
-		Brokers: addresses, Topic: topic.Name, ClientID: "integration-test",
+		Brokers: addresses, Topic: topic.Name, MaxMessageBytes: topic.MaxMessageBytes, ClientID: "integration-test",
 	})
 	if err != nil {
 		t.Fatalf("build publisher: %v", err)
@@ -268,7 +269,7 @@ func TestVerificationRefusesToServeOnACleanupPolicyThatDisagrees(t *testing.T) {
 	})
 
 	publisher, err := broker.NewPublisher(broker.Config{
-		Brokers: addresses, Topic: topic.Name, ClientID: "integration-test",
+		Brokers: addresses, Topic: topic.Name, MaxMessageBytes: topic.MaxMessageBytes, ClientID: "integration-test",
 	})
 	if err != nil {
 		t.Fatalf("build publisher: %v", err)

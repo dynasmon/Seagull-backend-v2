@@ -78,9 +78,10 @@ func start(t *testing.T, options replicaOptions) *replica {
 	}
 
 	detections, err := broker.NewDetections(broker.Config{
-		Brokers:  options.addresses,
-		Topic:    options.found,
-		ClientID: "integration-test",
+		Brokers:         options.addresses,
+		Topic:           options.found,
+		MaxMessageBytes: temporaryCarriage,
+		ClientID:        "integration-test",
 	})
 	if err != nil {
 		consumer.Close()
@@ -155,7 +156,7 @@ func admitFrom(t *testing.T, addresses []string, topic, owner, agent string, fro
 func admitAt(t *testing.T, addresses []string, topic, owner, agent string, from, count int, at time.Time) {
 	t.Helper()
 
-	publisher, err := broker.NewPublisher(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	publisher, err := broker.NewPublisher(broker.Config{Brokers: addresses, Topic: topic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build the publisher: %v", err)
 	}

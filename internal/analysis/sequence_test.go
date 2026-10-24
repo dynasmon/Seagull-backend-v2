@@ -54,6 +54,8 @@ type timed struct {
 	outcome  eventv1.Outcome
 	source   string
 	observed time.Duration
+	agent    string
+	id       string
 }
 
 func staged(t *testing.T, seen timed) analysis.Record {
@@ -62,8 +64,12 @@ func staged(t *testing.T, seen timed) analysis.Record {
 	if seen.source == "" {
 		seen.source = "203.0.113.10"
 	}
+	if seen.id == "" {
+		seen.id = fmt.Sprintf("%s-%s-%d", seen.source, seen.outcome, seen.at.UnixNano())
+	}
 	record := fixtures.SSHAuthentication{
-		EventID:  fmt.Sprintf("%s-%s-%d", seen.source, seen.outcome, seen.at.UnixNano()),
+		EventID:  seen.id,
+		AgentID:  seen.agent,
 		SourceIP: seen.source,
 		Outcome:  seen.outcome,
 		At:       seen.at,

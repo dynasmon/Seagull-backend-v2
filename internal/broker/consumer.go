@@ -23,7 +23,6 @@ const (
 type endOffsetReader interface {
 	ListStartOffsets(ctx context.Context, topics ...string) (kadm.ListedOffsets, error)
 	ListEndOffsets(ctx context.Context, topics ...string) (kadm.ListedOffsets, error)
-	ListOffsetsAfterMilli(ctx context.Context, millisecond int64, topics ...string) (kadm.ListedOffsets, error)
 	ListOffsetsAfter(ctx context.Context, topic string, milliseconds map[int32]int64) (kadm.ListedOffsets, error)
 }
 

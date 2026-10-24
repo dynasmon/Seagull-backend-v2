@@ -13,6 +13,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
+	"github.com/dynasmon/Seagull-backend-v2/internal/inventory"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/vulnerability"
 )
@@ -119,7 +120,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupDelete,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
-			MaxMessageBytes: defaultCarriage,
+			MaxMessageBytes: carrying(inventory.MaxRecordBytes),
 		},
 		InventoryQuarantine: Topic{
 			Name:            parser.String("SEAGULL_BACKBONE_INVENTORY_QUARANTINE_TOPIC", "security.inventory.quarantine"),
@@ -129,7 +130,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupDelete,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
-			MaxMessageBytes: quarantining(defaultCarriage),
+			MaxMessageBytes: quarantining(carrying(inventory.MaxRecordBytes)),
 		},
 		Advisories: Topic{
 			Name:            parser.String("SEAGULL_BACKBONE_ADVISORIES_TOPIC", "security.advisories"),

@@ -159,15 +159,21 @@ every run and reports drift only for settings a broker answers for.
 State held in a process does not move with a partition, so whenever the group
 hands the engine one — at startup and at every rebalance — the engine is put back
 to the first record inside the window its running rules need and reads forward
-from there. That is what `SEAGULL_DETECTION_STATE_WINDOW` costs on a restart,
+from there. The window is measured back from the last record the engine
+committed on that partition, never from the clock, so an engine that was stopped
+or behind for longer than the window still rebuilds the one it was in (ADR 36).
+That is what `SEAGULL_DETECTION_STATE_WINDOW` costs on a restart,
 widened by `SEAGULL_EVENT_MAX_CLOCK_SKEW` because a window is event time and the
 stream is ordered by arrival. A deployment running no stateful rule reads
 nothing back, and a reader further behind than the window keeps its position
 rather than being moved forward onto telemetry nobody has decided.
 `backbone_state_rebuild_partitions_total` and
 `backbone_state_rebuild_records_total` say how often that happened and how much
-it cost; `backbone_partitions_held` and `backbone_partitions_moved_total` say
-what the group is doing.
+it cost; `backbone_state_rebuild_incomplete_total` counts, by partition, a window
+the topic no longer held because retention passed it, which is also logged as
+`state_rebuild_incomplete` with the reason — records nothing decided were
+removed, or the last record committed was; `backbone_partitions_held` and
+`backbone_partitions_moved_total` say what the group is doing.
 
 `security.events.raw` is keyed by the agent. A rule whose `group_by` includes
 the agent is exact at any number of replicas; one that groups across agents is

@@ -243,7 +243,8 @@ A rule that counts or orders remembers a bounded window of events, held by the
 process that decided them. That state does not move with a partition, so
 whenever the group hands the engine a partition — at startup and at every
 rebalance — the engine is put back to the first record inside the window its
-rules need and reads forward. The window is rebuilt from the stream rather than
+rules need, measured back from the last record it committed there rather than
+from the clock, and reads forward. The window is rebuilt from the stream rather than
 from a checkpoint, because an observation names the event it came from and every
 window is measured in event time: replaying decides the same detections, under
 the same names, and counts nothing twice.

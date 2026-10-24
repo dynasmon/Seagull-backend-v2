@@ -22,10 +22,11 @@ const (
 var schemaVersion = strconv.Itoa(event.SchemaVersion)
 
 type Config struct {
-	Brokers  []string
-	Topic    string
-	ClientID string
-	Security Security
+	Brokers         []string
+	Topic           string
+	MaxMessageBytes int32
+	ClientID        string
+	Security        Security
 }
 
 type Publisher struct {

@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"time"
@@ -22,7 +23,10 @@ import (
 type Recovery func(held int32) (time.Duration, error)
 
 // Deciding the replayed suffix again writes what it already wrote, because a
-// detection is named by the rule and the events it was decided from.
+// detection is named by the rule and the events it was decided from. The window
+// is measured back from the last record each partition committed and never from
+// the clock: a reader stopped or behind for longer than the window was still in
+// the middle of one, and a window the topic no longer holds is reported.
 func (c *Consumer) rebuild(ctx context.Context, offsets map[string]map[int32]kgo.Offset) (map[string]map[int32]kgo.Offset, error) {
 	if c.recovery == nil {
 		return offsets, nil
@@ -39,24 +43,85 @@ func (c *Consumer) rebuild(ctx context.Context, offsets map[string]map[int32]kgo
 }
 
 func (c *Consumer) rewind(ctx context.Context, offsets map[string]map[int32]kgo.Offset, window time.Duration) (map[string]map[int32]kgo.Offset, error) {
-	from := time.Now().Add(-window)
-	listed, err := c.endOffsets.ListOffsetsAfterMilli(ctx, from.UnixMilli(), c.topic)
+	committed := make(map[int32]int64, len(offsets[c.topic]))
+	for partition, position := range offsets[c.topic] {
+		if offset := position.EpochOffset().Offset; offset > 0 {
+			committed[partition] = offset
+		}
+	}
+	if len(committed) == 0 {
+		return offsets, nil
+	}
+
+	starts, err := c.endOffsets.ListStartOffsets(ctx, c.topic)
+	if err != nil {
+		return nil, c.refuse(fmt.Errorf("read where %s starts to rebuild detection state: %w", c.topic, err))
+	}
+	held := make(map[int32]int64, len(committed))
+	for partition, position := range committed {
+		start, found := starts.Lookup(c.topic, partition)
+		switch {
+		case found && start.Err != nil:
+			return nil, c.refuse(fmt.Errorf("read where partition %d of %s starts: %w", partition, c.topic, start.Err))
+		case !found || start.Offset < 0:
+			return nil, c.refuse(fmt.Errorf("the backbone did not say where partition %d of %s starts", partition, c.topic))
+		}
+		switch {
+		case position < start.Offset:
+			c.cut(partition, position, "undecided_records_gone")
+		case position-1 < start.Offset:
+			c.cut(partition, position, "last_committed_record_gone")
+		default:
+			held[partition] = position
+		}
+	}
+	if len(held) == 0 {
+		return offsets, nil
+	}
+
+	stopped, err := c.lastRecordTimes(ctx, held)
+	if err != nil {
+		return nil, c.refuse(fmt.Errorf("read the last records %s committed to rebuild detection state: %w", c.topic, err))
+	}
+	from := make(map[int32]int64, len(held))
+	for partition, position := range held {
+		last, found := stopped[partition]
+		if !found {
+			c.cut(partition, position, "last_committed_record_gone")
+			continue
+		}
+		from[partition] = last.Add(-window).UnixMilli()
+	}
+	if len(from) == 0 {
+		return offsets, nil
+	}
+
+	listed, err := c.endOffsets.ListOffsetsAfter(ctx, c.topic, from)
 	if err != nil {
 		return nil, c.refuse(fmt.Errorf("read back %s of %s to rebuild detection state: %w", window, c.topic, err))
 	}
-
 	rebuilt := maps.Clone(offsets)
 	rebuilt[c.topic] = maps.Clone(offsets[c.topic])
-	for partition, position := range offsets[c.topic] {
-		committed := position.EpochOffset().Offset
+	for partition := range from {
+		position := held[partition]
 		earliest, found := listed.Lookup(c.topic, partition)
-		if committed < 0 || !found || earliest.Err != nil || earliest.Offset < 0 || earliest.Offset >= committed {
+		if !found || earliest.Err != nil || earliest.Offset < 0 || earliest.Offset >= position {
 			continue
 		}
 		rebuilt[c.topic][partition] = kgo.NewOffset().At(earliest.Offset).WithEpoch(-1)
-		c.metrics.rebuilt(c.topic, committed-earliest.Offset)
+		c.metrics.rebuilt(c.topic, position-earliest.Offset)
 	}
 	return rebuilt, nil
+}
+
+func (c *Consumer) cut(partition int32, position int64, reason string) {
+	c.metrics.cut(c.topic, partition)
+	c.logger.Warn("state_rebuild_incomplete",
+		slog.String("topic", c.topic),
+		slog.Int("partition", int(partition)),
+		slog.Int64("position", position),
+		slog.String("reason", reason),
+	)
 }
 
 func (c *Consumer) took(assigned map[string][]int32) {

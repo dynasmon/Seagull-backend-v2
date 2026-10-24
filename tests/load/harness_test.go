@@ -550,7 +550,7 @@ func recordsOn(t *testing.T, addresses []string, topic string) int64 {
 
 func realBackbone(t *testing.T, addresses []string, topic string) *broker.Publisher {
 	t.Helper()
-	publisher, err := broker.NewPublisher(broker.Config{Brokers: addresses, Topic: topic, ClientID: "load-gateway"})
+	publisher, err := broker.NewPublisher(broker.Config{Brokers: addresses, Topic: topic, MaxMessageBytes: 1 << 20, ClientID: "load-gateway"})
 	if err != nil {
 		t.Fatalf("connect to the backbone: %v", err)
 	}

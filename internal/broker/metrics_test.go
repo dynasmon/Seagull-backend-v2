@@ -100,10 +100,6 @@ func (s staticEndOffsets) ListEndOffsets(context.Context, ...string) (kadm.Liste
 	return s.offsets, s.err
 }
 
-func (s staticEndOffsets) ListOffsetsAfterMilli(context.Context, int64, ...string) (kadm.ListedOffsets, error) {
-	return s.after, s.err
-}
-
 func (s staticEndOffsets) ListOffsetsAfter(context.Context, string, map[int32]int64) (kadm.ListedOffsets, error) {
 	return s.after, s.err
 }

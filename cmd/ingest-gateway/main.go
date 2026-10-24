@@ -46,10 +46,11 @@ func gateway(ctx context.Context) error {
 	}
 
 	publisher, err := broker.NewPublisher(broker.Config{
-		Brokers:  settings.brokers,
-		Topic:    settings.topology.Events.Name,
-		ClientID: settings.admissionRules.Gateway,
-		Security: settings.security,
+		Brokers:         settings.brokers,
+		Topic:           settings.topology.Events.Name,
+		MaxMessageBytes: settings.topology.Events.MaxMessageBytes,
+		ClientID:        settings.admissionRules.Gateway,
+		Security:        settings.security,
 	})
 	if err != nil {
 		return err
@@ -57,10 +58,11 @@ func gateway(ctx context.Context) error {
 	defer publisher.Close()
 
 	assets, err := broker.NewInventory(broker.Config{
-		Brokers:  settings.brokers,
-		Topic:    settings.topology.Inventory.Name,
-		ClientID: settings.inventoryRules.Gateway,
-		Security: settings.security,
+		Brokers:         settings.brokers,
+		Topic:           settings.topology.Inventory.Name,
+		MaxMessageBytes: settings.topology.Inventory.MaxMessageBytes,
+		ClientID:        settings.inventoryRules.Gateway,
+		Security:        settings.security,
 	})
 	if err != nil {
 		return err
@@ -68,10 +70,11 @@ func gateway(ctx context.Context) error {
 	defer assets.Close()
 
 	reports, err := broker.NewStatus(broker.Config{
-		Brokers:  settings.brokers,
-		Topic:    settings.topology.Status.Name,
-		ClientID: settings.statusRules.Gateway,
-		Security: settings.security,
+		Brokers:         settings.brokers,
+		Topic:           settings.topology.Status.Name,
+		MaxMessageBytes: settings.topology.Status.MaxMessageBytes,
+		ClientID:        settings.statusRules.Gateway,
+		Security:        settings.security,
 	})
 	if err != nil {
 		return err
@@ -79,10 +82,11 @@ func gateway(ctx context.Context) error {
 	defer reports.Close()
 
 	findings, err := broker.NewAssessments(broker.Config{
-		Brokers:  settings.brokers,
-		Topic:    settings.topology.Assessments.Name,
-		ClientID: settings.assessments.Gateway,
-		Security: settings.security,
+		Brokers:         settings.brokers,
+		Topic:           settings.topology.Assessments.Name,
+		MaxMessageBytes: settings.topology.Assessments.MaxMessageBytes,
+		ClientID:        settings.assessments.Gateway,
+		Security:        settings.security,
 	})
 	if err != nil {
 		return err

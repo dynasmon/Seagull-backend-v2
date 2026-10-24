@@ -40,3 +40,4 @@ rediscovered by reading the code.
 - [34. A stored event is named by the agent that sent it, and a sorting key changes by a rebuild the migrator carries out](0034-a-stored-event-is-named-by-the-agent-that-sent-it.md)
 - [35. An alert key names a field the event contract declares, and reads what the detection holds in it](0035-an-alert-key-names-a-field-the-contract-declares.md)
 - [36. Detection state is read back from the last record a reader committed, never from the clock](0036-state-is-read-back-from-the-last-record-committed.md)
+- [37. Every topic declares the largest batch it carries, and the gateway admits no record its topic would refuse](0037-a-record-is-bounded-by-what-its-topic-carries.md)

@@ -307,3 +307,22 @@ func TestAcknowledgementCarriesTheCountTheAgentSent(t *testing.T) {
 		t.Fatalf("expected %d, got %d", len(events), acknowledgement.GetReceived())
 	}
 }
+
+func TestAnEventHeavierThanTheBackboneCarriesIsRefusedForGood(t *testing.T) {
+	backbone := &recordingBackbone{}
+	admitter := newAdmitter(t, backbone)
+
+	heavy := sample()
+	if !fixtures.Bloat(heavy, event.MaxEventBytes+4<<10) {
+		t.Fatal("no event weighs that much")
+	}
+	_, err := admitter.Admit(context.Background(), identity(), "acme", fixtures.Batch("batch-1", sample(), heavy))
+
+	rejection := rejectionOf(t, err)
+	if rejection.Code != ingest.CodeInvalidEvent || rejection.EventIndex != 1 || rejection.Field != "event" {
+		t.Fatalf("an event above the ceiling was refused as %+v, and an agent sends again whatever is not refused by its index", rejection)
+	}
+	if len(backbone.published) != 0 {
+		t.Fatal("a batch holding an event the backbone cannot carry reached the backbone")
+	}
+}

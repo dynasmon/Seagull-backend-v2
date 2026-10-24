@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
 	"github.com/dynasmon/Seagull-backend-v2/internal/inventory"
@@ -220,6 +223,62 @@ func TestAnInvalidInventoryRecordNamesItsPositionAndField(t *testing.T) {
 	}
 	if len(backbone.published) != 0 {
 		t.Fatal("a batch holding an invalid record reached the backbone")
+	}
+}
+
+func weighing(t *testing.T, size int, stamped bool) *inventoryv1.Record {
+	t.Helper()
+	snapshot := &inventoryv1.Record{
+		RecordId:      "inv-0000000042",
+		SchemaVersion: inventory.SchemaVersion,
+		Kind:          inventoryv1.Kind_KIND_PROCESS,
+		Mode:          inventoryv1.Mode_MODE_SNAPSHOT,
+		CollectedAt:   timestamppb.New(admissionClock.Add(-time.Minute)),
+		Origin:        &eventv1.Origin{Host: &eventv1.Host{Hostname: "web-01"}},
+		Collection:    &eventv1.Collection{Collector: "processes"},
+	}
+	if stamped {
+		snapshot.Origin.AgentId, snapshot.Origin.TenantId = "web-01", "acme"
+		snapshot.Reception = &eventv1.Reception{IngestTime: timestamppb.New(admissionClock), Gateway: "gateway-a", BatchId: "batch-1"}
+	}
+	if !fixtures.Weigh(snapshot, size) {
+		t.Fatalf("no process snapshot encodes to %d bytes", size)
+	}
+	return snapshot
+}
+
+func TestAnInventoryRecordHeavierThanTheBackboneCarriesIsRefusedForGood(t *testing.T) {
+	backbone := &recordingInventory{}
+	admitter := newInventoryAdmitter(t, backbone)
+
+	_, err := admitter.Admit(context.Background(), identity(), "acme",
+		fixtures.InventoryBatch("batch-1", scan(), weighing(t, inventory.MaxRecordBytes+1, true)))
+
+	rejection := rejectionOf(t, err)
+	if rejection.Code != ingest.CodeInvalidRecord || rejection.EventIndex != 1 || rejection.Field != "record" {
+		t.Fatalf("a record above the ceiling was refused as %+v, and an agent sends again whatever is not refused by its index", rejection)
+	}
+	if len(backbone.published) != 0 {
+		t.Fatal("a batch holding a record the backbone cannot carry reached the backbone")
+	}
+}
+
+func TestAnInventoryRecordIsWeighedAsTheGatewayPublishesIt(t *testing.T) {
+	backbone := &recordingInventory{}
+	admitter := newInventoryAdmitter(t, backbone)
+
+	stamped := weighing(t, inventory.MaxRecordBytes, true)
+	if _, err := admitter.Admit(context.Background(), identity(), "acme", fixtures.InventoryBatch("batch-1", stamped)); err != nil {
+		t.Fatalf("a record weighing the ceiling with the platform's own stamp was refused: %v", err)
+	}
+	if size := proto.Size(backbone.last()[0]); size != inventory.MaxRecordBytes {
+		t.Fatalf("the record reached the backbone weighing %d bytes", size)
+	}
+
+	unstamped := weighing(t, inventory.MaxRecordBytes, false)
+	_, err := admitter.Admit(context.Background(), identity(), "acme", fixtures.InventoryBatch("batch-1", unstamped))
+	if rejection := rejectionOf(t, err); rejection.Field != "record" {
+		t.Fatalf("a record weighing the ceiling before the gateway stamped it was refused as %+v", rejection)
 	}
 }
 

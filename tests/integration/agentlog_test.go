@@ -83,7 +83,7 @@ func TestARevokedAgentIsRefusedByAGatewayThatWasNotRunning(t *testing.T) {
 	addresses := brokers(t)
 	topic := compactedAgentTopic(t, addresses)
 
-	publisher, err := broker.NewAgents(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	publisher, err := broker.NewAgents(broker.Config{Brokers: addresses, Topic: topic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build an admission publisher: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestAGatewayThatWasNotRunningPlacesEachAgentInTheTenantTheRegistryRecorded(
 	addresses := brokers(t)
 	topic := compactedAgentTopic(t, addresses)
 
-	publisher, err := broker.NewAgents(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	publisher, err := broker.NewAgents(broker.Config{Brokers: addresses, Topic: topic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build an admission publisher: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestAnAgentLetInAgainIsAdmittedByAGatewayThatStartsAfterwards(t *testing.T)
 	addresses := brokers(t)
 	topic := compactedAgentTopic(t, addresses)
 
-	publisher, err := broker.NewAgents(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	publisher, err := broker.NewAgents(broker.Config{Brokers: addresses, Topic: topic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build an admission publisher: %v", err)
 	}

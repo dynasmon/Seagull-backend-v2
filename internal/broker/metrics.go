@@ -20,6 +20,7 @@ type ConsumerMetrics struct {
 	lag          *prometheus.GaugeVec
 	rebuilds     *prometheus.CounterVec
 	replayed     *prometheus.CounterVec
+	incomplete   *prometheus.CounterVec
 	movements    *prometheus.CounterVec
 	held         *prometheus.GaugeVec
 	mu           sync.Mutex
@@ -81,6 +82,12 @@ func NewConsumerMetrics(registry *metrics.Registry) *ConsumerMetrics {
 			Name:      "state_rebuild_records_total",
 			Help:      "Records a rebuild put back in front of the reader.",
 		}, []string{"topic"}),
+		incomplete: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "backbone",
+			Name:      "state_rebuild_incomplete_total",
+			Help:      "Partitions whose rebuild could not reach the start of their window, because the topic no longer holds it.",
+		}, []string{"topic", "partition"}),
 		movements: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: "backbone",
@@ -103,6 +110,7 @@ func NewConsumerMetrics(registry *metrics.Registry) *ConsumerMetrics {
 		instruments.lag,
 		instruments.rebuilds,
 		instruments.replayed,
+		instruments.incomplete,
 		instruments.movements,
 		instruments.held,
 	)
@@ -202,6 +210,10 @@ func (m *ConsumerMetrics) commitFailed() { m.commits.Inc() }
 func (m *ConsumerMetrics) rebuilt(topic string, records int64) {
 	m.rebuilds.WithLabelValues(topic).Inc()
 	m.replayed.WithLabelValues(topic).Add(float64(records))
+}
+
+func (m *ConsumerMetrics) cut(topic string, partition int32) {
+	m.incomplete.WithLabelValues(topic, label(partition)).Inc()
 }
 
 func (m *ConsumerMetrics) moved(topic, movement string, partitions int) {

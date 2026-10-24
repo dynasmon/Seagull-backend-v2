@@ -86,9 +86,14 @@ func TestLagRefreshFailureIsObservable(t *testing.T) {
 }
 
 type staticEndOffsets struct {
+	starts  kadm.ListedOffsets
 	offsets kadm.ListedOffsets
 	after   kadm.ListedOffsets
 	err     error
+}
+
+func (s staticEndOffsets) ListStartOffsets(context.Context, ...string) (kadm.ListedOffsets, error) {
+	return s.starts, s.err
 }
 
 func (s staticEndOffsets) ListEndOffsets(context.Context, ...string) (kadm.ListedOffsets, error) {
@@ -96,6 +101,10 @@ func (s staticEndOffsets) ListEndOffsets(context.Context, ...string) (kadm.Liste
 }
 
 func (s staticEndOffsets) ListOffsetsAfterMilli(context.Context, int64, ...string) (kadm.ListedOffsets, error) {
+	return s.after, s.err
+}
+
+func (s staticEndOffsets) ListOffsetsAfter(context.Context, string, map[int32]int64) (kadm.ListedOffsets, error) {
 	return s.after, s.err
 }
 

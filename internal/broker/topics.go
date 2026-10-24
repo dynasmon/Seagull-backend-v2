@@ -12,7 +12,10 @@ import (
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentstatus"
+	"github.com/dynasmon/Seagull-backend-v2/internal/assessment"
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
+	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	"github.com/dynasmon/Seagull-backend-v2/internal/inventory"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/vulnerability"
@@ -77,7 +80,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupDelete,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
-			MaxMessageBytes: defaultCarriage,
+			MaxMessageBytes: carrying(event.MaxEventBytes),
 		},
 		Quarantine: Topic{
 			Name:            parser.String("SEAGULL_BACKBONE_QUARANTINE_TOPIC", "security.events.quarantine"),
@@ -87,7 +90,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupDelete,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
-			MaxMessageBytes: quarantining(defaultCarriage),
+			MaxMessageBytes: quarantining(carrying(event.MaxEventBytes)),
 		},
 		Detections: Topic{
 			Name:            parser.String("SEAGULL_BACKBONE_DETECTIONS_TOPIC", "security.detections"),
@@ -176,7 +179,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupCompact,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
-			MaxMessageBytes: defaultCarriage,
+			MaxMessageBytes: carrying(agentstatus.MaxReportBytes),
 		},
 		StatusQuarantine: Topic{
 			Name:            parser.String("SEAGULL_BACKBONE_STATUS_QUARANTINE_TOPIC", "security.agents.status.quarantine"),
@@ -186,7 +189,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupDelete,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
-			MaxMessageBytes: quarantining(defaultCarriage),
+			MaxMessageBytes: quarantining(carrying(agentstatus.MaxReportBytes)),
 		},
 		// Every assessment and not the newest of each agent, unlike status: an
 		// agent keeps an assessment until the platform holds it so that what a
@@ -199,7 +202,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupDelete,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
-			MaxMessageBytes: defaultCarriage,
+			MaxMessageBytes: carrying(assessment.MaxAssessmentBytes),
 		},
 		AssessmentsQuarantine: Topic{
 			Name:            parser.String("SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_TOPIC", "security.assessments.quarantine"),
@@ -209,7 +212,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupDelete,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
-			MaxMessageBytes: quarantining(defaultCarriage),
+			MaxMessageBytes: quarantining(carrying(assessment.MaxAssessmentBytes)),
 		},
 	}
 }

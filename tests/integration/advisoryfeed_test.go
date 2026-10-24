@@ -142,7 +142,7 @@ func (r advisoryHistory) Replay(ctx context.Context, learn func(*vulnerabilityv1
 func importerOf(t *testing.T, addresses []string, topic string, served *mirror, now func() time.Time) *advisoryfeed.Importer {
 	t.Helper()
 
-	publisher, err := broker.NewAdvisories(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	publisher, err := broker.NewAdvisories(broker.Config{Brokers: addresses, Topic: topic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build the advisory publisher: %v", err)
 	}
@@ -207,7 +207,7 @@ func writing(t *testing.T, addresses []string, topic string, store *clickhouse.A
 	}
 	t.Cleanup(consumer.Close)
 
-	refused, err := broker.NewQuarantine(broker.Config{Brokers: addresses, Topic: temporaryTopic(t, addresses), ClientID: "integration-test"})
+	refused, err := broker.NewQuarantine(broker.Config{Brokers: addresses, Topic: temporaryTopic(t, addresses), MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build the quarantine publisher: %v", err)
 	}

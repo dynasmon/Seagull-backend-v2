@@ -163,6 +163,7 @@ func TestAnIncompleteTopicIsRefused(t *testing.T) {
 			topic.Replicas, topic.MinInSync = 2, 3
 			return topic
 		},
+		"no largest batch": func(topic Topic) Topic { topic.MaxMessageBytes = 0; return topic },
 	} {
 		if err := broken(complete).Validate(); err == nil {
 			t.Errorf("a topic with %s was accepted", name)
@@ -325,6 +326,29 @@ func TestFewerInSyncReplicasThanDeclaredBreaksTheTopology(t *testing.T) {
 	stricter := difference{key: minInSyncKey, held: "3", declared: "2", contract: atLeast}
 	if stricter.breaks() {
 		t.Error("a stricter durability floor stopped a process from serving")
+	}
+}
+
+func TestATopicCarryingLessThanDeclaredBreaksTheTopology(t *testing.T) {
+	topic := Topic{Name: "t", Partitions: 1, Replicas: 1, Cleanup: cleanupCompact, Compression: compressionZstd, MinInSync: 1, MaxMessageBytes: 4_259_840}
+
+	var carried *setting
+	for _, entry := range topic.settings() {
+		if entry.key == maxMessageKey {
+			carried = &entry
+		}
+	}
+	if carried == nil || carried.value != "4259840" {
+		t.Fatalf("the largest batch reaches the broker as %+v", carried)
+	}
+
+	short := difference{key: maxMessageKey, held: "1048576", declared: carried.value, contract: carried.contract}
+	if !short.breaks() {
+		t.Error("a topic refusing a batch the topology declares it carries was reported as drift, so a record the gateway admitted would never be durable")
+	}
+	wider := difference{key: maxMessageKey, held: "8388608", declared: carried.value, contract: carried.contract}
+	if wider.breaks() {
+		t.Error("a topic carrying more than the topology declares stopped a process from serving")
 	}
 }
 

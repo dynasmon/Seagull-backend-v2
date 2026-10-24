@@ -92,6 +92,7 @@ func engine(ctx context.Context) error {
 		Metrics:      broker.NewConsumerMetrics(platform.Metrics()),
 		Recovery:     recovering(engineRuntime, settings.topology.Events.Partitions, registry, platform.Logger()),
 		Security:     settings.security,
+		Logger:       platform.Logger(),
 	})
 	if err != nil {
 		return err

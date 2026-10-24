@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/pkg/kmsg"
 )
 
 const (
@@ -18,8 +21,51 @@ const (
 )
 
 type endOffsetReader interface {
+	ListStartOffsets(ctx context.Context, topics ...string) (kadm.ListedOffsets, error)
 	ListEndOffsets(ctx context.Context, topics ...string) (kadm.ListedOffsets, error)
-	ListOffsetsAfterMilli(ctx context.Context, millisecond int64, topics ...string) (kadm.ListedOffsets, error)
+	ListOffsetsAfter(ctx context.Context, topic string, milliseconds map[int32]int64) (kadm.ListedOffsets, error)
+}
+
+type offsetLister struct {
+	*kadm.Client
+	client *kgo.Client
+}
+
+func (l offsetLister) ListOffsetsAfter(ctx context.Context, topic string, milliseconds map[int32]int64) (kadm.ListedOffsets, error) {
+	asked := kmsg.NewListOffsetsRequestTopic()
+	asked.Topic = topic
+	for partition, millisecond := range milliseconds {
+		one := kmsg.NewListOffsetsRequestTopicPartition()
+		one.Partition = partition
+		one.Timestamp = millisecond
+		asked.Partitions = append(asked.Partitions, one)
+	}
+	request := kmsg.NewPtrListOffsetsRequest()
+	request.Topics = append(request.Topics, asked)
+
+	listed := kadm.ListedOffsets{topic: make(map[int32]kadm.ListedOffset, len(milliseconds))}
+	for _, shard := range l.client.RequestSharded(ctx, request) {
+		if shard.Err != nil {
+			return nil, shard.Err
+		}
+		answer, ok := shard.Resp.(*kmsg.ListOffsetsResponse)
+		if !ok {
+			return nil, fmt.Errorf("the backbone answered a listing of %s with %T", topic, shard.Resp)
+		}
+		for _, answered := range answer.Topics {
+			for _, partition := range answered.Partitions {
+				listed[topic][partition.Partition] = kadm.ListedOffset{
+					Topic:       answered.Topic,
+					Partition:   partition.Partition,
+					Timestamp:   partition.Timestamp,
+					Offset:      partition.Offset,
+					LeaderEpoch: partition.LeaderEpoch,
+					Err:         kerr.ErrorForCode(partition.ErrorCode),
+				}
+			}
+		}
+	}
+	return listed, nil
 }
 
 type Record struct {
@@ -40,18 +86,21 @@ type ConsumerConfig struct {
 	FetchMaxWait time.Duration
 	Metrics      *ConsumerMetrics
 	Security     Security
+	Logger       *slog.Logger
 
 	Recovery Recovery
 }
 
 type Consumer struct {
-	client     *kgo.Client
-	topic      string
-	group      string
-	maxRecords int
-	metrics    *ConsumerMetrics
-	endOffsets endOffsetReader
-	recovery   Recovery
+	client          *kgo.Client
+	topic           string
+	group           string
+	maxRecords      int
+	metrics         *ConsumerMetrics
+	endOffsets      endOffsetReader
+	recovery        Recovery
+	lastRecordTimes func(ctx context.Context, positions map[int32]int64) (map[int32]time.Time, error)
+	logger          *slog.Logger
 
 	mu       sync.Mutex
 	assigned map[int32]struct{}
@@ -76,12 +125,17 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 		return nil, errors.New("a backbone consumer needs metrics")
 	}
 
+	logger := config.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
 	consumer := &Consumer{
 		topic:      config.Topic,
 		group:      config.Group,
 		maxRecords: config.MaxRecords,
 		metrics:    config.Metrics,
 		recovery:   config.Recovery,
+		logger:     logger,
 		assigned:   make(map[int32]struct{}),
 	}
 
@@ -89,6 +143,7 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 	if err != nil {
 		return nil, err
 	}
+	consumer.lastRecordTimes = readLastRecordTimes(config, secured)
 
 	client, err := kgo.NewClient(append([]kgo.Opt{
 		kgo.SeedBrokers(config.Brokers...),
@@ -113,7 +168,7 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 	}
 
 	consumer.client = client
-	consumer.endOffsets = kadm.NewClient(client)
+	consumer.endOffsets = offsetLister{Client: kadm.NewClient(client), client: client}
 	return consumer, nil
 }
 

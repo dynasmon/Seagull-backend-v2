@@ -149,6 +149,11 @@ func (r *replica) failed(t *testing.T) error {
 // that agent's key chooses and inside any window a rule declares.
 func admitFrom(t *testing.T, addresses []string, topic, owner, agent string, from, count int) {
 	t.Helper()
+	admitAt(t, addresses, topic, owner, agent, from, count, time.Now().UTC())
+}
+
+func admitAt(t *testing.T, addresses []string, topic, owner, agent string, from, count int, at time.Time) {
+	t.Helper()
 
 	publisher, err := broker.NewPublisher(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
 	if err != nil {
@@ -165,7 +170,6 @@ func admitFrom(t *testing.T, addresses []string, topic, owner, agent string, fro
 		t.Fatalf("build the admitter: %v", err)
 	}
 
-	at := time.Now().UTC()
 	batch := fixtures.Batch(fmt.Sprintf("batch-%s-%d", agent, from))
 	for index := from; index < from+count; index++ {
 		batch.Events = append(batch.Events, fixtures.SSHAuthentication{
@@ -210,6 +214,11 @@ func detected(t *testing.T, addresses []string, topic string, wanted int, within
 // fifteen events before, five after, and a threshold of twenty.
 func acrossARestart(t *testing.T) *detection.Program {
 	t.Helper()
+	return acrossARestartWithin(t, 10*time.Minute)
+}
+
+func acrossARestartWithin(t *testing.T, within time.Duration) *detection.Program {
+	t.Helper()
 
 	program, err := detection.Compile(detection.Rule{
 		ID:          "authentication.repeated_failures",
@@ -224,7 +233,7 @@ func acrossARestart(t *testing.T) *detection.Program {
 		},
 		Count: detection.Count{
 			AtLeast: 20,
-			Within:  10 * time.Minute,
+			Within:  within,
 			GroupBy: []detection.Field{"authentication.network.source.ip", "origin.agent_id"},
 		},
 		Severity: detection.High,
@@ -296,6 +305,40 @@ func TestARestartThatDoesNotReadItsWindowBackFindsNothing(t *testing.T) {
 
 	if made := detected(t, addresses, found, 1, 20*time.Second); made != 0 {
 		t.Fatalf("a reader that never read its window back made %d detections", made)
+	}
+}
+
+func TestAProcessDownLongerThanItsRecoveryStillReachesTheThreshold(t *testing.T) {
+	addresses := brokers(t)
+	topic := temporaryTopic(t, addresses)
+	found := temporaryTopic(t, addresses)
+	group := fmt.Sprintf("analysis-engine-%d", time.Now().UnixNano())
+	owner := tenant(t)
+	program := acrossARestartWithin(t, 5*time.Second)
+	recovery := 8 * time.Second
+	at := time.Now().UTC()
+
+	admitAt(t, addresses, topic, owner, "web-01", 0, 15, at)
+	admitted := time.Now()
+
+	first := start(t, replicaOptions{
+		addresses: addresses, topic: topic, found: found, group: group,
+		program: program, recover: recovery,
+	})
+	awaitCommitted(t, addresses, topic, group, 15)
+	first.terminate(t)
+
+	admitAt(t, addresses, topic, owner, "web-01", 15, 5, at)
+	time.Sleep(time.Until(admitted.Add(recovery + 2*time.Second)))
+
+	start(t, replicaOptions{
+		addresses: addresses, topic: topic, found: found, group: group,
+		program: program, recover: recovery,
+	})
+
+	made := detected(t, addresses, found, 1, 30*time.Second)
+	if made == 0 {
+		t.Fatal("twenty events inside the window produced no detection after a restart longer than the recovery")
 	}
 }
 

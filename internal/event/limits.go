@@ -7,7 +7,9 @@ const (
 )
 
 // Every bound below is part of the event contract. Storage schemas are derived
-// from these numbers; they are not derived from a storage schema.
+// from these numbers; they are not derived from a storage schema, and what the
+// backbone carries is derived from the bytes an event encodes to as the gateway
+// publishes it.
 const (
 	MaxEventIDLength     = 64
 	MinEventIDLength     = 8
@@ -28,4 +30,6 @@ const (
 	MaxAuthMethodLength  = 32
 	MaxRawRecordLength   = 4096
 	MaxBatchIDLength     = 64
+
+	MaxEventBytes = 960 << 10
 )

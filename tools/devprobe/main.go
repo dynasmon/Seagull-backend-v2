@@ -55,6 +55,7 @@ func main() {
 	outcome := flag.String("outcome", "failure", "authentication outcome the sample event carries: failure or success")
 	source := flag.String("source", "203.0.113.10", "address the sample event's session came from")
 	assets := flag.Bool("inventory", false, "send an asset inventory snapshot to the gateway instead of an event batch")
+	packages := flag.Int("packages", 3, "packages the inventory snapshot names, each as dpkg reports one on Debian 12; ten thousand is the most one record carries")
 	flag.Parse()
 
 	run := func() error { return probe(*endpoint, *registry, *pki, *batchID, *eventID, *outcome, *source) }
@@ -71,7 +72,7 @@ func main() {
 		run = func() error { return enrol(*agentEndpoint, *renewalEndpoint, *pki, *agentID) }
 	}
 	if *assets {
-		run = func() error { return survey(*endpoint, *registry, *pki, *batchID) }
+		run = func() error { return survey(*endpoint, *registry, *pki, *batchID, *packages) }
 	}
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "devprobe: %v\n", err)
@@ -535,7 +536,7 @@ func probe(endpoint, registry, pki, batchID, eventID, outcome, source string) er
 	return offer(client, endpoint+ingest.EventsPath, sample(batchID, eventID, outcome, source), registry != "")
 }
 
-func survey(endpoint, registry, pki, batchID string) error {
+func survey(endpoint, registry, pki, batchID string, packages int) error {
 	client, err := speaker(pki, "agent")
 	if err != nil {
 		return err
@@ -545,7 +546,7 @@ func survey(endpoint, registry, pki, batchID string) error {
 			return err
 		}
 	}
-	return offer(client, endpoint+ingest.InventoryPath, scanned(batchID), registry != "")
+	return offer(client, endpoint+ingest.InventoryPath, scanned(batchID, packages), registry != "")
 }
 
 func offer(client *http.Client, url string, batch proto.Message, registered bool) error {
@@ -688,7 +689,7 @@ func sample(batchID, eventID, outcome, source string) *ingestv1.EventBatch {
 	}
 }
 
-func scanned(batchID string) *inventoryv1.RecordBatch {
+func scanned(batchID string, packages int) *inventoryv1.RecordBatch {
 	now := timestamppb.New(time.Now().UTC())
 	origin := &eventv1.Origin{
 		AgentId: "ignored-by-the-gateway",
@@ -713,6 +714,20 @@ func scanned(batchID string) *inventoryv1.RecordBatch {
 			Name: name, Version: version, Architecture: "amd64", Manager: "dpkg", Vendor: "Debian",
 		}}}
 	}
+	listed := []*inventoryv1.Item{installed("curl", "8.5.0"), installed("openssl", "3.0.13"), installed("openssh-server", "9.2p1")}
+	listed = listed[:max(0, min(len(listed), packages))]
+	for index := len(listed); index < packages; index++ {
+		listed = append(listed, &inventoryv1.Item{Body: &inventoryv1.Item_Package{Package: &inventoryv1.Package{
+			Name:         fmt.Sprintf("libgnome-desktop-%05d", index),
+			Version:      "1:2.36.1-8+deb12u1",
+			Architecture: "amd64",
+			Manager:      "dpkg",
+			Source:       fmt.Sprintf("gnome-desktop-%05d (2.36.1-8+deb12u1)", index),
+			Vendor:       "Debian GNOME Maintainers <pkg-gnome-maintainers@lists.alioth.debian.org>",
+			SizeBytes:    2_461_696,
+			InstalledAt:  now,
+		}}})
+	}
 
 	return &inventoryv1.RecordBatch{
 		BatchId:         batchID,
@@ -722,8 +737,7 @@ func scanned(batchID string) *inventoryv1.RecordBatch {
 				&inventoryv1.Item{Body: &inventoryv1.Item_OperatingSystem{OperatingSystem: &inventoryv1.OperatingSystem{
 					Name: "Debian GNU/Linux", Version: "12", Platform: "debian", Codename: "bookworm", Family: "debian",
 				}}}),
-			record(batchID+".packages", inventoryv1.Kind_KIND_PACKAGE,
-				installed("curl", "8.5.0"), installed("openssl", "3.0.13"), installed("openssh-server", "9.2p1")),
+			record(batchID+".packages", inventoryv1.Kind_KIND_PACKAGE, listed...),
 			record(batchID+".services", inventoryv1.Kind_KIND_SERVICE,
 				&inventoryv1.Item{Body: &inventoryv1.Item_Service{Service: &inventoryv1.Service{
 					Name: "sshd", DisplayName: "OpenSSH", State: inventoryv1.Service_STATE_RUNNING,

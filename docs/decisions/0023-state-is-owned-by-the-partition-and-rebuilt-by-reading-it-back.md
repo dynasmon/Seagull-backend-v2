@@ -1,5 +1,11 @@
 # 23. Detection state is owned by the partition that feeds it, and rebuilt by reading that partition back
 
+> Amended by [ADR 36](0036-state-is-read-back-from-the-last-record-committed.md):
+> the window a reader rebuilds is measured back from the last record each
+> partition committed, not from the clock, so a reader stopped or behind for
+> longer than its recovery still rebuilds the window it was in, and a window the
+> topic no longer holds is reported.
+
 ## Context
 
 [ADR 18](0018-detection-state-is-a-bounded-window.md) said what a rule

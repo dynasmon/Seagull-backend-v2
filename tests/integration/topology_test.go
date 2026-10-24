@@ -169,6 +169,60 @@ func TestTheMigratorConvergesRetentionThatDriftedAwayFromTheTopology(t *testing.
 	}
 }
 
+func TestTheMigratorConvergesTheLargestBatchATopicCarries(t *testing.T) {
+	addresses := brokers(t)
+	topic := declaredTopic(t, addresses, 2, 48*time.Hour)
+	topic.MaxMessageBytes = 2 << 20
+	createTopic(t, addresses, topic.Name, 2, "172800000")
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	changed, err := provisioner(t, addresses).Apply(ctx, []broker.Topic{topic})
+	if err != nil {
+		t.Fatalf("apply the topology: %v", err)
+	}
+	if !slices.ContainsFunc(changed, func(entry string) bool { return strings.Contains(entry, "max.message.bytes") }) {
+		t.Errorf("a topic taking batches of 1 MiB against a declaration of 2 MiB reported %v as changed", changed)
+	}
+	if _, settings := shapeOf(t, addresses, topic.Name); settings["max.message.bytes"] != "2097152" {
+		t.Fatalf("max.message.bytes stayed at %q", settings["max.message.bytes"])
+	}
+}
+
+func TestVerificationRefusesToServeATopicCarryingLessThanDeclared(t *testing.T) {
+	addresses := brokers(t)
+	topic := declaredTopic(t, addresses, 2, 48*time.Hour)
+	topic.MaxMessageBytes = 2 << 20
+	createTopic(t, addresses, topic.Name, 2, "172800000")
+
+	publisher, err := broker.NewPublisher(broker.Config{
+		Brokers: addresses, Topic: topic.Name, MaxMessageBytes: topic.MaxMessageBytes, ClientID: "integration-test",
+	})
+	if err != nil {
+		t.Fatalf("build publisher: %v", err)
+	}
+	t.Cleanup(publisher.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	_, err = publisher.VerifyTopics(ctx, topic)
+	if err == nil {
+		t.Fatal("a topic refusing batches above 1 MiB passed a verification declaring 2 MiB, so a record the gateway admitted would never be durable")
+	}
+	if !strings.Contains(err.Error(), "max.message.bytes") || !strings.Contains(err.Error(), "backbone-migrator") {
+		t.Errorf("the refusal does not say what is wrong or how to fix it: %v", err)
+	}
+
+	if _, err := provisioner(t, addresses).Apply(ctx, []broker.Topic{topic}); err != nil {
+		t.Fatalf("apply the topology: %v", err)
+	}
+	if _, err := publisher.VerifyTopics(ctx, topic); err != nil {
+		t.Fatalf("a converged topic still failed verification: %v", err)
+	}
+}
+
 // Growing the partition count moves an agent's records to a different partition
 // and ends the per-agent ordering, so the migrator reports it instead.
 func TestTheMigratorRefusesToRepartitionAnExistingTopic(t *testing.T) {

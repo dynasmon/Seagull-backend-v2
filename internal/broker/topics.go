@@ -246,6 +246,8 @@ func (t Topic) Validate() error {
 	case t.MinInSync > t.Replicas:
 		return fmt.Errorf("%s keeps %d replicas and would need %d of them in sync, so no write could ever be acknowledged",
 			t.Name, t.Replicas, t.MinInSync)
+	case t.MaxMessageBytes < 1:
+		return fmt.Errorf("%s needs the largest record batch it carries", t.Name)
 	}
 	return nil
 }
@@ -257,12 +259,13 @@ type setting struct {
 
 // What a difference between the broker and the topology means. Retention and
 // compression cost the platform a window or some disk, and a process that
-// refused to serve over one would trade the stream for the setting. The other
-// two are promises: a cleanup policy decides whether a record still exists, and
+// refused to serve over one would trade the stream for the setting. The others
+// are promises: a cleanup policy decides whether a record still exists,
 // `acks=all` on fewer in-sync replicas than were declared reports a write
-// durable that is not, which is a wrong answer rather than a degraded one. A
-// value compared for being at least the declared one reads a negative as
-// unbounded, which is never short of anything.
+// durable that is not, and a topic carrying a smaller batch than was declared
+// refuses a record the platform already admitted, which is a wrong answer rather
+// than a degraded one. A value compared for being at least the declared one
+// reads a negative as unbounded, which is never short of anything.
 type agreement int
 
 const (
@@ -286,6 +289,7 @@ func (t Topic) settings() []setting {
 		{key: cleanupKey, value: t.Cleanup, contract: exact},
 		{key: compressionKey, value: t.Compression, contract: operational},
 		{key: minInSyncKey, value: strconv.FormatInt(int64(t.MinInSync), 10), contract: atLeast},
+		{key: maxMessageKey, value: strconv.FormatInt(int64(t.MaxMessageBytes), 10), contract: atLeast},
 	}
 }
 

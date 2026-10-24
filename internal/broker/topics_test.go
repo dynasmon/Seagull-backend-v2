@@ -179,7 +179,7 @@ func TestTheSettingsOfATopicAreOrdered(t *testing.T) {
 	for _, entry := range topic.settings() {
 		keys = append(keys, entry.key)
 	}
-	if want := []string{retentionKey, cleanupKey, compressionKey, minInSyncKey}; !slices.Equal(keys, want) {
+	if want := []string{retentionKey, cleanupKey, compressionKey, minInSyncKey, maxMessageKey}; !slices.Equal(keys, want) {
 		t.Fatalf("settings are ordered %v, want %v", keys, want)
 	}
 
@@ -348,6 +348,7 @@ func TestEverySettingDeclaresWhatADifferenceMeans(t *testing.T) {
 		cleanupKey:     exact,
 		compressionKey: operational,
 		minInSyncKey:   atLeast,
+		maxMessageKey:  atLeast,
 	}
 
 	topic := Topic{Name: "t", Partitions: 1, Replicas: 1, Retention: 0, Cleanup: cleanupCompact, Compression: compressionZstd, MinInSync: 1}

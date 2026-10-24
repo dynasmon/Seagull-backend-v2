@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -26,11 +27,23 @@ func reader(t *testing.T, recovery Recovery, ends, after kadm.ListedOffsets) *Co
 	t.Helper()
 
 	return &Consumer{
-		topic:      stream,
-		metrics:    NewConsumerMetrics(metrics.New("test")),
-		endOffsets: staticEndOffsets{offsets: ends, after: after},
-		recovery:   recovery,
-		assigned:   map[int32]struct{}{0: {}, 1: {}},
+		topic:   stream,
+		metrics: NewConsumerMetrics(metrics.New("test")),
+		endOffsets: staticEndOffsets{
+			starts:  listed(map[int32]int64{0: 0, 1: 0}),
+			offsets: ends,
+			after:   after,
+		},
+		recovery: recovery,
+		lastRecordTimes: func(_ context.Context, positions map[int32]int64) (map[int32]time.Time, error) {
+			times := make(map[int32]time.Time, len(positions))
+			for partition := range positions {
+				times[partition] = time.Now()
+			}
+			return times, nil
+		},
+		logger:   slog.New(slog.DiscardHandler),
+		assigned: map[int32]struct{}{0: {}, 1: {}},
 	}
 }
 

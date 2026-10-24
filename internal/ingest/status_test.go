@@ -159,3 +159,22 @@ func TestTheStatusAdmitterRefusesAnIncompletePolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestAReportHeavierThanTheBackboneCarriesIsRefusedForGood(t *testing.T) {
+	backbone := &recordingStatus{}
+	admitter := newStatusAdmitter(t, backbone)
+
+	heavy := reported()
+	if !fixtures.Bloat(heavy, agentstatus.MaxReportBytes+4<<10) {
+		t.Fatal("no report weighs that much")
+	}
+	_, err := admitter.Admit(context.Background(), identity(), "acme", fixtures.StatusBatch("status-1", reported(), heavy))
+
+	rejection := rejectionOf(t, err)
+	if rejection.Code != ingest.CodeInvalidReport || rejection.EventIndex != 1 || rejection.Field != "report" {
+		t.Fatalf("a report above the ceiling was refused as %+v, and an agent sends again whatever is not refused by its index", rejection)
+	}
+	if len(backbone.published) != 0 {
+		t.Fatal("a batch holding a report the backbone cannot carry reached the backbone")
+	}
+}

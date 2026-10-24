@@ -153,7 +153,7 @@ func TestAReportTheGatewayAdmitsIsFoldedAndReadBackAndFoldingItAgainChangesNothi
 	topic := temporaryTopic(t, addresses)
 	quarantineTopic := temporaryTopic(t, addresses)
 
-	publisher, err := broker.NewStatus(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	publisher, err := broker.NewStatus(broker.Config{Brokers: addresses, Topic: topic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build the status publisher: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestAReportTheGatewayAdmitsIsFoldedAndReadBackAndFoldingItAgainChangesNothi
 	}
 	t.Cleanup(consumer.Close)
 
-	refused, err := broker.NewQuarantine(broker.Config{Brokers: addresses, Topic: quarantineTopic, ClientID: "integration-test"})
+	refused, err := broker.NewQuarantine(broker.Config{Brokers: addresses, Topic: quarantineTopic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build the quarantine publisher: %v", err)
 	}

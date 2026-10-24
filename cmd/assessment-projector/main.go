@@ -80,10 +80,11 @@ func projector(ctx context.Context) error {
 	}
 
 	refused, err := broker.NewQuarantine(broker.Config{
-		Brokers:  settings.brokers,
-		Topic:    settings.topology.AssessmentsQuarantine.Name,
-		ClientID: serviceName,
-		Security: settings.security,
+		Brokers:         settings.brokers,
+		Topic:           settings.topology.AssessmentsQuarantine.Name,
+		MaxMessageBytes: settings.topology.AssessmentsQuarantine.MaxMessageBytes,
+		ClientID:        serviceName,
+		Security:        settings.security,
 	})
 	if err != nil {
 		return err

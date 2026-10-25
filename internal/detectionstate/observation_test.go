@@ -21,6 +21,7 @@ func TestAnObservationSaysWhichEventItCameFromAndWhen(t *testing.T) {
 		{"whole", detectionstate.Observation{Event: sent, At: at, Value: "203.0.113.10"}, nil},
 		{"counting only", detectionstate.Observation{Event: sent, At: at}, nil},
 		{"unnamed", detectionstate.Observation{Event: detectionstate.EventName{Agent: "web-01"}, At: at}, detectionstate.ErrNoEvent},
+		{"unsent", detectionstate.Observation{Event: detectionstate.EventName{ID: "e1"}, At: at}, detectionstate.ErrNoAgent},
 		{"untimed", detectionstate.Observation{Event: sent}, detectionstate.ErrNoTime},
 		{
 			"sprawling",

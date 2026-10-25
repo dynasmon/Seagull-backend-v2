@@ -259,7 +259,11 @@ any number of replicas, and one grouping across agents is only exact where a
 single reader holds the whole stream. A deployment may declare that it does, and
 the declaration is checked against what the group actually assigned it: a claim
 that stops being true stops the engine rather than halving what such a rule
-reports. A ruleset carrying a rule this deployment cannot answer — a window
+reports. Under such a rule a key holds several agents' events, and an event is
+told apart there by the agent that sent it as well as by its identifier, so one
+agent can never make another's event read as a repeat
+([ADR 38](docs/decisions/0038-an-observation-is-named-by-the-agent-that-sent-its-event.md)).
+A ruleset carrying a rule this deployment cannot answer — a window
 wider than the store keeps, a threshold no key could reach, a group the stream
 splits — is refused whole, and the last ruleset the process could answer keeps
 running. Active means executable. See

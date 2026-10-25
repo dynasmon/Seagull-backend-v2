@@ -98,7 +98,7 @@ func correlated(stages []string, told []detectionstate.Observation, group []dete
 
 	widest, narrowest := told[0].Skew, told[0].Skew
 	for index, seen := range told {
-		found.Stages = append(found.Stages, detection.Satisfied{Name: stages[index], Event: seen.Event.ID, At: seen.At})
+		found.Stages = append(found.Stages, detection.Satisfied{Name: stages[index], Agent: seen.Event.Agent, Event: seen.Event.ID, At: seen.At})
 		widest = max(widest, seen.Skew)
 		narrowest = min(narrowest, seen.Skew)
 	}

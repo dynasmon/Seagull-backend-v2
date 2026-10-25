@@ -12,6 +12,7 @@ const MaxValueLength = 512
 
 var (
 	ErrNoEvent      = errors.New("an observation names the event it was made from")
+	ErrNoAgent      = errors.New("an observation names the agent that sent its event")
 	ErrNoTime       = errors.New("an observation carries the event time it happened at")
 	ErrValueTooLong = fmt.Errorf("an observed value is at most %d bytes", MaxValueLength)
 )
@@ -44,6 +45,8 @@ func (o Observation) Validate() error {
 	switch {
 	case o.Event.ID == "":
 		return ErrNoEvent
+	case o.Event.Agent == "":
+		return ErrNoAgent
 	case o.At.IsZero():
 		return ErrNoTime
 	case len(o.Value) > MaxValueLength:

@@ -57,6 +57,7 @@ var addressable = map[hunt.Dataset][]hunt.Field{
 		"correlation.group.absent",
 		"correlation.group.field",
 		"correlation.group.value",
+		"correlation.stages.agent_id",
 		"correlation.stages.event_id",
 		"correlation.stages.event_time",
 		"correlation.stages.name",

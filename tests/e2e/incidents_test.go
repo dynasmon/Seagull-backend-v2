@@ -47,8 +47,8 @@ func newOpenedIncidents() *openedIncidents {
 		Origin:     &eventv1.Origin{TenantId: "default", AgentId: "e2e-agent-01"},
 		Correlation: &detectionv1.Correlation{
 			Stages: []*detectionv1.Stage{
-				{Name: "a failed password", EventId: "e2e-event-1", EventTime: timestamppb.New(failed)},
-				{Name: "one that was accepted", EventId: "e2e-event-2", EventTime: timestamppb.New(failed.Add(40 * time.Second))},
+				{Name: "a failed password", EventId: "e2e-event-1", EventTime: timestamppb.New(failed), AgentId: "e2e-agent-01"},
+				{Name: "one that was accepted", EventId: "e2e-event-2", EventTime: timestamppb.New(failed.Add(40 * time.Second)), AgentId: "e2e-agent-01"},
 			},
 			Window:      durationpb.New(5 * time.Minute),
 			ClockSpread: durationpb.New(0),
@@ -137,8 +137,9 @@ func TestAnIncidentIsWorkedOverRealMutualTLSAndTracesBackToItsEvents(t *testing.
 		t.Fatalf("the story carries %d stages", len(told.GetStages()))
 	}
 	for index, wanted := range []string{"e2e-event-1", "e2e-event-2"} {
-		if told.GetStages()[index].GetEventId() != wanted {
-			t.Errorf("stage %d names %q rather than %q", index, told.GetStages()[index].GetEventId(), wanted)
+		if told.GetStages()[index].GetEventId() != wanted || told.GetStages()[index].GetAgentId() != "e2e-agent-01" {
+			t.Errorf("stage %d names %q from %q rather than %q from e2e-agent-01",
+				index, told.GetStages()[index].GetEventId(), told.GetStages()[index].GetAgentId(), wanted)
 		}
 	}
 	if told.GetConfidence() != incidentv1.Confidence_CONFIDENCE_HIGH {

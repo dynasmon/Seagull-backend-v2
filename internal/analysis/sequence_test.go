@@ -56,6 +56,7 @@ type timed struct {
 	observed time.Duration
 	agent    string
 	id       string
+	user     string
 }
 
 func staged(t *testing.T, seen timed) analysis.Record {
@@ -70,6 +71,7 @@ func staged(t *testing.T, seen timed) analysis.Record {
 	record := fixtures.SSHAuthentication{
 		EventID:  seen.id,
 		AgentID:  seen.agent,
+		Username: seen.user,
 		SourceIP: seen.source,
 		Outcome:  seen.outcome,
 		At:       seen.at,

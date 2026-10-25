@@ -1,5 +1,11 @@
 # 11. A detection is not an alert
 
+> Amended by [ADR 39](0039-a-detection-is-named-by-the-agent-and-identifier-of-every-event-that-decided-it.md):
+> a detection is named by its tenant as well, and by the agent and identifier of
+> every event it was decided from rather than by the agent of the event that
+> completed it, so the same events name the same detection whichever arrived
+> last; a correlation across agents is about the agent of its last stage.
+
 ## Context
 
 [ADR 9](0009-an-absent-field-answers-no-question.md) settled how a rule decides

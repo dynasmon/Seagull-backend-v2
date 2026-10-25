@@ -263,6 +263,11 @@ reports. Under such a rule a key holds several agents' events, and an event is
 told apart there by the agent that sent it as well as by its identifier, so one
 agent can never make another's event read as a repeat
 ([ADR 38](docs/decisions/0038-an-observation-is-named-by-the-agent-that-sent-its-event.md)).
+A detection is named by the agent and identifier of every event it was decided
+from, so a story across agents is one detection whichever event the reader met
+last, and is about the agent its last stage came from; a count across agents
+decides as often in any order, and which events it names follows the order
+([ADR 39](docs/decisions/0039-a-detection-is-named-by-the-agent-and-identifier-of-every-event-that-decided-it.md)).
 A ruleset carrying a rule this deployment cannot answer — a window
 wider than the store keeps, a threshold no key could reach, a group the stream
 splits — is refused whole, and the last ruleset the process could answer keeps

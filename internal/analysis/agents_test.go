@@ -1,10 +1,13 @@
 package analysis_test
 
 import (
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/analysis"
+	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
+	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 )
 
@@ -76,6 +79,24 @@ func TestAnotherAgentsEventUnderAToldStagesIdentifierDoesNotTellTheStoryAgain(t 
 	})
 	if len(made) != 1 {
 		t.Fatalf("a story told once, then a failure another agent sent under its first stage's identifier, made %d detections", len(made))
+	}
+}
+
+func TestAStoryTwoAgentsToldUnderOneIdentifierIsADetectionItsConsumersTake(t *testing.T) {
+	made := process(t, story(t, 5*time.Minute, "authentication.network.source.ip"), []analysis.Record{
+		failedOn(t, "web-01", "shared-000000001", 0),
+		acceptedOn(t, "web-02", "shared-000000001", 30*time.Second),
+	})
+	if len(made) != 1 {
+		t.Fatalf("two agents sharing an event identifier told the story %d times", len(made))
+	}
+
+	err := detection.ValidateContract(made[0])
+	var violation *event.Violation
+	stillOpen(t, "BE-093", errors.As(err, &violation) && violation.Field == "source_event_ids[1]",
+		"a detection names the events of its stages by identifier alone, so a story two agents told under one names an event twice and its consumers refuse it")
+	if err != nil {
+		t.Fatalf("the consumers of a story two agents told under one identifier refuse it: %v", err)
 	}
 }
 

@@ -1,5 +1,11 @@
 # 21. An incident is a correlation somebody owns, and how far its order can be trusted is measured
 
+> Amended by [ADR 39](0039-a-detection-is-named-by-the-agent-and-identifier-of-every-event-that-decided-it.md):
+> a story across agents is named the same whichever of its events arrived last,
+> so a sole reader's read back finds the incident it opened when every stage had
+> one candidate; with several it can open a second. A story across agents is
+> listed under the agent of its last stage, and each stage names its agent.
+
 ## Context
 
 [ADR 11](0011-a-detection-is-not-an-alert.md) said what a detection is by saying

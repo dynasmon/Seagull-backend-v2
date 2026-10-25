@@ -105,8 +105,8 @@ func populated() *detectionv1.Detection {
 			Window:      durationpb.New(5 * time.Minute),
 			ClockSpread: durationpb.New(1500 * time.Millisecond),
 			Stages: []*detectionv1.Stage{
-				{Name: "a failed password", EventId: "7c1d5e9b2a4c6d8e0f1a2b3c4d5e6f70", EventTime: timestamppb.New(at.Add(-3 * time.Minute))},
-				{Name: "one that was accepted", EventId: "3f7c1d5e9b2a4c6d8e0f1a2b3c4d5e6f", EventTime: timestamppb.New(at)},
+				{Name: "a failed password", EventId: "7c1d5e9b2a4c6d8e0f1a2b3c4d5e6f70", EventTime: timestamppb.New(at.Add(-3 * time.Minute)), AgentId: "dev-agent-01"},
+				{Name: "one that was accepted", EventId: "3f7c1d5e9b2a4c6d8e0f1a2b3c4d5e6f", EventTime: timestamppb.New(at), AgentId: "dev-agent-01"},
 			},
 			Group: []*detectionv1.Grouping{
 				{Field: "authentication.network.source.ip", Value: "203.0.113.10"},

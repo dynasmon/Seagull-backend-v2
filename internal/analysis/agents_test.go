@@ -1,27 +1,13 @@
 package analysis_test
 
 import (
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/analysis"
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
-	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 )
-
-// A test that reproduces the defect of an open card. It is skipped while the
-// defect is there and fails as soon as it is gone, so the marker leaves with the
-// fix and the assertions after it become the regression test.
-func stillOpen(t *testing.T, card string, reproduced bool, defect string) {
-	t.Helper()
-
-	if reproduced {
-		t.Skipf("%s is open: %s", card, defect)
-	}
-	t.Fatalf("%s no longer reproduces: remove this marker so the test guards the fix", card)
-}
 
 func failedOn(t *testing.T, agent, id string, after time.Duration) analysis.Record {
 	t.Helper()
@@ -91,11 +77,7 @@ func TestAStoryTwoAgentsToldUnderOneIdentifierIsADetectionItsConsumersTake(t *te
 		t.Fatalf("two agents sharing an event identifier told the story %d times", len(made))
 	}
 
-	err := detection.ValidateContract(made[0])
-	var violation *event.Violation
-	stillOpen(t, "BE-093", errors.As(err, &violation) && violation.Field == "source_event_ids[1]",
-		"a detection names the events of its stages by identifier alone, so a story two agents told under one names an event twice and its consumers refuse it")
-	if err != nil {
+	if err := detection.ValidateContract(made[0]); err != nil {
 		t.Fatalf("the consumers of a story two agents told under one identifier refuse it: %v", err)
 	}
 }

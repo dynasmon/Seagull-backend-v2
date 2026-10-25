@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
@@ -75,7 +76,7 @@ func ValidateContract(made *detectionv1.Detection) error {
 	if err := aggregation(made.GetAggregation(), made.GetEventClass(), made.GetEventTime().AsTime()); err != nil {
 		return err
 	}
-	return correlation(made.GetCorrelation(), made.GetEventClass(), made.GetSourceEventIds(), made.GetEventTime().AsTime())
+	return correlation(made.GetCorrelation(), made.GetEventClass(), made.GetSourceEventIds(), made.GetEventTime().AsTime(), made.GetOrigin().GetAgentId())
 }
 
 func validateDecidingTechnique(held *detectionv1.Technique) error {
@@ -130,16 +131,10 @@ func sourceEvents(ids []string) error {
 	if len(ids) > MaxStages {
 		return invalid("source_event_ids", fmt.Sprintf("names %d events and the ceiling is %d", len(ids), MaxStages))
 	}
-	seen := make(map[string]struct{}, len(ids))
 	for index, id := range ids {
-		field := fmt.Sprintf("source_event_ids[%d]", index)
 		if !event.ValidIdentifier(id) {
-			return invalid(field, "is malformed")
+			return invalid(fmt.Sprintf("source_event_ids[%d]", index), "is malformed")
 		}
-		if _, repeated := seen[id]; repeated {
-			return invalid(field, "names an event twice")
-		}
-		seen[id] = struct{}{}
 	}
 	return nil
 }
@@ -197,7 +192,7 @@ func aggregation(counted *detectionv1.Aggregation, class eventv1.EventClass, eve
 	return groupings("aggregation.group", counted.GetGroup(), class)
 }
 
-func correlation(told *detectionv1.Correlation, class eventv1.EventClass, sourceIDs []string, eventTime time.Time) error {
+func correlation(told *detectionv1.Correlation, class eventv1.EventClass, sourceIDs []string, eventTime time.Time, about string) error {
 	if told == nil {
 		if len(sourceIDs) != 1 {
 			return invalid("source_event_ids", "must name one event for an uncorrelated detection")
@@ -226,6 +221,8 @@ func correlation(told *detectionv1.Correlation, class eventv1.EventClass, source
 	}
 
 	names := make(map[string]struct{}, len(told.GetStages()))
+	sent := make(map[[2]string]struct{}, len(told.GetStages()))
+	agents := 0
 	var first, previous time.Time
 	for index, stage := range told.GetStages() {
 		field := fmt.Sprintf("correlation.stages[%d]", index)
@@ -242,6 +239,17 @@ func correlation(told *detectionv1.Correlation, class eventv1.EventClass, source
 		if stage.GetEventId() != sourceIDs[index] {
 			return invalid(field+".event_id", "does not match source_event_ids")
 		}
+		if agent := stage.GetAgentId(); agent != "" {
+			if !agentidentity.Valid(agent) {
+				return invalid(field+".agent_id", "is not an agent identity")
+			}
+			agents++
+		}
+		pair := [2]string{stage.GetAgentId(), stage.GetEventId()}
+		if _, repeated := sent[pair]; repeated {
+			return invalid(field+".event_id", "names an event another stage names")
+		}
+		sent[pair] = struct{}{}
 		if err := contractInstant(field+".event_time", stage.GetEventTime()); err != nil {
 			return err
 		}
@@ -256,6 +264,13 @@ func correlation(told *detectionv1.Correlation, class eventv1.EventClass, source
 	}
 	if previous != eventTime {
 		return invalid("event_time", "does not equal the last correlated stage")
+	}
+	stages := told.GetStages()
+	switch {
+	case agents != 0 && agents != len(stages):
+		return invalid("correlation.stages", "name the agent of some of their events and not of the others")
+	case agents != 0 && about != stages[len(stages)-1].GetAgentId():
+		return invalid("origin.agent_id", "is not the agent of the last stage")
 	}
 	if previous.Sub(first) > window {
 		return invalid("correlation.stages", "span longer than the correlation window")

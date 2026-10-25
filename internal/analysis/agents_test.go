@@ -19,6 +19,39 @@ func acceptedOn(t *testing.T, agent, id string, after time.Duration) analysis.Re
 	return staged(t, timed{at: began.Add(after), outcome: eventv1.Outcome_OUTCOME_SUCCESS, agent: agent, id: id})
 }
 
+func TestADetectionOfOneAgentsEventsKeepsTheNameItCarriedBeforeStagesNamedTheirAgents(t *testing.T) {
+	for _, one := range []struct {
+		kind    string
+		program *detection.Program
+		records []analysis.Record
+		named   string
+	}{
+		{
+			"single event", compiled(t, "ssh.failed_password", "failure"),
+			[]analysis.Record{failedOn(t, "web-01", "web-01-000000001", 0)},
+			"11abba04ffd1954bc9200508a28c7b94",
+		},
+		{
+			"count", threshold(t, 2, 10*time.Minute, "authentication.network.source.ip", "origin.agent_id"),
+			[]analysis.Record{failedOn(t, "web-01", "web-01-000000001", 0), failedOn(t, "web-01", "web-01-000000002", time.Second)},
+			"1ff9410b8395b714884edf9ca321ca55",
+		},
+		{
+			"story", story(t, 5*time.Minute, "authentication.network.source.ip", "origin.agent_id"),
+			[]analysis.Record{failedOn(t, "web-01", "web-01-000000001", 0), acceptedOn(t, "web-01", "web-01-000000002", 30*time.Second)},
+			"cde3c0d403c710646e5d248ae9143a29",
+		},
+	} {
+		t.Run(one.kind, func(t *testing.T) {
+			made := process(t, one.program, one.records)
+			if len(made) != 1 || made[0].GetDetectionId() != one.named {
+				t.Fatalf("one agent's %s is named %v and was named %s before stages named their agents",
+					one.kind, names(made), one.named)
+			}
+		})
+	}
+}
+
 func TestTwoAgentsSendingOneEventIdentifierAreCountedApart(t *testing.T) {
 	program := threshold(t, 2, 10*time.Minute, "authentication.network.source.ip")
 

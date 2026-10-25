@@ -155,6 +155,11 @@ func admitFrom(t *testing.T, addresses []string, topic, owner, agent string, fro
 
 func admitAt(t *testing.T, addresses []string, topic, owner, agent string, from, count int, at time.Time) {
 	t.Helper()
+	admitNamed(t, addresses, topic, owner, agent, agent, from, count, at)
+}
+
+func admitNamed(t *testing.T, addresses []string, topic, owner, agent, named string, from, count int, at time.Time) {
+	t.Helper()
 
 	publisher, err := broker.NewPublisher(broker.Config{Brokers: addresses, Topic: topic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
@@ -174,7 +179,7 @@ func admitAt(t *testing.T, addresses []string, topic, owner, agent string, from,
 	batch := fixtures.Batch(fmt.Sprintf("batch-%s-%d", agent, from))
 	for index := from; index < from+count; index++ {
 		batch.Events = append(batch.Events, fixtures.SSHAuthentication{
-			EventID:  fmt.Sprintf("%s-%09d", agent, index),
+			EventID:  fmt.Sprintf("%s-%09d", named, index),
 			At:       at,
 			Sequence: uint64(index),
 		}.Event())

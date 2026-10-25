@@ -1,5 +1,10 @@
 # 27. Inventory is a record kind of its own, and what an asset currently has is what the newest full scan named
 
+> Amended by [ADR 37](0037-a-record-is-bounded-by-what-its-topic-carries.md): a
+> record is bounded by the bytes it encodes to as well as by its items — 4 MiB
+> once the gateway stamped it, refused for good above that — and its topic
+> carries it; a snapshot stays one record rather than arriving in parts.
+
 ## Context
 
 [ADR 12](0012-storage-is-owned-per-workload.md) decided two classes of data and

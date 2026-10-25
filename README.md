@@ -31,7 +31,11 @@ certificate rather than from anything the producer sent, admits or refuses the
 batch against explicit size and rate ceilings, and answers only once the
 backbone owns it. An agent may drop its local copy of a batch on that answer and
 on nothing else, so a gateway that crashes mid-batch costs a retry rather than
-telemetry.
+telemetry. A retry is only ever asked for when it can succeed: every topic
+declares the largest batch it carries, every producer is held to it, and a record
+heavier than its topic takes is refused by its position instead of being admitted
+and answered `503` for as long as it is sent
+([ADR 37](docs/decisions/0037-a-record-is-bounded-by-what-its-topic-carries.md)).
 
 ### Detection engineering
 
@@ -487,10 +491,12 @@ go run ./tools/devprobe -hunt https://127.0.0.1:8444
 ```
 
 Send what an asset has — a distribution, a package list and a service — and watch
-it become the current state of that asset:
+it become the current state of that asset; `-packages 10000` sends the widest
+package list one record carries, about 1.9 MB:
 
 ```bash
 go run ./tools/devprobe -inventory
+go run ./tools/devprobe -inventory -packages 10000
 ```
 
 The development stack follows Debian's advisories; another distribution is one

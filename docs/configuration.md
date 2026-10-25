@@ -78,7 +78,13 @@ The gateway serves four routes on one listener: `POST /v1/events`,
 `POST /v1/inventory`, `POST /v1/status` and `POST /v1/assessments`. They stand
 behind the same certificate, the same registry answer, the same rate limiter and
 the same capacity bound, so a collector cannot buy a second budget by sending
-inventory, a status report or an assessment. A scan may be older than an event
+inventory, a status report or an assessment. Each record is weighed as the
+gateway publishes it, once its identity, tenant and reception are stamped: an
+inventory record may encode to 4 MiB, and an event, a status report or an
+assessment to 960 KiB, which no field bound reaches and only undeclared fields
+can. A heavier record is refused by its position with the route's `invalid_*`
+code and the field `record`, `event`, `report` or `assessment`, rather than
+admitted and then answered `503` for as long as it is sent. A scan may be older than an event
 may be, because an asset that was offline for a fortnight sends what it saw while
 it was, and so may an assessment, which an agent keeps until the platform holds
 it. A status report is admitted on the event window: liveness is measured from
@@ -616,7 +622,7 @@ other answer means the agent keeps the batch and retries:
 | `403` | the platform takes nothing from this connection: no usable agent identity, no registration placing the agent in a tenant (`agent_not_registered`), or a registration it stopped honouring (`agent_not_admitted`); keep the batch |
 | `413` | the body is above the gateway ceiling; send smaller batches |
 | `415` | the batch was not sent as protobuf |
-| `422` | an event failed admission; the answer names the index and the field |
+| `422` | a record failed admission, or weighs more than its topic carries; the answer names the index and the field, and the record is refused for good |
 | `426` | the protocol version is not supported by this gateway |
 | `429` | the agent is above its budget; back off |
 | `503` | the batch was not made durable; retry |
@@ -647,22 +653,22 @@ before its body is read.
 Fourteen topics, declared once in `internal/broker` and applied by
 `backbone-migrator`:
 
-| Topic | Partitions | Retention | Why |
-|---|---|---|---|
-| `security.events.raw` | 12 | 7 days | admitted telemetry, keyed by agent |
-| `security.events.quarantine` | 3 | 30 days | refused records, kept longer because they are the ones still waiting to be read |
-| `security.detections` | 6 | 30 days | what the rules decided, keyed by the agent it is about; narrower than the stream it is made from and kept as long as a refused record, for the same reason |
-| `security.detections.quarantine` | 3 | 30 days | records the detection writer could not store; one quarantine per stream, because a refused record's partition and offset only mean something alongside the topic they came from |
-| `security.inventory.raw` | 6 | 30 days | what an asset was observed to have, keyed by the asset so its scans are read in the order they were written, which is what decides whether an item is still installed; kept long enough that the projection can be rebuilt by replaying it |
-| `security.inventory.quarantine` | 3 | 30 days | records the inventory projector could not store, for the same reason the other two quarantines are apart |
-| `security.rulesets` | 1 | compacted, kept | every published ruleset under its own content id, plus one `active` key naming the one to run; one partition because a version and the record activating it are only meaningful in the order they were written |
-| `security.agents` | 1 | compacted, kept | the last thing the control plane decided about each agent, keyed by the agent; one partition because the last record about an agent has to be the last one every gateway sees |
-| `security.advisories` | 1 | compacted, kept | the newest version of every advisory the platform holds, keyed by its source and id, and the newest attempt to follow each feed, keyed by the feed; one partition so the advisories an attempt published are read before the record accounting for them |
-| `security.advisories.quarantine` | 1 | 30 days | records the advisory writer could not store |
-| `security.agents.status` | 3 | compacted, kept | what every agent last said of itself, keyed by the agent, so the newest report of each one is there for a reader that starts long after it was written, and one agent's reports are read in the order they arrived |
-| `security.agents.status.quarantine` | 1 | 30 days | reports the status projector could not store |
-| `security.assessments` | 3 | 30 days | every assessment agents made of their hosts, keyed by the agent so its assessments are read in the order they arrived; not compacted, because the ones before the newest are what a posture was |
-| `security.assessments.quarantine` | 1 | 30 days | assessments the assessment projector could not store |
+| Topic | Partitions | Retention | Largest batch | Why |
+|---|---|---|---|---|
+| `security.events.raw` | 12 | 7 days | 1 MiB | admitted telemetry, keyed by agent |
+| `security.events.quarantine` | 3 | 30 days | 1 MiB + 64 KiB | refused records, kept longer because they are the ones still waiting to be read |
+| `security.detections` | 6 | 30 days | 1 MiB | what the rules decided, keyed by the agent it is about; narrower than the stream it is made from and kept as long as a refused record, for the same reason |
+| `security.detections.quarantine` | 3 | 30 days | 1 MiB + 64 KiB | records the detection writer could not store; one quarantine per stream, because a refused record's partition and offset only mean something alongside the topic they came from |
+| `security.inventory.raw` | 6 | 30 days | 4 MiB + 64 KiB | what an asset was observed to have, keyed by the asset so its scans are read in the order they were written, which is what decides whether an item is still installed; kept long enough that the projection can be rebuilt by replaying it |
+| `security.inventory.quarantine` | 3 | 30 days | 4 MiB + 128 KiB | records the inventory projector could not store, for the same reason the other two quarantines are apart |
+| `security.rulesets` | 1 | compacted, kept | 1 MiB | every published ruleset under its own content id, plus one `active` key naming the one to run; one partition because a version and the record activating it are only meaningful in the order they were written |
+| `security.agents` | 1 | compacted, kept | 1 MiB | the last thing the control plane decided about each agent, keyed by the agent; one partition because the last record about an agent has to be the last one every gateway sees |
+| `security.advisories` | 1 | compacted, kept | 1 MiB | the newest version of every advisory the platform holds, keyed by its source and id, and the newest attempt to follow each feed, keyed by the feed; one partition so the advisories an attempt published are read before the record accounting for them |
+| `security.advisories.quarantine` | 1 | 30 days | 1 MiB + 64 KiB | records the advisory writer could not store |
+| `security.agents.status` | 3 | compacted, kept | 1 MiB | what every agent last said of itself, keyed by the agent, so the newest report of each one is there for a reader that starts long after it was written, and one agent's reports are read in the order they arrived |
+| `security.agents.status.quarantine` | 1 | 30 days | 1 MiB + 64 KiB | reports the status projector could not store |
+| `security.assessments` | 3 | 30 days | 1 MiB | every assessment agents made of their hosts, keyed by the agent so its assessments are read in the order they arrived; not compacted, because the ones before the newest are what a posture was |
+| `security.assessments.quarantine` | 1 | 30 days | 1 MiB + 64 KiB | assessments the assessment projector could not store |
 
 **Partitions and replication are refused, never converged.** Records are keyed
 by `agent_id`, so growing the partition count moves an agent to a different
@@ -673,6 +679,17 @@ a live topic stays an operator's decision.
 **Retention, cleanup and compression do converge.** They describe how long the
 backbone keeps what it already ordered, so a run brings them back to the
 declaration and reports what it changed.
+
+**The largest batch converges too, and is verified as a promise.** Each topic
+carries the largest record its producers may write plus 64 KiB for the key, the
+headers and the framing, never less than the 1 MiB a broker takes by default, and
+a quarantine 64 KiB more than its stream, because a refused record is copied
+whole with its reason beside it. Every producer builds batches no larger than its
+topic declares. A topic carrying less than the declaration would refuse a record
+the platform already admitted, so a process facing one refuses to serve, as it
+does for a cleanup policy that disagrees; the declaration is derived from the
+record ceilings and is not a setting
+([ADR 37](decisions/0037-a-record-is-bounded-by-what-its-topic-carries.md)).
 
 **Startup verifies rather than assumes.** Readiness reaches the brokers, not the
 topics, so a gateway whose topic is missing starts, reports itself healthy, and

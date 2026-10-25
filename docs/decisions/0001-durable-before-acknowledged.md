@@ -1,5 +1,9 @@
 # 1. Telemetry is durable before it is acknowledged
 
+> Amended by [ADR 37](0037-a-record-is-bounded-by-what-its-topic-carries.md): a
+> record its topic could never carry is refused by its position, never answered
+> `503`, so sending again stays something that can succeed.
+
 ## Context
 
 v1's ingest endpoint accepted a batch, put it on a Redis list and answered

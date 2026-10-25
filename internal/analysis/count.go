@@ -39,7 +39,7 @@ func (e *Engine) reached(ctx context.Context, program *detection.Program, match 
 	key := detectionstate.KeyFor(record.GetOrigin().GetTenantId(), rule.ID, rule.Revision, group)
 
 	held, err := e.state.Observe(ctx, key, detectionstate.Observation{
-		Event: record.GetEventId(),
+		Event: nameOf(record),
 		At:    record.GetTime().GetEventTime().AsTime(),
 	}, rule.Count.Within)
 	if err != nil {
@@ -70,6 +70,13 @@ func (e *Engine) reached(ctx context.Context, program *detection.Program, match 
 		Saturated: held.Saturated,
 	}
 	return true, nil
+}
+
+// The agent is the one the gateway stamped from the certificate the event was
+// sent with, over whatever the producer wrote there, so no producer can name its
+// event as another agent's.
+func nameOf(record *eventv1.Event) detectionstate.EventName {
+	return detectionstate.EventName{Agent: record.GetOrigin().GetAgentId(), ID: record.GetEventId()}
 }
 
 // A store that will not take an observation is counted and not logged: a flood

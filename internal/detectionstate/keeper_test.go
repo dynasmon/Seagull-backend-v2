@@ -20,8 +20,12 @@ var epoch = time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 
 func at(seconds int) time.Time { return epoch.Add(time.Duration(seconds) * time.Second) }
 
+func named(event string) detectionstate.EventName {
+	return detectionstate.EventName{Agent: "web-01", ID: event}
+}
+
 func saw(event string, second int, value string) detectionstate.Observation {
-	return detectionstate.Observation{Event: event, At: at(second), Value: value}
+	return detectionstate.Observation{Event: named(event), At: at(second), Value: value}
 }
 
 func kept(t *testing.T, bounds detectionstate.Bounds) *detectionstate.Keeper {
@@ -37,7 +41,7 @@ func observe(t *testing.T, keeper *detectionstate.Keeper, key detectionstate.Key
 	t.Helper()
 	state, err := keeper.Observe(context.Background(), key, seen, window)
 	if err != nil {
-		t.Fatalf("observe %s: %v", seen.Event, err)
+		t.Fatalf("observe %v: %v", seen.Event, err)
 	}
 	return state
 }
@@ -297,7 +301,7 @@ func TestConcurrentObserversAgreeOnWhatAKeyHasSeen(t *testing.T) {
 		go func() {
 			defer writers.Done()
 			for index := range 8 {
-				seen := detectionstate.Observation{Event: fmt.Sprintf("e%d-%d", writer, index), At: at(index)}
+				seen := saw(fmt.Sprintf("e%d-%d", writer, index), index, "")
 				if _, err := keeper.Observe(context.Background(), key, seen, time.Hour); err != nil {
 					t.Errorf("observe from writer %d: %v", writer, err)
 				}
@@ -306,7 +310,7 @@ func TestConcurrentObserversAgreeOnWhatAKeyHasSeen(t *testing.T) {
 	}
 	writers.Wait()
 
-	state := observe(t, keeper, key, detectionstate.Observation{Event: "e0-0", At: at(0)})
+	state := observe(t, keeper, key, saw("e0-0", 0, ""))
 	if state.Count != 64 {
 		t.Errorf("eight writers of eight events each came to %d", state.Count)
 	}
@@ -327,17 +331,17 @@ func TestTheWindowIsReadBackInEventTime(t *testing.T) {
 	at := time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
 	key := detectionstate.Key("a-key")
 	for _, seen := range []detectionstate.Observation{
-		{Event: "third", At: at.Add(2 * time.Minute), Value: "c", Skew: 3 * time.Second},
-		{Event: "first", At: at, Value: "a", Skew: time.Second},
-		{Event: "second", At: at.Add(time.Minute), Value: "b", Skew: 2 * time.Second},
+		{Event: named("third"), At: at.Add(2 * time.Minute), Value: "c", Skew: 3 * time.Second},
+		{Event: named("first"), At: at, Value: "a", Skew: time.Second},
+		{Event: named("second"), At: at.Add(time.Minute), Value: "b", Skew: 2 * time.Second},
 	} {
 		if _, _, err := keeper.Ordered(context.Background(), key, seen, time.Hour); err != nil {
-			t.Fatalf("fold %s: %v", seen.Event, err)
+			t.Fatalf("fold %v: %v", seen.Event, err)
 		}
 	}
 
 	_, window, err := keeper.Ordered(context.Background(), key, detectionstate.Observation{
-		Event: "fourth", At: at.Add(30 * time.Second), Value: "d", Skew: 4 * time.Second,
+		Event: named("fourth"), At: at.Add(30 * time.Second), Value: "d", Skew: 4 * time.Second,
 	}, time.Hour)
 	if err != nil {
 		t.Fatalf("fold a late observation: %v", err)
@@ -345,7 +349,7 @@ func TestTheWindowIsReadBackInEventTime(t *testing.T) {
 
 	order := make([]string, 0, len(window))
 	for _, seen := range window {
-		order = append(order, seen.Event)
+		order = append(order, seen.Event.ID)
 	}
 	if want := []string{"first", "fourth", "second", "third"}; !slices.Equal(order, want) {
 		t.Errorf("the window reads back as %v and happened as %v", order, want)
@@ -354,14 +358,14 @@ func TestTheWindowIsReadBackInEventTime(t *testing.T) {
 		t.Errorf("an observation carries a skew of %s", window[1].Skew)
 	}
 
-	window[0].Event = "rewritten"
+	window[0].Event.ID = "rewritten"
 	_, again, err := keeper.Ordered(context.Background(), key, detectionstate.Observation{
-		Event: "fifth", At: at.Add(3 * time.Minute), Value: "e",
+		Event: named("fifth"), At: at.Add(3 * time.Minute), Value: "e",
 	}, time.Hour)
 	if err != nil {
 		t.Fatalf("fold after writing to the window: %v", err)
 	}
-	if again[0].Event != "first" {
+	if again[0].Event.ID != "first" {
 		t.Error("a caller writing to the window it was handed changed the one the keeper keeps")
 	}
 }

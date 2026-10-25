@@ -44,8 +44,6 @@ func TestTwoAgentsSendingOneEventIdentifierAreCountedApart(t *testing.T) {
 		failedOn(t, "web-01", "shared-000000001", 0),
 		failedOn(t, "web-02", "shared-000000001", time.Second),
 	})
-	stillOpen(t, "BE-092", len(made) == 0,
-		"an observation is named by its event identifier alone, so two agents' events sharing one are counted once")
 	if len(made) != 1 {
 		t.Fatalf("two agents sharing an event identifier made %d detections against a threshold of two", len(made))
 	}
@@ -65,8 +63,6 @@ func TestTwoAgentsSendingOneEventIdentifierStillTellAStory(t *testing.T) {
 		failedOn(t, "web-01", "shared-000000001", 0),
 		acceptedOn(t, "web-02", "shared-000000001", 30*time.Second),
 	})
-	stillOpen(t, "BE-092", len(made) == 0,
-		"an observation is named by its event identifier alone, so a stage another agent sent under the same one reads as a repeat")
 	if len(made) != 1 {
 		t.Fatalf("two agents sharing an event identifier told the story %d times", len(made))
 	}

@@ -25,12 +25,12 @@ type EventName struct {
 	ID    string
 }
 
-// What one event contributes to a key. Event carries the deterministic id, so a
-// replayed batch counts once; At is event time, never the clock; Value is what a
-// cardinality counts distinct of or the stage a sequence reached, empty when the
-// rule only counts.
+// What one event contributes to a key. Event names it, so a replayed batch
+// counts once; At is event time, never the clock; Value is what a cardinality
+// counts distinct of or the stage a sequence reached, empty when the rule only
+// counts.
 type Observation struct {
-	Event string
+	Event EventName
 	At    time.Time
 	Value string
 
@@ -42,7 +42,7 @@ type Observation struct {
 
 func (o Observation) Validate() error {
 	switch {
-	case o.Event == "":
+	case o.Event.ID == "":
 		return ErrNoEvent
 	case o.At.IsZero():
 		return ErrNoTime

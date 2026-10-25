@@ -11,19 +11,20 @@ import (
 
 func TestAnObservationSaysWhichEventItCameFromAndWhen(t *testing.T) {
 	at := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	sent := detectionstate.EventName{Agent: "web-01", ID: "e1"}
 
 	for _, one := range []struct {
 		name     string
 		seen     detectionstate.Observation
 		expected error
 	}{
-		{"whole", detectionstate.Observation{Event: "e1", At: at, Value: "203.0.113.10"}, nil},
-		{"counting only", detectionstate.Observation{Event: "e1", At: at}, nil},
-		{"unnamed", detectionstate.Observation{At: at}, detectionstate.ErrNoEvent},
-		{"untimed", detectionstate.Observation{Event: "e1"}, detectionstate.ErrNoTime},
+		{"whole", detectionstate.Observation{Event: sent, At: at, Value: "203.0.113.10"}, nil},
+		{"counting only", detectionstate.Observation{Event: sent, At: at}, nil},
+		{"unnamed", detectionstate.Observation{Event: detectionstate.EventName{Agent: "web-01"}, At: at}, detectionstate.ErrNoEvent},
+		{"untimed", detectionstate.Observation{Event: sent}, detectionstate.ErrNoTime},
 		{
 			"sprawling",
-			detectionstate.Observation{Event: "e1", At: at, Value: strings.Repeat("a", detectionstate.MaxValueLength+1)},
+			detectionstate.Observation{Event: sent, At: at, Value: strings.Repeat("a", detectionstate.MaxValueLength+1)},
 			detectionstate.ErrValueTooLong,
 		},
 	} {

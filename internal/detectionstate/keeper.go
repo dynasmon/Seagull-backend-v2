@@ -69,7 +69,7 @@ func (k *Keeper) fold(ctx context.Context, key Key, seen Observation, window tim
 		if len(k.keys) >= k.bounds.Keys {
 			return State{}, nil, ErrAtCapacity
 		}
-		entry = &held{ids: make(map[string]struct{})}
+		entry = &held{ids: make(map[EventName]struct{})}
 		k.keys[key] = entry
 	}
 	entry.window = window
@@ -111,7 +111,7 @@ func (k *Keeper) reclaim() int {
 type held struct {
 	window time.Duration
 	seen   []Observation
-	ids    map[string]struct{}
+	ids    map[EventName]struct{}
 	values map[string]int
 }
 

@@ -34,12 +34,13 @@ func (e *Engine) completed(ctx context.Context, program *detection.Program, matc
 	group := program.Group(record)
 	key := detectionstate.KeyFor(record.GetOrigin().GetTenantId(), rule.ID, rule.Revision, group)
 
-	held, window, err := e.state.Ordered(ctx, key, detectionstate.Observation{
-		Event: record.GetEventId(),
+	seen := detectionstate.Observation{
+		Event: nameOf(record),
 		At:    record.GetTime().GetEventTime().AsTime(),
 		Value: reached.String(),
 		Skew:  skewOf(record),
-	}, rule.Sequence.Within)
+	}
+	held, window, err := e.state.Ordered(ctx, key, seen, rule.Sequence.Within)
 	if err != nil {
 		if ctx.Err() != nil {
 			return false, err
@@ -56,12 +57,12 @@ func (e *Engine) completed(ctx context.Context, program *detection.Program, matc
 	}
 
 	stages := program.Stages()
-	told, complete := ordered(window, len(stages), "")
+	told, complete := ordered(window, len(stages), detectionstate.EventName{})
 	if !complete {
 		e.metrics.observed(OutcomeStaged)
 		return false, nil
 	}
-	if _, before := ordered(window, len(stages), record.GetEventId()); before {
+	if _, before := ordered(window, len(stages), seen.Event); before {
 		e.metrics.observed(OutcomeStaged)
 		return false, nil
 	}
@@ -78,7 +79,7 @@ func (e *Engine) completed(ctx context.Context, program *detection.Program, matc
 // The earliest assignment of the window to the stages, in event time. Earliest
 // finds one whenever one exists: a later choice at any stage leaves no more of
 // the window for the stages after it than the earliest does.
-func ordered(window []detectionstate.Observation, stages int, without string) ([]detectionstate.Observation, bool) {
+func ordered(window []detectionstate.Observation, stages int, without detectionstate.EventName) ([]detectionstate.Observation, bool) {
 	told := make([]detectionstate.Observation, 0, stages)
 	for _, seen := range window {
 		if len(told) == stages {
@@ -97,7 +98,7 @@ func correlated(stages []string, told []detectionstate.Observation, group []dete
 
 	widest, narrowest := told[0].Skew, told[0].Skew
 	for index, seen := range told {
-		found.Stages = append(found.Stages, detection.Satisfied{Name: stages[index], Event: seen.Event, At: seen.At})
+		found.Stages = append(found.Stages, detection.Satisfied{Name: stages[index], Event: seen.Event.ID, At: seen.At})
 		widest = max(widest, seen.Skew)
 		narrowest = min(narrowest, seen.Skew)
 	}

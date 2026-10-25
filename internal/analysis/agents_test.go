@@ -112,10 +112,7 @@ func TestAStoryAcrossAgentsIsNamedTheSameWhicheverEventArrivesLast(t *testing.T)
 			len(inOrder), len(reversed))
 	}
 
-	renamed := inOrder[0].GetDetectionId() != reversed[0].GetDetectionId()
-	stillOpen(t, "BE-093", renamed,
-		"a detection is named after the agent of the event that completed it, so the arrival order renames a story")
-	if renamed {
+	if inOrder[0].GetDetectionId() != reversed[0].GetDetectionId() {
 		t.Fatalf("one story was named %s in order and %s reversed",
 			inOrder[0].GetDetectionId(), reversed[0].GetDetectionId())
 	}

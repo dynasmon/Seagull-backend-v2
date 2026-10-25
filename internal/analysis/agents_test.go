@@ -68,6 +68,17 @@ func TestTwoAgentsSendingOneEventIdentifierStillTellAStory(t *testing.T) {
 	}
 }
 
+func TestAnotherAgentsEventUnderAToldStagesIdentifierDoesNotTellTheStoryAgain(t *testing.T) {
+	made := process(t, story(t, 5*time.Minute, "authentication.network.source.ip"), []analysis.Record{
+		failedOn(t, "web-01", "shared-000000001", 0),
+		acceptedOn(t, "web-02", "web-02-000000001", 30*time.Second),
+		failedOn(t, "web-03", "shared-000000001", 10*time.Second),
+	})
+	if len(made) != 1 {
+		t.Fatalf("a story told once, then a failure another agent sent under its first stage's identifier, made %d detections", len(made))
+	}
+}
+
 func TestAStoryAcrossAgentsIsNamedTheSameWhicheverEventArrivesLast(t *testing.T) {
 	program := story(t, 5*time.Minute, "authentication.network.source.ip")
 	failedOnOne := failedOn(t, "web-01", "web-01-000000001", 0)

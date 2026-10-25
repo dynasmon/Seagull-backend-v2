@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/dynasmon/Seagull-backend-v2/internal/analysis"
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
@@ -94,6 +96,16 @@ func interleavings(partitions ...[]analysis.Record) [][]analysis.Record {
 	return orders
 }
 
+func eventIn(t *testing.T, record analysis.Record) *eventv1.Event {
+	t.Helper()
+
+	var decoded eventv1.Event
+	if err := proto.Unmarshal(record.Value, &decoded); err != nil {
+		t.Fatalf("decode event: %v", err)
+	}
+	return &decoded
+}
+
 func stageAgents(made *detectionv1.Detection) []string {
 	agents := make([]string, 0, len(made.GetCorrelation().GetStages()))
 	for _, stage := range made.GetCorrelation().GetStages() {
@@ -169,6 +181,31 @@ func TestAStoryAcrossAgentsIsOneDetectionUnderOneNameInEveryOrderItsPartitionsIn
 		}
 		if err := detection.ValidateContract(made[0]); err != nil {
 			t.Errorf("the consumers of a story across agents refuse it: %v", err)
+		}
+	}
+}
+
+func TestACountAcrossAgentsDecidesAsOftenInEveryInterleavingAndNamesWhatCarriedItOverItsThreshold(t *testing.T) {
+	program := threshold(t, 2, 10*time.Minute, "authentication.network.source.ip")
+	orders := interleavings(
+		[]analysis.Record{
+			failedOn(t, "web-01", "web-01-000000001", 0),
+			failedOn(t, "web-01", "web-01-000000002", 20*time.Second),
+		},
+		[]analysis.Record{failedOn(t, "web-02", "web-02-000000001", 10*time.Second)},
+	)
+
+	for _, order := range orders {
+		made := process(t, program, order)
+		if len(made) != 2 {
+			t.Fatalf("three failures across agents against a threshold of two made %d detections in one order", len(made))
+		}
+		for index, one := range made {
+			reached := eventIn(t, order[index+1])
+			if one.GetSourceEventIds()[0] != reached.GetEventId() || one.GetOrigin().GetAgentId() != reached.GetOrigin().GetAgentId() {
+				t.Errorf("the detection decided on the fold that kept the count at its threshold names %s from %s, not the event folded there",
+					one.GetSourceEventIds()[0], one.GetOrigin().GetAgentId())
+			}
 		}
 	}
 }

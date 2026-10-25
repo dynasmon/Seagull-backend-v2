@@ -9,7 +9,9 @@ const (
 )
 
 // Every bound below is part of the inventory contract. Storage schemas are
-// derived from these numbers; they are not derived from a storage schema.
+// derived from these numbers; they are not derived from a storage schema, and
+// what the backbone carries is derived from the bytes a record encodes to as
+// the gateway publishes it.
 const (
 	MaxRecordIDLength = 64
 	MinRecordIDLength = 8
@@ -19,6 +21,8 @@ const (
 	// the body ceiling does, so a producer cannot buy memory with item counts.
 	MaxItemsPerRecord = 10_000
 	MaxItemsPerBatch  = 20_000
+
+	MaxRecordBytes = 4 << 20
 
 	MaxNameLength         = 256
 	MaxVersionLength      = 128

@@ -7,7 +7,11 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kadm"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentstatus"
+	"github.com/dynasmon/Seagull-backend-v2/internal/assessment"
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
+	"github.com/dynasmon/Seagull-backend-v2/internal/event"
+	"github.com/dynasmon/Seagull-backend-v2/internal/inventory"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/vulnerability"
 )
@@ -423,6 +427,10 @@ func TestEveryTopicCarriesTheLargestRecordItsProducersMayWrite(t *testing.T) {
 	}{
 		{topology.Detections, detection.MaxDetectionBytes},
 		{topology.Advisories, vulnerability.MaxAdvisoryBytes},
+		{topology.Inventory, inventory.MaxRecordBytes},
+		{topology.Events, event.MaxEventBytes},
+		{topology.Status, agentstatus.MaxReportBytes},
+		{topology.Assessments, assessment.MaxAssessmentBytes},
 	} {
 		if int(kind.topic.MaxMessageBytes) < kind.largest+1<<10 {
 			t.Errorf("%s carries %d bytes and its producers may write a record of %d, with a key, headers and framing beside it",

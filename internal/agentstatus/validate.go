@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -17,11 +18,18 @@ func Validate(report *agentv1.Status, now time.Time, policy event.Policy) error 
 	if err := ValidateContract(report); err != nil {
 		return err
 	}
+	if size := proto.Size(report); size > MaxReportBytes {
+		return &event.Violation{
+			Field:  "report",
+			Reason: fmt.Sprintf("encodes to %d bytes and the ceiling is %d", size, MaxReportBytes),
+		}
+	}
 	return admissible(report.GetReportedAt().AsTime(), now, policy)
 }
 
 // Every rule that does not depend on when the report is examined, so the
-// projector reads back what the gateway admitted without refusing it for age.
+// projector reads back what the gateway admitted without refusing it for age or
+// for what it weighs: a report a topic holds was carried.
 func ValidateContract(report *agentv1.Status) error {
 	if report == nil {
 		return &event.Violation{Field: "report", Reason: "is missing"}

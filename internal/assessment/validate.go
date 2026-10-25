@@ -7,6 +7,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	assessmentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/assessment/v1"
@@ -16,11 +18,18 @@ func Validate(assessed *assessmentv1.Assessment, now time.Time, policy event.Pol
 	if err := ValidateContract(assessed); err != nil {
 		return err
 	}
+	if size := proto.Size(assessed); size > MaxAssessmentBytes {
+		return &event.Violation{
+			Field:  "assessment",
+			Reason: fmt.Sprintf("encodes to %d bytes and the ceiling is %d", size, MaxAssessmentBytes),
+		}
+	}
 	return admissible(assessed.GetAssessedAt().AsTime(), now, policy)
 }
 
 // Every rule that does not depend on when the assessment is examined, so the
-// projector reads back what the gateway admitted without refusing it for age.
+// projector reads back what the gateway admitted without refusing it for age or
+// for what it weighs: an assessment a topic holds was carried.
 func ValidateContract(assessed *assessmentv1.Assessment) error {
 	if assessed == nil {
 		return &event.Violation{Field: "assessment", Reason: "is missing"}

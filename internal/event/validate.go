@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
@@ -34,12 +35,19 @@ func Validate(record *eventv1.Event, now time.Time, policy Policy) error {
 	if err := ValidateContract(record); err != nil {
 		return err
 	}
+	if size := proto.Size(record); size > MaxEventBytes {
+		return &Violation{
+			Field:  "event",
+			Reason: fmt.Sprintf("encodes to %d bytes and the ceiling is %d", size, MaxEventBytes),
+		}
+	}
 	return admissible(record.GetTime(), now, policy)
 }
 
 // Every rule that does not depend on when the record is examined. A replay must
 // not apply the gateway's admission window, or it would refuse the events it
-// exists to reprocess.
+// exists to reprocess, and it does not weigh one either: an event a topic holds
+// was carried, and only admission decides what the backbone is asked to carry.
 func ValidateContract(record *eventv1.Event) error {
 	if record == nil {
 		return &Violation{Field: "event", Reason: "is missing"}

@@ -167,3 +167,22 @@ func TestTheAssessmentAdmitterRefusesAnIncompletePolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestAnAssessmentHeavierThanTheBackboneCarriesIsRefusedForGood(t *testing.T) {
+	backbone := &recordingAssessments{}
+	admitter := newAssessmentAdmitter(t, backbone)
+
+	heavy := fixtures.Posture{AssessmentID: "asm-0000000002", At: admissionClock.Add(-time.Minute)}.Assessment()
+	if !fixtures.Bloat(heavy, assessment.MaxAssessmentBytes+4<<10) {
+		t.Fatal("no assessment weighs that much")
+	}
+	_, err := admitter.Admit(context.Background(), identity(), "acme", fixtures.AssessmentBatch("assessment-1", posture(), heavy))
+
+	rejection := rejectionOf(t, err)
+	if rejection.Code != ingest.CodeInvalidAssessment || rejection.EventIndex != 1 || rejection.Field != "assessment" {
+		t.Fatalf("an assessment above the ceiling was refused as %+v, and an agent sends again whatever is not refused by its index", rejection)
+	}
+	if len(backbone.published) != 0 {
+		t.Fatal("a batch holding an assessment the backbone cannot carry reached the backbone")
+	}
+}

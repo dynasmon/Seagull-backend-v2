@@ -41,3 +41,4 @@ rediscovered by reading the code.
 - [35. An alert key names a field the event contract declares, and reads what the detection holds in it](0035-an-alert-key-names-a-field-the-contract-declares.md)
 - [36. Detection state is read back from the last record a reader committed, never from the clock](0036-state-is-read-back-from-the-last-record-committed.md)
 - [37. Every topic declares the largest batch it carries, and the gateway admits no record its topic would refuse](0037-a-record-is-bounded-by-what-its-topic-carries.md)
+- [38. An observation in detection state is named by the agent that sent its event as well as by its identifier](0038-an-observation-is-named-by-the-agent-that-sent-its-event.md)

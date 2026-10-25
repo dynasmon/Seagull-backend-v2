@@ -72,6 +72,22 @@ func TestACountRisesWithWhatOneKeyHasSeenAndTwoKeysCountApart(t *testing.T) {
 	}
 }
 
+func TestTwoAgentsSendingOneIdentifierAreTwoObservations(t *testing.T) {
+	keeper := kept(t, bounded())
+	key := keyed("203.0.113.10")
+	fromOne, fromAnother := saw("e1", 0, ""), saw("e1", 1, "")
+	fromAnother.Event.Agent = "web-02"
+
+	observe(t, keeper, key, fromOne)
+	state := observe(t, keeper, key, fromAnother)
+	if state.Repeated || state.Count != 2 {
+		t.Errorf("two agents' events under one identifier came to %+v", state)
+	}
+	if again := observe(t, keeper, key, fromAnother); !again.Repeated || again.Count != 2 {
+		t.Errorf("one agent's event delivered twice came to %+v", again)
+	}
+}
+
 func TestTheSameEventTwiceCountsOnce(t *testing.T) {
 	keeper := kept(t, bounded())
 	key := keyed("203.0.113.10")

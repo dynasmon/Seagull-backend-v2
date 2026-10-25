@@ -66,12 +66,17 @@ func correlation(row Row) *detectionv1.Correlation {
 		Window:      durationpb.New(time.Duration(row.CorrelationWindowSeconds) * time.Second),
 		ClockSpread: durationpb.New(time.Duration(row.CorrelationClockSpreadMillis) * time.Millisecond),
 	}
+	named := len(row.CorrelationStageAgentID) >= width
 	for index := range width {
-		told.Stages = append(told.Stages, &detectionv1.Stage{
+		stage := &detectionv1.Stage{
 			Name:      row.CorrelationStageName[index],
 			EventId:   row.CorrelationStageEventID[index],
 			EventTime: moment(row.CorrelationStageEventTime[index]),
-		})
+		}
+		if named {
+			stage.AgentId = row.CorrelationStageAgentID[index]
+		}
+		told.Stages = append(told.Stages, stage)
 	}
 
 	grouped := min(len(row.CorrelationGroupField), len(row.CorrelationGroupValue), len(row.CorrelationGroupAbsent))

@@ -135,7 +135,7 @@ func TestAPublishedRulesetReachesAProcessThatWasNotRunning(t *testing.T) {
 	addresses := brokers(t)
 	topic := compactedTopic(t, addresses)
 
-	publisher, err := broker.NewRulesets(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	publisher, err := broker.NewRulesets(broker.Config{Brokers: addresses, Topic: topic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build a ruleset publisher: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestRollingBackReachesTheRulesetThatRanBefore(t *testing.T) {
 	addresses := brokers(t)
 	topic := compactedTopic(t, addresses)
 
-	publisher, err := broker.NewRulesets(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	publisher, err := broker.NewRulesets(broker.Config{Brokers: addresses, Topic: topic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build a ruleset publisher: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestAFollowerSeesARulesetPublishedAfterItStarted(t *testing.T) {
 	addresses := brokers(t)
 	topic := compactedTopic(t, addresses)
 
-	publisher, err := broker.NewRulesets(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	publisher, err := broker.NewRulesets(broker.Config{Brokers: addresses, Topic: topic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build a ruleset publisher: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestARevisionRepublishedAskingSomethingElseIsRefusedByEveryReader(t *testin
 	addresses := brokers(t)
 	topic := compactedTopic(t, addresses)
 
-	publisher, err := broker.NewRulesets(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	publisher, err := broker.NewRulesets(broker.Config{Brokers: addresses, Topic: topic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build a ruleset publisher: %v", err)
 	}
@@ -380,7 +380,7 @@ func TestTheActivationTrailOutlivesThePointersItReplaced(t *testing.T) {
 	addresses := brokers(t)
 	topic := compactedTopic(t, addresses)
 
-	publisher, err := broker.NewRulesets(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	publisher, err := broker.NewRulesets(broker.Config{Brokers: addresses, Topic: topic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build a ruleset publisher: %v", err)
 	}
@@ -443,7 +443,7 @@ func TestAnActivationPublishedTwiceIsOneLineOfTheTrail(t *testing.T) {
 	addresses := brokers(t)
 	topic := compactedTopic(t, addresses)
 
-	publisher, err := broker.NewRulesets(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	publisher, err := broker.NewRulesets(broker.Config{Brokers: addresses, Topic: topic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build a ruleset publisher: %v", err)
 	}

@@ -22,10 +22,11 @@ const (
 var schemaVersion = strconv.Itoa(event.SchemaVersion)
 
 type Config struct {
-	Brokers  []string
-	Topic    string
-	ClientID string
-	Security Security
+	Brokers         []string
+	Topic           string
+	MaxMessageBytes int32
+	ClientID        string
+	Security        Security
 }
 
 type Publisher struct {
@@ -35,13 +36,18 @@ type Publisher struct {
 
 // Records are acknowledged by every in-sync replica before a produce returns,
 // and the producer is idempotent: an agent is told its batch is durable only
-// once the backbone owns it.
+// once the backbone owns it. A batch is never larger than its topic carries,
+// and a ceiling the client chose for itself would refuse a record the topic
+// takes, or build a batch the topic refuses.
 func newProducerClient(config Config) (*kgo.Client, error) {
 	if len(config.Brokers) == 0 {
 		return nil, errors.New("the backbone needs at least one broker address")
 	}
 	if config.Topic == "" {
 		return nil, errors.New("the backbone needs a topic")
+	}
+	if config.MaxMessageBytes < 1 {
+		return nil, fmt.Errorf("publishing to %s needs the largest record batch it carries", config.Topic)
 	}
 
 	secured, err := config.Security.options()
@@ -53,6 +59,7 @@ func newProducerClient(config Config) (*kgo.Client, error) {
 		kgo.SeedBrokers(config.Brokers...),
 		kgo.ClientID(config.ClientID),
 		kgo.RequiredAcks(kgo.AllISRAcks()),
+		kgo.ProducerBatchMaxBytes(config.MaxMessageBytes),
 		kgo.ProducerBatchCompression(kgo.ZstdCompression(), kgo.NoCompression()),
 		kgo.ProducerLinger(5 * time.Millisecond),
 		kgo.MaxBufferedRecords(200_000),

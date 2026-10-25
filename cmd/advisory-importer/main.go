@@ -42,10 +42,11 @@ func importer(ctx context.Context) error {
 	}
 
 	publisher, err := broker.NewAdvisories(broker.Config{
-		Brokers:  settings.brokers,
-		Topic:    settings.topology.Advisories.Name,
-		ClientID: serviceName,
-		Security: settings.security,
+		Brokers:         settings.brokers,
+		Topic:           settings.topology.Advisories.Name,
+		MaxMessageBytes: settings.topology.Advisories.MaxMessageBytes,
+		ClientID:        serviceName,
+		Security:        settings.security,
 	})
 	if err != nil {
 		return err

@@ -80,10 +80,11 @@ func writer(ctx context.Context) error {
 	}
 
 	refused, err := broker.NewQuarantine(broker.Config{
-		Brokers:  settings.brokers,
-		Topic:    settings.topology.DetectionsQuarantine.Name,
-		ClientID: serviceName,
-		Security: settings.security,
+		Brokers:         settings.brokers,
+		Topic:           settings.topology.DetectionsQuarantine.Name,
+		MaxMessageBytes: settings.topology.DetectionsQuarantine.MaxMessageBytes,
+		ClientID:        serviceName,
+		Security:        settings.security,
 	})
 	if err != nil {
 		return err

@@ -7,7 +7,9 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kadm"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
+	"github.com/dynasmon/Seagull-backend-v2/internal/vulnerability"
 )
 
 func declared(t *testing.T, environment map[string]string) Topology {
@@ -136,13 +138,14 @@ func TestEveryTopicPropertyIsConfigurablePerEnvironment(t *testing.T) {
 
 func TestAnIncompleteTopicIsRefused(t *testing.T) {
 	complete := Topic{
-		Name:        "security.events.raw",
-		Partitions:  12,
-		Replicas:    1,
-		Retention:   time.Hour,
-		Cleanup:     cleanupDelete,
-		Compression: compressionZstd,
-		MinInSync:   1,
+		Name:            "security.events.raw",
+		Partitions:      12,
+		Replicas:        1,
+		Retention:       time.Hour,
+		Cleanup:         cleanupDelete,
+		Compression:     compressionZstd,
+		MinInSync:       1,
+		MaxMessageBytes: 1 << 20,
 	}
 	if err := complete.Validate(); err != nil {
 		t.Fatalf("a complete topic was refused: %v", err)
@@ -160,6 +163,7 @@ func TestAnIncompleteTopicIsRefused(t *testing.T) {
 			topic.Replicas, topic.MinInSync = 2, 3
 			return topic
 		},
+		"no largest batch": func(topic Topic) Topic { topic.MaxMessageBytes = 0; return topic },
 	} {
 		if err := broken(complete).Validate(); err == nil {
 			t.Errorf("a topic with %s was accepted", name)
@@ -176,7 +180,7 @@ func TestTheSettingsOfATopicAreOrdered(t *testing.T) {
 	for _, entry := range topic.settings() {
 		keys = append(keys, entry.key)
 	}
-	if want := []string{retentionKey, cleanupKey, compressionKey, minInSyncKey}; !slices.Equal(keys, want) {
+	if want := []string{retentionKey, cleanupKey, compressionKey, minInSyncKey, maxMessageKey}; !slices.Equal(keys, want) {
 		t.Fatalf("settings are ordered %v, want %v", keys, want)
 	}
 
@@ -325,6 +329,29 @@ func TestFewerInSyncReplicasThanDeclaredBreaksTheTopology(t *testing.T) {
 	}
 }
 
+func TestATopicCarryingLessThanDeclaredBreaksTheTopology(t *testing.T) {
+	topic := Topic{Name: "t", Partitions: 1, Replicas: 1, Cleanup: cleanupCompact, Compression: compressionZstd, MinInSync: 1, MaxMessageBytes: 4_259_840}
+
+	var carried *setting
+	for _, entry := range topic.settings() {
+		if entry.key == maxMessageKey {
+			carried = &entry
+		}
+	}
+	if carried == nil || carried.value != "4259840" {
+		t.Fatalf("the largest batch reaches the broker as %+v", carried)
+	}
+
+	short := difference{key: maxMessageKey, held: "1048576", declared: carried.value, contract: carried.contract}
+	if !short.breaks() {
+		t.Error("a topic refusing a batch the topology declares it carries was reported as drift, so a record the gateway admitted would never be durable")
+	}
+	wider := difference{key: maxMessageKey, held: "8388608", declared: carried.value, contract: carried.contract}
+	if wider.breaks() {
+		t.Error("a topic carrying more than the topology declares stopped a process from serving")
+	}
+}
+
 func TestAnUnboundedValueIsNeverShortOfWhatWasDeclared(t *testing.T) {
 	if shortOf("-1", "172800000") {
 		t.Error("unbounded retention was read as shorter than two days")
@@ -345,6 +372,7 @@ func TestEverySettingDeclaresWhatADifferenceMeans(t *testing.T) {
 		cleanupKey:     exact,
 		compressionKey: operational,
 		minInSyncKey:   atLeast,
+		maxMessageKey:  atLeast,
 	}
 
 	topic := Topic{Name: "t", Partitions: 1, Replicas: 1, Retention: 0, Cleanup: cleanupCompact, Compression: compressionZstd, MinInSync: 1}
@@ -355,6 +383,50 @@ func TestEverySettingDeclaresWhatADifferenceMeans(t *testing.T) {
 	for _, entry := range held {
 		if entry.contract != wanted[entry.key] {
 			t.Errorf("%s is classified %d", entry.key, entry.contract)
+		}
+	}
+}
+
+func TestNoTopicCarriesLessThanABrokerTakesByDefault(t *testing.T) {
+	for _, topic := range declared(t, map[string]string{}).Topics() {
+		if topic.MaxMessageBytes < 1_048_576 {
+			t.Errorf("%s carries batches of %d bytes, below the 1 MiB a broker takes by default, so the migrator would shrink what a deployment already writes",
+				topic.Name, topic.MaxMessageBytes)
+		}
+	}
+}
+
+func TestEveryQuarantineCarriesMoreThanTheStreamItQuarantines(t *testing.T) {
+	topology := declared(t, map[string]string{})
+
+	for _, stream := range []struct{ source, quarantine Topic }{
+		{topology.Events, topology.Quarantine},
+		{topology.Detections, topology.DetectionsQuarantine},
+		{topology.Inventory, topology.InventoryQuarantine},
+		{topology.Advisories, topology.AdvisoriesQuarantine},
+		{topology.Status, topology.StatusQuarantine},
+		{topology.Assessments, topology.AssessmentsQuarantine},
+	} {
+		if stream.quarantine.MaxMessageBytes <= stream.source.MaxMessageBytes {
+			t.Errorf("%s carries %d bytes and quarantines into %s, which carries %d: a refused record is copied whole and the reason travels beside it",
+				stream.source.Name, stream.source.MaxMessageBytes, stream.quarantine.Name, stream.quarantine.MaxMessageBytes)
+		}
+	}
+}
+
+func TestEveryTopicCarriesTheLargestRecordItsProducersMayWrite(t *testing.T) {
+	topology := declared(t, map[string]string{})
+
+	for _, kind := range []struct {
+		topic   Topic
+		largest int
+	}{
+		{topology.Detections, detection.MaxDetectionBytes},
+		{topology.Advisories, vulnerability.MaxAdvisoryBytes},
+	} {
+		if int(kind.topic.MaxMessageBytes) < kind.largest+1<<10 {
+			t.Errorf("%s carries %d bytes and its producers may write a record of %d, with a key, headers and framing beside it",
+				kind.topic.Name, kind.topic.MaxMessageBytes, kind.largest)
 		}
 	}
 }

@@ -3,9 +3,12 @@ package broker
 import (
 	"context"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/twmb/franz-go/pkg/kgo"
 )
+
+const maxDetailBytes = 4 << 10
 
 type Refused struct {
 	Key       []byte
@@ -45,7 +48,7 @@ func (q *Quarantine) Publish(ctx context.Context, refused []Refused) error {
 			Value: entry.Value,
 			Headers: []kgo.RecordHeader{
 				{Key: "quarantine-reason", Value: []byte(entry.Reason)},
-				{Key: "quarantine-detail", Value: []byte(entry.Detail)},
+				{Key: "quarantine-detail", Value: []byte(bounded(entry.Detail))},
 				{Key: "source-partition", Value: []byte(label(entry.Partition))},
 				{Key: "source-offset", Value: []byte(fmt.Sprint(entry.Offset))},
 			},
@@ -66,3 +69,16 @@ func (q *Quarantine) Ping(ctx context.Context) error {
 }
 
 func (q *Quarantine) Close() { q.client.Close() }
+
+// What a refusal says beside the record is bounded, so a quarantine carrying
+// its stream's largest batch and its framing always takes the copy.
+func bounded(detail string) string {
+	if len(detail) <= maxDetailBytes {
+		return detail
+	}
+	cut := maxDetailBytes
+	for cut > 0 && !utf8.RuneStart(detail[cut]) {
+		cut--
+	}
+	return detail[:cut]
+}

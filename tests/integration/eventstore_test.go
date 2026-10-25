@@ -269,9 +269,10 @@ func TestAPoisonRecordIsQuarantinedAndTheRestOfTheBatchIsStored(t *testing.T) {
 
 	quarantineTopic := temporaryTopic(t, addresses)
 	refused, err := broker.NewQuarantine(broker.Config{
-		Brokers:  addresses,
-		Topic:    quarantineTopic,
-		ClientID: "integration-test",
+		Brokers:         addresses,
+		Topic:           quarantineTopic,
+		MaxMessageBytes: temporaryCarriage,
+		ClientID:        "integration-test",
 	})
 	if err != nil {
 		t.Fatalf("build the quarantine publisher: %v", err)

@@ -36,6 +36,10 @@ func brokers(t *testing.T) []string {
 	return strings.Split(value, ",")
 }
 
+// What a topic created without settings carries, so a test publisher builds no
+// batch the topic it writes to would refuse.
+const temporaryCarriage = 1 << 20
+
 func temporaryTopic(t *testing.T, addresses []string) string {
 	t.Helper()
 
@@ -67,9 +71,10 @@ func TestAdmittedBatchBecomesDurableOnTheBackbone(t *testing.T) {
 	topic := temporaryTopic(t, addresses)
 
 	publisher, err := broker.NewPublisher(broker.Config{
-		Brokers:  addresses,
-		Topic:    topic,
-		ClientID: "integration-test",
+		Brokers:         addresses,
+		Topic:           topic,
+		MaxMessageBytes: temporaryCarriage,
+		ClientID:        "integration-test",
 	})
 	if err != nil {
 		t.Fatalf("build publisher: %v", err)
@@ -133,9 +138,10 @@ func TestPublisherReportsAnUnreachableBackbone(t *testing.T) {
 	brokers(t)
 
 	publisher, err := broker.NewPublisher(broker.Config{
-		Brokers:  []string{"127.0.0.1:1"},
-		Topic:    "security.events.raw",
-		ClientID: "integration-test",
+		Brokers:         []string{"127.0.0.1:1"},
+		Topic:           "security.events.raw",
+		MaxMessageBytes: temporaryCarriage,
+		ClientID:        "integration-test",
 	})
 	if err != nil {
 		t.Fatalf("build publisher: %v", err)
@@ -162,9 +168,10 @@ func TestReachableBackbonePassesReadiness(t *testing.T) {
 	addresses := brokers(t)
 
 	publisher, err := broker.NewPublisher(broker.Config{
-		Brokers:  addresses,
-		Topic:    "security.events.raw",
-		ClientID: "integration-test",
+		Brokers:         addresses,
+		Topic:           "security.events.raw",
+		MaxMessageBytes: temporaryCarriage,
+		ClientID:        "integration-test",
 	})
 	if err != nil {
 		t.Fatalf("build publisher: %v", err)
@@ -183,7 +190,7 @@ func TestConsumerLagIncludesRecordsWaitingForDurableProcessing(t *testing.T) {
 	addresses := brokers(t)
 	topic := temporaryTopic(t, addresses)
 	publisher, err := broker.NewPublisher(broker.Config{
-		Brokers: addresses, Topic: topic, ClientID: "integration-test",
+		Brokers: addresses, Topic: topic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test",
 	})
 	if err != nil {
 		t.Fatalf("build publisher: %v", err)

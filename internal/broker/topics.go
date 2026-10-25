@@ -12,7 +12,9 @@ import (
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
+	"github.com/dynasmon/Seagull-backend-v2/internal/vulnerability"
 )
 
 const (
@@ -20,6 +22,7 @@ const (
 	cleanupKey     = "cleanup.policy"
 	compressionKey = "compression.type"
 	minInSyncKey   = "min.insync.replicas"
+	maxMessageKey  = "max.message.bytes"
 
 	cleanupDelete   = "delete"
 	cleanupCompact  = "compact"
@@ -36,6 +39,8 @@ type Topic struct {
 
 	// With one replica in sync, acks from all of them is acks from one.
 	MinInSync int16
+
+	MaxMessageBytes int32
 }
 
 type Topology struct {
@@ -64,132 +69,146 @@ func LoadTopology(parser *config.Parser) Topology {
 	minInSync := int16(parser.Int("SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS", int(replicas)/2+1, 1, 15))
 	return Topology{
 		Events: Topic{
-			Name:        parser.String("SEAGULL_BACKBONE_EVENTS_TOPIC", "security.events.raw"),
-			Partitions:  int32(parser.Int("SEAGULL_BACKBONE_EVENTS_PARTITIONS", 12, 1, 1_000)),
-			Replicas:    replicas,
-			Retention:   parser.Duration("SEAGULL_BACKBONE_EVENTS_RETENTION", 7*24*time.Hour, time.Hour, 10*365*24*time.Hour),
-			Cleanup:     cleanupDelete,
-			Compression: compressionZstd,
-			MinInSync:   minInSync,
+			Name:            parser.String("SEAGULL_BACKBONE_EVENTS_TOPIC", "security.events.raw"),
+			Partitions:      int32(parser.Int("SEAGULL_BACKBONE_EVENTS_PARTITIONS", 12, 1, 1_000)),
+			Replicas:        replicas,
+			Retention:       parser.Duration("SEAGULL_BACKBONE_EVENTS_RETENTION", 7*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:         cleanupDelete,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			MaxMessageBytes: defaultCarriage,
 		},
 		Quarantine: Topic{
-			Name:        parser.String("SEAGULL_BACKBONE_QUARANTINE_TOPIC", "security.events.quarantine"),
-			Partitions:  int32(parser.Int("SEAGULL_BACKBONE_QUARANTINE_PARTITIONS", 3, 1, 1_000)),
-			Replicas:    replicas,
-			Retention:   parser.Duration("SEAGULL_BACKBONE_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
-			Cleanup:     cleanupDelete,
-			Compression: compressionZstd,
-			MinInSync:   minInSync,
+			Name:            parser.String("SEAGULL_BACKBONE_QUARANTINE_TOPIC", "security.events.quarantine"),
+			Partitions:      int32(parser.Int("SEAGULL_BACKBONE_QUARANTINE_PARTITIONS", 3, 1, 1_000)),
+			Replicas:        replicas,
+			Retention:       parser.Duration("SEAGULL_BACKBONE_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:         cleanupDelete,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			MaxMessageBytes: quarantining(defaultCarriage),
 		},
 		Detections: Topic{
-			Name:        parser.String("SEAGULL_BACKBONE_DETECTIONS_TOPIC", "security.detections"),
-			Partitions:  int32(parser.Int("SEAGULL_BACKBONE_DETECTIONS_PARTITIONS", 6, 1, 1_000)),
-			Replicas:    replicas,
-			Retention:   parser.Duration("SEAGULL_BACKBONE_DETECTIONS_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
-			Cleanup:     cleanupDelete,
-			Compression: compressionZstd,
-			MinInSync:   minInSync,
+			Name:            parser.String("SEAGULL_BACKBONE_DETECTIONS_TOPIC", "security.detections"),
+			Partitions:      int32(parser.Int("SEAGULL_BACKBONE_DETECTIONS_PARTITIONS", 6, 1, 1_000)),
+			Replicas:        replicas,
+			Retention:       parser.Duration("SEAGULL_BACKBONE_DETECTIONS_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:         cleanupDelete,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			MaxMessageBytes: carrying(detection.MaxDetectionBytes),
 		},
 		// One quarantine per stream, not one for the platform: a refused record
 		// carries the partition and offset it came from, and those only mean
 		// something alongside the topic they came from.
 		DetectionsQuarantine: Topic{
-			Name:        parser.String("SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_TOPIC", "security.detections.quarantine"),
-			Partitions:  int32(parser.Int("SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_PARTITIONS", 3, 1, 1_000)),
-			Replicas:    replicas,
-			Retention:   parser.Duration("SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
-			Cleanup:     cleanupDelete,
-			Compression: compressionZstd,
-			MinInSync:   minInSync,
+			Name:            parser.String("SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_TOPIC", "security.detections.quarantine"),
+			Partitions:      int32(parser.Int("SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_PARTITIONS", 3, 1, 1_000)),
+			Replicas:        replicas,
+			Retention:       parser.Duration("SEAGULL_BACKBONE_DETECTIONS_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:         cleanupDelete,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			MaxMessageBytes: quarantining(carrying(detection.MaxDetectionBytes)),
 		},
 		Inventory: Topic{
-			Name:        parser.String("SEAGULL_BACKBONE_INVENTORY_TOPIC", "security.inventory.raw"),
-			Partitions:  int32(parser.Int("SEAGULL_BACKBONE_INVENTORY_PARTITIONS", 6, 1, 1_000)),
-			Replicas:    replicas,
-			Retention:   parser.Duration("SEAGULL_BACKBONE_INVENTORY_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
-			Cleanup:     cleanupDelete,
-			Compression: compressionZstd,
-			MinInSync:   minInSync,
+			Name:            parser.String("SEAGULL_BACKBONE_INVENTORY_TOPIC", "security.inventory.raw"),
+			Partitions:      int32(parser.Int("SEAGULL_BACKBONE_INVENTORY_PARTITIONS", 6, 1, 1_000)),
+			Replicas:        replicas,
+			Retention:       parser.Duration("SEAGULL_BACKBONE_INVENTORY_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:         cleanupDelete,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			MaxMessageBytes: defaultCarriage,
 		},
 		InventoryQuarantine: Topic{
-			Name:        parser.String("SEAGULL_BACKBONE_INVENTORY_QUARANTINE_TOPIC", "security.inventory.quarantine"),
-			Partitions:  int32(parser.Int("SEAGULL_BACKBONE_INVENTORY_QUARANTINE_PARTITIONS", 3, 1, 1_000)),
-			Replicas:    replicas,
-			Retention:   parser.Duration("SEAGULL_BACKBONE_INVENTORY_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
-			Cleanup:     cleanupDelete,
-			Compression: compressionZstd,
-			MinInSync:   minInSync,
+			Name:            parser.String("SEAGULL_BACKBONE_INVENTORY_QUARANTINE_TOPIC", "security.inventory.quarantine"),
+			Partitions:      int32(parser.Int("SEAGULL_BACKBONE_INVENTORY_QUARANTINE_PARTITIONS", 3, 1, 1_000)),
+			Replicas:        replicas,
+			Retention:       parser.Duration("SEAGULL_BACKBONE_INVENTORY_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:         cleanupDelete,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			MaxMessageBytes: quarantining(defaultCarriage),
 		},
 		Advisories: Topic{
-			Name:        parser.String("SEAGULL_BACKBONE_ADVISORIES_TOPIC", "security.advisories"),
-			Partitions:  1,
-			Replicas:    replicas,
-			Cleanup:     cleanupCompact,
-			Compression: compressionZstd,
-			MinInSync:   minInSync,
+			Name:            parser.String("SEAGULL_BACKBONE_ADVISORIES_TOPIC", "security.advisories"),
+			Partitions:      1,
+			Replicas:        replicas,
+			Cleanup:         cleanupCompact,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			MaxMessageBytes: carrying(vulnerability.MaxAdvisoryBytes),
 		},
 		AdvisoriesQuarantine: Topic{
-			Name:        parser.String("SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_TOPIC", "security.advisories.quarantine"),
-			Partitions:  int32(parser.Int("SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_PARTITIONS", 1, 1, 1_000)),
-			Replicas:    replicas,
-			Retention:   parser.Duration("SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
-			Cleanup:     cleanupDelete,
-			Compression: compressionZstd,
-			MinInSync:   minInSync,
+			Name:            parser.String("SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_TOPIC", "security.advisories.quarantine"),
+			Partitions:      int32(parser.Int("SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_PARTITIONS", 1, 1, 1_000)),
+			Replicas:        replicas,
+			Retention:       parser.Duration("SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:         cleanupDelete,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			MaxMessageBytes: quarantining(carrying(vulnerability.MaxAdvisoryBytes)),
 		},
 		Rulesets: Topic{
-			Name:        parser.String("SEAGULL_BACKBONE_RULESETS_TOPIC", "security.rulesets"),
-			Partitions:  1,
-			Replicas:    replicas,
-			Cleanup:     cleanupCompact,
-			Compression: compressionZstd,
-			MinInSync:   minInSync,
+			Name:            parser.String("SEAGULL_BACKBONE_RULESETS_TOPIC", "security.rulesets"),
+			Partitions:      1,
+			Replicas:        replicas,
+			Cleanup:         cleanupCompact,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			MaxMessageBytes: defaultCarriage,
 		},
 		Agents: Topic{
-			Name:        parser.String("SEAGULL_BACKBONE_AGENTS_TOPIC", "security.agents"),
-			Partitions:  1,
-			Replicas:    replicas,
-			Cleanup:     cleanupCompact,
-			Compression: compressionZstd,
-			MinInSync:   minInSync,
+			Name:            parser.String("SEAGULL_BACKBONE_AGENTS_TOPIC", "security.agents"),
+			Partitions:      1,
+			Replicas:        replicas,
+			Cleanup:         cleanupCompact,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			MaxMessageBytes: defaultCarriage,
 		},
 		Status: Topic{
-			Name:        parser.String("SEAGULL_BACKBONE_STATUS_TOPIC", "security.agents.status"),
-			Partitions:  int32(parser.Int("SEAGULL_BACKBONE_STATUS_PARTITIONS", 3, 1, 1_000)),
-			Replicas:    replicas,
-			Cleanup:     cleanupCompact,
-			Compression: compressionZstd,
-			MinInSync:   minInSync,
+			Name:            parser.String("SEAGULL_BACKBONE_STATUS_TOPIC", "security.agents.status"),
+			Partitions:      int32(parser.Int("SEAGULL_BACKBONE_STATUS_PARTITIONS", 3, 1, 1_000)),
+			Replicas:        replicas,
+			Cleanup:         cleanupCompact,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			MaxMessageBytes: defaultCarriage,
 		},
 		StatusQuarantine: Topic{
-			Name:        parser.String("SEAGULL_BACKBONE_STATUS_QUARANTINE_TOPIC", "security.agents.status.quarantine"),
-			Partitions:  int32(parser.Int("SEAGULL_BACKBONE_STATUS_QUARANTINE_PARTITIONS", 1, 1, 1_000)),
-			Replicas:    replicas,
-			Retention:   parser.Duration("SEAGULL_BACKBONE_STATUS_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
-			Cleanup:     cleanupDelete,
-			Compression: compressionZstd,
-			MinInSync:   minInSync,
+			Name:            parser.String("SEAGULL_BACKBONE_STATUS_QUARANTINE_TOPIC", "security.agents.status.quarantine"),
+			Partitions:      int32(parser.Int("SEAGULL_BACKBONE_STATUS_QUARANTINE_PARTITIONS", 1, 1, 1_000)),
+			Replicas:        replicas,
+			Retention:       parser.Duration("SEAGULL_BACKBONE_STATUS_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:         cleanupDelete,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			MaxMessageBytes: quarantining(defaultCarriage),
 		},
 		// Every assessment and not the newest of each agent, unlike status: an
 		// agent keeps an assessment until the platform holds it so that what a
 		// posture was can be read back, and a compacted topic would drop that.
 		Assessments: Topic{
-			Name:        parser.String("SEAGULL_BACKBONE_ASSESSMENTS_TOPIC", "security.assessments"),
-			Partitions:  int32(parser.Int("SEAGULL_BACKBONE_ASSESSMENTS_PARTITIONS", 3, 1, 1_000)),
-			Replicas:    replicas,
-			Retention:   parser.Duration("SEAGULL_BACKBONE_ASSESSMENTS_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
-			Cleanup:     cleanupDelete,
-			Compression: compressionZstd,
-			MinInSync:   minInSync,
+			Name:            parser.String("SEAGULL_BACKBONE_ASSESSMENTS_TOPIC", "security.assessments"),
+			Partitions:      int32(parser.Int("SEAGULL_BACKBONE_ASSESSMENTS_PARTITIONS", 3, 1, 1_000)),
+			Replicas:        replicas,
+			Retention:       parser.Duration("SEAGULL_BACKBONE_ASSESSMENTS_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:         cleanupDelete,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			MaxMessageBytes: defaultCarriage,
 		},
 		AssessmentsQuarantine: Topic{
-			Name:        parser.String("SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_TOPIC", "security.assessments.quarantine"),
-			Partitions:  int32(parser.Int("SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_PARTITIONS", 1, 1, 1_000)),
-			Replicas:    replicas,
-			Retention:   parser.Duration("SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
-			Cleanup:     cleanupDelete,
-			Compression: compressionZstd,
-			MinInSync:   minInSync,
+			Name:            parser.String("SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_TOPIC", "security.assessments.quarantine"),
+			Partitions:      int32(parser.Int("SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_PARTITIONS", 1, 1, 1_000)),
+			Replicas:        replicas,
+			Retention:       parser.Duration("SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:         cleanupDelete,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			MaxMessageBytes: quarantining(defaultCarriage),
 		},
 	}
 }
@@ -227,6 +246,8 @@ func (t Topic) Validate() error {
 	case t.MinInSync > t.Replicas:
 		return fmt.Errorf("%s keeps %d replicas and would need %d of them in sync, so no write could ever be acknowledged",
 			t.Name, t.Replicas, t.MinInSync)
+	case t.MaxMessageBytes < 1:
+		return fmt.Errorf("%s needs the largest record batch it carries", t.Name)
 	}
 	return nil
 }
@@ -238,12 +259,13 @@ type setting struct {
 
 // What a difference between the broker and the topology means. Retention and
 // compression cost the platform a window or some disk, and a process that
-// refused to serve over one would trade the stream for the setting. The other
-// two are promises: a cleanup policy decides whether a record still exists, and
+// refused to serve over one would trade the stream for the setting. The others
+// are promises: a cleanup policy decides whether a record still exists,
 // `acks=all` on fewer in-sync replicas than were declared reports a write
-// durable that is not, which is a wrong answer rather than a degraded one. A
-// value compared for being at least the declared one reads a negative as
-// unbounded, which is never short of anything.
+// durable that is not, and a topic carrying a smaller batch than was declared
+// refuses a record the platform already admitted, which is a wrong answer rather
+// than a degraded one. A value compared for being at least the declared one
+// reads a negative as unbounded, which is never short of anything.
 type agreement int
 
 const (
@@ -267,6 +289,7 @@ func (t Topic) settings() []setting {
 		{key: cleanupKey, value: t.Cleanup, contract: exact},
 		{key: compressionKey, value: t.Compression, contract: operational},
 		{key: minInSyncKey, value: strconv.FormatInt(int64(t.MinInSync), 10), contract: atLeast},
+		{key: maxMessageKey, value: strconv.FormatInt(int64(t.MaxMessageBytes), 10), contract: atLeast},
 	}
 }
 

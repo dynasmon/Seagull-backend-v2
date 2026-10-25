@@ -64,21 +64,23 @@ func TestTheEngineConsumesTheBackboneInAGroupOfItsOwn(t *testing.T) {
 	verifyCtx, cancelVerify := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelVerify()
 	if _, err := consumer.VerifyTopics(verifyCtx, broker.Topic{
-		Name:        topic,
-		Partitions:  3,
-		Replicas:    1,
-		Retention:   time.Hour,
-		Cleanup:     "delete",
-		Compression: "zstd",
-		MinInSync:   1,
+		Name:            topic,
+		Partitions:      3,
+		Replicas:        1,
+		Retention:       time.Hour,
+		Cleanup:         "delete",
+		Compression:     "zstd",
+		MinInSync:       1,
+		MaxMessageBytes: 1 << 20,
 	}); err != nil {
 		t.Fatalf("the engine refused a topic it should accept: %v", err)
 	}
 
 	detections, err := broker.NewDetections(broker.Config{
-		Brokers:  addresses,
-		Topic:    found,
-		ClientID: "integration-test",
+		Brokers:         addresses,
+		Topic:           found,
+		MaxMessageBytes: temporaryCarriage,
+		ClientID:        "integration-test",
 	})
 	if err != nil {
 		t.Fatalf("build the detection publisher: %v", err)
@@ -203,9 +205,10 @@ func TestACountingRuleDecidesOnceTheWindowReachesItsThreshold(t *testing.T) {
 	t.Cleanup(consumer.Close)
 
 	detections, err := broker.NewDetections(broker.Config{
-		Brokers:  addresses,
-		Topic:    found,
-		ClientID: "integration-test",
+		Brokers:         addresses,
+		Topic:           found,
+		MaxMessageBytes: temporaryCarriage,
+		ClientID:        "integration-test",
 	})
 	if err != nil {
 		t.Fatalf("build the detection publisher: %v", err)
@@ -295,9 +298,10 @@ func TestASequenceIsDecidedOffTheBackboneWhateverOrderItArrivesIn(t *testing.T) 
 	t.Cleanup(consumer.Close)
 
 	detections, err := broker.NewDetections(broker.Config{
-		Brokers:  addresses,
-		Topic:    found,
-		ClientID: "integration-test",
+		Brokers:         addresses,
+		Topic:           found,
+		MaxMessageBytes: temporaryCarriage,
+		ClientID:        "integration-test",
 	})
 	if err != nil {
 		t.Fatalf("build the detection publisher: %v", err)
@@ -366,7 +370,7 @@ func TestASequenceIsDecidedOffTheBackboneWhateverOrderItArrivesIn(t *testing.T) 
 func admitStory(t *testing.T, addresses []string, topic string) {
 	t.Helper()
 
-	publisher, err := broker.NewPublisher(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	publisher, err := broker.NewPublisher(broker.Config{Brokers: addresses, Topic: topic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build the publisher: %v", err)
 	}
@@ -554,7 +558,7 @@ func detectionsIn(t *testing.T, reported string) []string {
 func admitEvents(t *testing.T, addresses []string, topic string, count int) {
 	t.Helper()
 
-	publisher, err := broker.NewPublisher(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	publisher, err := broker.NewPublisher(broker.Config{Brokers: addresses, Topic: topic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build the publisher: %v", err)
 	}

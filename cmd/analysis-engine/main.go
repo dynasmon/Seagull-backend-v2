@@ -40,10 +40,11 @@ func engine(ctx context.Context) error {
 	// by a client of its own: the group that reads telemetry and the producer
 	// that reports findings fail apart from each other.
 	detections, err := broker.NewDetections(broker.Config{
-		Brokers:  settings.brokers,
-		Topic:    settings.topology.Detections.Name,
-		ClientID: serviceName,
-		Security: settings.security,
+		Brokers:         settings.brokers,
+		Topic:           settings.topology.Detections.Name,
+		MaxMessageBytes: settings.topology.Detections.MaxMessageBytes,
+		ClientID:        serviceName,
+		Security:        settings.security,
 	})
 	if err != nil {
 		return err

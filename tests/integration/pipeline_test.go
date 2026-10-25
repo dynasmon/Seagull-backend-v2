@@ -32,9 +32,10 @@ func TestAnAdmittedBatchReachesTheStore(t *testing.T) {
 	quarantineTopic := temporaryTopic(t, addresses)
 
 	publisher, err := broker.NewPublisher(broker.Config{
-		Brokers:  addresses,
-		Topic:    topic,
-		ClientID: "integration-test",
+		Brokers:         addresses,
+		Topic:           topic,
+		MaxMessageBytes: temporaryCarriage,
+		ClientID:        "integration-test",
 	})
 	if err != nil {
 		t.Fatalf("build the publisher: %v", err)
@@ -84,9 +85,10 @@ func TestAnAdmittedBatchReachesTheStore(t *testing.T) {
 	t.Cleanup(consumer.Close)
 
 	refused, err := broker.NewQuarantine(broker.Config{
-		Brokers:  addresses,
-		Topic:    quarantineTopic,
-		ClientID: "integration-test",
+		Brokers:         addresses,
+		Topic:           quarantineTopic,
+		MaxMessageBytes: temporaryCarriage,
+		ClientID:        "integration-test",
 	})
 	if err != nil {
 		t.Fatalf("build the quarantine publisher: %v", err)
@@ -208,9 +210,10 @@ func TestAnAdmittedInventoryBatchReachesTheCurrentAssetState(t *testing.T) {
 	quarantineTopic := temporaryTopic(t, addresses)
 
 	publisher, err := broker.NewInventory(broker.Config{
-		Brokers:  addresses,
-		Topic:    topic,
-		ClientID: "integration-test",
+		Brokers:         addresses,
+		Topic:           topic,
+		MaxMessageBytes: temporaryCarriage,
+		ClientID:        "integration-test",
 	})
 	if err != nil {
 		t.Fatalf("build the inventory publisher: %v", err)
@@ -266,9 +269,10 @@ func TestAnAdmittedInventoryBatchReachesTheCurrentAssetState(t *testing.T) {
 	t.Cleanup(consumer.Close)
 
 	refused, err := broker.NewQuarantine(broker.Config{
-		Brokers:  addresses,
-		Topic:    quarantineTopic,
-		ClientID: "integration-test",
+		Brokers:         addresses,
+		Topic:           quarantineTopic,
+		MaxMessageBytes: temporaryCarriage,
+		ClientID:        "integration-test",
 	})
 	if err != nil {
 		t.Fatalf("build the quarantine publisher: %v", err)

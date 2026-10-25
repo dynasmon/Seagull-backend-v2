@@ -106,10 +106,11 @@ func controlAPI(ctx context.Context) error {
 	}
 
 	admissions, err := broker.NewAgents(broker.Config{
-		Brokers:  settings.brokers,
-		Topic:    settings.topology.Agents.Name,
-		ClientID: serviceName,
-		Security: settings.security,
+		Brokers:         settings.brokers,
+		Topic:           settings.topology.Agents.Name,
+		MaxMessageBytes: settings.topology.Agents.MaxMessageBytes,
+		ClientID:        serviceName,
+		Security:        settings.security,
 	})
 	if err != nil {
 		return err
@@ -422,10 +423,11 @@ type rulesetLog struct {
 
 func publishedRulesets(ctx context.Context, settings configuration, platform *service.Service) (rulesetLog, error) {
 	publisher, err := broker.NewRulesets(broker.Config{
-		Brokers:  settings.brokers,
-		Topic:    settings.topology.Rulesets.Name,
-		ClientID: serviceName,
-		Security: settings.security,
+		Brokers:         settings.brokers,
+		Topic:           settings.topology.Rulesets.Name,
+		MaxMessageBytes: settings.topology.Rulesets.MaxMessageBytes,
+		ClientID:        serviceName,
+		Security:        settings.security,
 	})
 	if err != nil {
 		return rulesetLog{}, err

@@ -115,7 +115,7 @@ func TestAnAssessmentTheGatewayAdmitsIsKeptOnceWhateverTimesItIsPublished(t *tes
 	topic := temporaryTopic(t, addresses)
 	quarantineTopic := temporaryTopic(t, addresses)
 
-	publisher, err := broker.NewAssessments(broker.Config{Brokers: addresses, Topic: topic, ClientID: "integration-test"})
+	publisher, err := broker.NewAssessments(broker.Config{Brokers: addresses, Topic: topic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build the assessment publisher: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestAnAssessmentTheGatewayAdmitsIsKeptOnceWhateverTimesItIsPublished(t *tes
 	}
 	t.Cleanup(consumer.Close)
 
-	refused, err := broker.NewQuarantine(broker.Config{Brokers: addresses, Topic: quarantineTopic, ClientID: "integration-test"})
+	refused, err := broker.NewQuarantine(broker.Config{Brokers: addresses, Topic: quarantineTopic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build the quarantine publisher: %v", err)
 	}

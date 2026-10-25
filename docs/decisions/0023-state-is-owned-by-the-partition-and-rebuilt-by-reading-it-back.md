@@ -5,6 +5,12 @@
 > partition committed, not from the clock, so a reader stopped or behind for
 > longer than its recovery still rebuilds the window it was in, and a window the
 > topic no longer holds is reported.
+> Amended by [ADR 39](0039-a-detection-is-named-by-the-agent-and-identifier-of-every-event-that-decided-it.md):
+> a detection is named by its tenant, its rule and revision, and the agent and
+> identifier of every event it was decided from. A sole reader's read back
+> decides a story with one candidate per stage under the name it carried, and
+> can decide a count across agents under other names, which the alert plane
+> folds into the alert its key already holds.
 
 ## Context
 

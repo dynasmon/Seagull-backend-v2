@@ -119,11 +119,98 @@ func correlated(t *testing.T, subject detection.Rule, record *eventv1.Event) *de
 		Group:       program.Group(record),
 		ClockSpread: 3 * time.Second,
 		Stages: []detection.Satisfied{
-			{Name: subject.Sequence.Stages[0].Name, Event: record.GetEventId(), At: happened.Add(-30 * time.Second)},
-			{Name: subject.Sequence.Stages[1].Name, Event: "3f7c1d5e9b2a4c6d8e0f1a2b3c4d5e6f", At: happened},
+			{Name: subject.Sequence.Stages[0].Name, Agent: record.GetOrigin().GetAgentId(), Event: record.GetEventId(), At: happened.Add(-30 * time.Second)},
+			{Name: subject.Sequence.Stages[1].Name, Agent: record.GetOrigin().GetAgentId(), Event: "3f7c1d5e9b2a4c6d8e0f1a2b3c4d5e6f", At: happened},
 		},
 	}}
 	return match.Detected(ruleset, record, at)
+}
+
+func toldBy(t *testing.T, record *eventv1.Event, stages []detection.Satisfied) *detectionv1.Detection {
+	t.Helper()
+
+	at, err := time.Parse(time.RFC3339, decidedAt)
+	if err != nil {
+		t.Fatalf("the fixture time is not a time: %v", err)
+	}
+	subject := correlating()
+	program, err := detection.Compile(subject)
+	if err != nil {
+		t.Fatalf("a rule that should run was refused: %v", err)
+	}
+	_, evidence := program.Satisfied(record)
+	match := detection.Match{Rule: subject, Evidence: evidence, Correlated: detection.Correlated{
+		Group:  program.Group(record),
+		Stages: stages,
+	}}
+	return match.Detected(ruleset, record, at)
+}
+
+func stagesFrom(t *testing.T, first, second string) []detection.Satisfied {
+	t.Helper()
+
+	happened := observed(t).GetTime().GetEventTime().AsTime()
+	return []detection.Satisfied{
+		{Name: "a failed password", Agent: first, Event: "11111111-2222-3333-4444-555555555555", At: happened.Add(-30 * time.Second)},
+		{Name: "one that was accepted", Agent: second, Event: "3f7c1d5e9b2a4c6d8e0f1a2b3c4d5e6f", At: happened},
+	}
+}
+
+func completedOn(t *testing.T, agent string) *eventv1.Event {
+	t.Helper()
+
+	record := observed(t)
+	record.Origin.AgentId = agent
+	return record
+}
+
+func TestEachStageNamesTheAgentThatSentItsEvent(t *testing.T) {
+	made := toldBy(t, observed(t), stagesFrom(t, "web-01", "web-02"))
+
+	agents := make([]string, 0, 2)
+	for _, stage := range made.GetCorrelation().GetStages() {
+		agents = append(agents, stage.GetAgentId())
+	}
+	if !slices.Equal(agents, []string{"web-01", "web-02"}) {
+		t.Errorf("the stages of a story web-01 and web-02 told name %v", agents)
+	}
+}
+
+func TestAStoryIsNamedByWhichAgentSentWhichEventAndNotByTheEventThatCompletedIt(t *testing.T) {
+	one := toldBy(t, completedOn(t, "web-01"), stagesFrom(t, "web-01", "web-02"))
+	another := toldBy(t, completedOn(t, "web-02"), stagesFrom(t, "web-01", "web-02"))
+	if one.GetDetectionId() != another.GetDetectionId() {
+		t.Errorf("one story was named %s when web-01 completed it and %s when web-02 did",
+			one.GetDetectionId(), another.GetDetectionId())
+	}
+
+	swapped := toldBy(t, completedOn(t, "web-01"), stagesFrom(t, "web-02", "web-01"))
+	if swapped.GetDetectionId() == one.GetDetectionId() {
+		t.Errorf("two stories pairing the same agents with different events share the name %s", one.GetDetectionId())
+	}
+}
+
+func TestAStorySpanningAgentsIsAboutTheAgentOfItsLastStageAndNoHost(t *testing.T) {
+	record := completedOn(t, "web-01")
+	made := toldBy(t, record, stagesFrom(t, "web-01", "web-02"))
+
+	origin := made.GetOrigin()
+	if origin.GetAgentId() != "web-02" || origin.GetTenantId() != record.GetOrigin().GetTenantId() || origin.GetHost() != nil {
+		t.Errorf("a story web-01 began and web-02 ended is about %v", origin)
+	}
+	if err := detection.ValidateContract(made); err != nil {
+		t.Errorf("a story across agents was refused: %v", err)
+	}
+}
+
+func TestAStoryOfOneAgentCarriesTheOriginOfTheEventThatCompletedIt(t *testing.T) {
+	record := completedOn(t, "web-01")
+	made := toldBy(t, record, stagesFrom(t, "web-01", "web-01"))
+
+	if !proto.Equal(made.GetOrigin(), record.GetOrigin()) {
+		t.Errorf("a story of one agent is about %v and the event that completed it came from %v",
+			made.GetOrigin(), record.GetOrigin())
+	}
 }
 
 // The origin is copied from the event whole, so what it carries is the event

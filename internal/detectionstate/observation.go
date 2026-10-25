@@ -16,6 +16,15 @@ var (
 	ErrValueTooLong = fmt.Errorf("an observed value is at most %d bytes", MaxValueLength)
 )
 
+// An event as the platform names it: by the agent the gateway read from the
+// certificate the event was sent with, and by the identifier that agent gave
+// it. The identifier is the producer's to choose and two agents can choose one
+// alike, so it never names an event alone (ADR 38).
+type EventName struct {
+	Agent string
+	ID    string
+}
+
 // What one event contributes to a key. Event carries the deterministic id, so a
 // replayed batch counts once; At is event time, never the clock; Value is what a
 // cardinality counts distinct of or the stage a sequence reached, empty when the

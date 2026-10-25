@@ -20,6 +20,21 @@ func TestADetectionSurvivesTheRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAStoryStoredBeforeStagesNamedTheirAgentsComesBackWithItsStages(t *testing.T) {
+	row := Project(populated())
+	row.CorrelationStageAgentID = []string{}
+
+	stages := Restore(row).GetCorrelation().GetStages()
+	if len(stages) != 2 {
+		t.Fatalf("a story stored without its stages' agents came back with %d stages", len(stages))
+	}
+	for _, stage := range stages {
+		if stage.GetAgentId() != "" {
+			t.Errorf("a stage stored without its agent came back from %s", stage.GetAgentId())
+		}
+	}
+}
+
 func TestADetectionWithoutEvidenceComesBackWithout(t *testing.T) {
 	original := populated()
 	original.Evidence = nil

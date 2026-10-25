@@ -341,8 +341,8 @@ func investigate(endpoint, pki string) error {
 		fmt.Printf("  %s %s %s %s confidence=%s\n", one.GetRaisedAt().AsTime().Format(time.RFC3339),
 			one.GetIncidentId(), one.GetRule().GetId(), one.GetSeverity(), incident.Level(one.GetConfidence()))
 		for _, stage := range one.GetStages() {
-			fmt.Printf("    %s %s %s\n", stage.GetEventTime().AsTime().Format(time.RFC3339),
-				stage.GetName(), stage.GetEventId())
+			fmt.Printf("    %s %s %s from %s\n", stage.GetEventTime().AsTime().Format(time.RFC3339),
+				stage.GetName(), stage.GetEventId(), stage.GetAgentId())
 		}
 		for _, about := range one.GetGroup() {
 			fmt.Printf("    about %s=%s\n", about.GetField(), about.GetValue())

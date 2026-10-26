@@ -55,7 +55,7 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_GATEWAY_RATE_PER_SECOND` | `200` | per-agent batch budget, `0` disables it |
 | `SEAGULL_GATEWAY_RATE_BURST` | `400` | per-agent burst |
 | `SEAGULL_GATEWAY_RATE_TRACKED_AGENTS` | `10000` | how many agents the limiter remembers |
-| `SEAGULL_GATEWAY_ID` | `ingest-gateway` | recorded on every admitted event |
+| `SEAGULL_GATEWAY_ID` | `ingest-gateway` | recorded on every admitted event, so at most the 64 bytes the event contract lets it be; a longer one refuses to start |
 | `SEAGULL_GATEWAY_START_TIMEOUT` | `30s` | how long it will spend reading the agent roster before it gives up |
 | `SEAGULL_GATEWAY_ROSTER_RECORDS` | `500` | admission records read per fetch |
 | `SEAGULL_EVENT_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock an event may be |

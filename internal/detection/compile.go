@@ -77,7 +77,17 @@ func Compile(rule Rule) (*Program, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Program{rule: rule, root: root, stages: stages, fields: fields, grouped: grouped}, nil
+
+	program := &Program{rule: rule, root: root, stages: stages, fields: fields, grouped: grouped}
+	if heaviest := program.Heaviest(); heaviest > MaxDetectionBytes {
+		part := "match"
+		if rule.Sequence.Correlates() {
+			part = "sequence"
+		}
+		return nil, rule.violation(part, fmt.Sprintf(
+			"asks so much that a detection of it could encode to %d bytes, and a detection carries at most %d", heaviest, MaxDetectionBytes))
+	}
+	return program, nil
 }
 
 func (r Rule) compileMatching(read map[Field]struct{}) (node, []staged, error) {

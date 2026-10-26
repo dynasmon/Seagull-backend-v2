@@ -188,6 +188,14 @@ exact only where a single reader holds the whole stream, which is what
 assignment on every rebalance, and a reader that loses the stream it claimed
 stops rather than reporting a share of what such a rule was written to find. See
 [ADR 23](decisions/0023-state-is-owned-by-the-partition-and-rebuilt-by-reading-it-back.md).
+Even a sole reader meets its partitions in the order it fetches them, which a
+read back does not reproduce: a story with one event per stage is named the same
+whatever that order was, while a count across agents names the event that took
+it over its threshold, so a read back can decide it again under other names. Key
+such a rule in the alerting document by what it groups by, and the alert plane
+folds those into the alert already raised; under the built-in key, the rule and
+the agent, they split by whichever agent's event reached the threshold. See
+[ADR 39](decisions/0039-a-detection-is-named-by-the-agent-and-identifier-of-every-event-that-decided-it.md).
 
 The rule tree is the bootstrap, not the source of truth. The engine runs it
 until `security.rulesets` names a published ruleset to run, and from then on the

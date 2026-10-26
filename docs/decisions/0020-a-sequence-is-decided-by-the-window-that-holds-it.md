@@ -1,5 +1,11 @@
 # 20. A sequence is a rule whose stages are ordered in event time, decided once per window that holds it
 
+> Amended by [ADR 39](0039-a-detection-is-named-by-the-agent-and-identifier-of-every-event-that-decided-it.md):
+> each stage names the agent that sent its event, and a story with one candidate
+> per stage carries the same name in every arrival order, across agents as
+> within one. With several candidates, which events it cites still follows the
+> order, as below.
+
 ## Context
 
 [ADR 19](0019-a-rule-that-counts-decides-on-a-window.md) made a count part of a

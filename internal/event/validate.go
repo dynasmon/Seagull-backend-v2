@@ -71,6 +71,9 @@ func ValidateContract(record *eventv1.Event) error {
 	if err := ValidateCollection(record.GetCollection()); err != nil {
 		return err
 	}
+	if err := validateReception(record.GetReception()); err != nil {
+		return err
+	}
 	return validateBody(record)
 }
 
@@ -154,6 +157,13 @@ func ValidateCollection(collection *eventv1.Collection) error {
 		return err
 	}
 	return text("collection.source", collection.GetSource(), MaxSourceLength, false)
+}
+
+func validateReception(reception *eventv1.Reception) error {
+	if err := text("reception.gateway", reception.GetGateway(), MaxGatewayLength, false); err != nil {
+		return err
+	}
+	return text("reception.batch_id", reception.GetBatchId(), MaxBatchIDLength, false)
 }
 
 func validateBody(record *eventv1.Event) error {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
@@ -118,5 +119,12 @@ func load(parser *config.Parser) (configuration, error) {
 		},
 	}
 
-	return loaded, parser.Err()
+	if err := parser.Err(); err != nil {
+		return configuration{}, err
+	}
+	if len(gateway) > event.MaxGatewayLength {
+		return configuration{}, fmt.Errorf(
+			"invalid configuration: SEAGULL_GATEWAY_ID is longer than the %d bytes every event it admits may record", event.MaxGatewayLength)
+	}
+	return loaded, nil
 }

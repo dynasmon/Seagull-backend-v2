@@ -140,6 +140,7 @@ func sourceEvents(ids []string) error {
 }
 
 func evidence(found []*detectionv1.Evidence, class eventv1.EventClass) error {
+	held, _ := longestWritten()
 	if len(found) > MaxEvidence {
 		return invalid("evidence", fmt.Sprintf("carries %d entries and the ceiling is %d", len(found), MaxEvidence))
 	}
@@ -155,7 +156,7 @@ func evidence(found []*detectionv1.Evidence, class eventv1.EventClass) error {
 		if !Operator(one.GetOperator()).known() {
 			return invalid(field+".operator", "is not an operator the rule language declares")
 		}
-		if err := contractText(field+".held", one.GetHeld(), event.MaxRawRecordLength, false); err != nil {
+		if err := contractText(field+".held", one.GetHeld(), held, false); err != nil {
 			return err
 		}
 		if one.GetAbsent() && one.GetHeld() != "" {
@@ -279,6 +280,7 @@ func correlation(told *detectionv1.Correlation, class eventv1.EventClass, source
 }
 
 func groupings(field string, group []*detectionv1.Grouping, class eventv1.EventClass) error {
+	_, valued := longestWritten()
 	if len(group) > MaxGroupBy {
 		return invalid(field, fmt.Sprintf("names %d fields and the ceiling is %d", len(group), MaxGroupBy))
 	}
@@ -296,7 +298,7 @@ func groupings(field string, group []*detectionv1.Grouping, class eventv1.EventC
 			return invalid(part+".field", "is repeated")
 		}
 		seen[path] = struct{}{}
-		if err := contractText(part+".value", one.GetValue(), event.MaxRawRecordLength, false); err != nil {
+		if err := contractText(part+".value", one.GetValue(), valued, false); err != nil {
 			return err
 		}
 		if one.GetAbsent() && one.GetValue() != "" {

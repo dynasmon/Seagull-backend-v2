@@ -215,11 +215,7 @@ func (p *Program) describes(subject Case) *eventv1.Event {
 			continue
 		}
 
-		held := message
-		for _, step := range path[:len(path)-1] {
-			held = held.Mutable(step).Message()
-		}
-		held.Set(leaf, literal)
+		place(message, path, literal)
 	}
 	return record
 }

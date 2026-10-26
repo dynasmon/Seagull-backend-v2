@@ -1,5 +1,10 @@
 # 15. A ruleset is published to a log, and the pointer is the only mutable thing
 
+> Amended by [ADR 40](0040-a-record-the-platform-makes-is-bounded-where-it-is-made.md):
+> a ruleset whose record is heavier than its log carries is refused at
+> publication as the invalid ruleset it is, `422`, rather than answered as a log
+> that could not be reached.
+
 ## Context
 
 [ADR 8](0008-a-ruleset-is-named-by-what-is-in-it.md) made a ruleset's identity

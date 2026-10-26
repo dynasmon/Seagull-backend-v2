@@ -10,8 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
+	rulesetv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ruleset/v1"
 )
 
 // Random rather than repeated, so the broker is handed a batch as large as the
@@ -106,5 +110,60 @@ func TestAQuarantineTakesTheLargestRecordItsStreamCarries(t *testing.T) {
 	}
 	if held := consume(t, addresses, quarantine.Name, 1); !bytes.Equal(held[0].Value, largest) {
 		t.Fatalf("the quarantine holds %d bytes of the %d refused", len(held[0].Value), len(largest))
+	}
+}
+
+func rulesetWeighing(t *testing.T, size int) *rulesetv1.Record {
+	t.Helper()
+
+	random := rand.New(rand.NewPCG(94, 1))
+	version := &rulesetv1.Version{Id: "3538ec98f5ce3e22e8e65f47cd0344ee", PublishedBy: "dev-engineer", PublishedAt: timestamppb.Now()}
+	record := &rulesetv1.Record{Record: &rulesetv1.Record_Version{Version: version}}
+	for length := size - proto.Size(record) - 8; length <= size; length++ {
+		note := make([]byte, length)
+		for index := range note {
+			note[index] = byte('!' + random.UintN('~'-'!'+1))
+		}
+		version.Note = string(note)
+		if proto.Size(record) == size {
+			return record
+		}
+	}
+	t.Fatalf("no ruleset record encodes to %d bytes", size)
+	return nil
+}
+
+func TestTheRulesetsTopicCarriesTheHeaviestRulesetTheControlPlanePublishes(t *testing.T) {
+	addresses := brokers(t)
+	shipped := shippedTopology()
+	topic := declaredTopic(t, addresses, 1, 48*time.Hour)
+	topic.MaxMessageBytes = shipped.Rulesets.MaxMessageBytes
+	provisioned(t, addresses, topic)
+
+	published, err := broker.NewRulesets(broker.Config{
+		Brokers: addresses, Topic: topic.Name, MaxMessageBytes: topic.MaxMessageBytes, ClientID: "integration-test",
+	})
+	if err != nil {
+		t.Fatalf("build the ruleset publisher: %v", err)
+	}
+	t.Cleanup(published.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	heaviest := rulesetWeighing(t, shipped.Rulesets.LargestRecord())
+	if err := published.Publish(ctx, heaviest); err != nil {
+		t.Fatalf("a ruleset of %d bytes, the most the control plane publishes, was refused: %v", shipped.Rulesets.LargestRecord(), err)
+	}
+	encoded, err := proto.Marshal(heaviest)
+	if err != nil {
+		t.Fatalf("encode the ruleset: %v", err)
+	}
+	if held := consume(t, addresses, topic.Name, 1); !bytes.Equal(held[0].Value, encoded) {
+		t.Fatalf("the log holds %d bytes of the %d published", len(held[0].Value), len(encoded))
+	}
+
+	if err := published.Publish(ctx, rulesetWeighing(t, int(topic.MaxMessageBytes))); err == nil {
+		t.Fatal("a ruleset as heavy as the whole batch the log carries was taken, so refusing it before publishing refuses what would have been carried")
 	}
 }

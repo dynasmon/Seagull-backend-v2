@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -243,5 +244,59 @@ func TestTheShippedAlertingDocumentFoldsEachAttackerOfAnAgentApart(t *testing.T)
 		if entry["msg"] == "alert_key_part_unspoken" {
 			t.Errorf("the shipped document keys %v on %v, which its detections never speak of", entry["rule"], entry["part"])
 		}
+	}
+}
+
+// What an agent sends is held to the event contract and nothing more: a gateway
+// keeps the fields it does not know, and canonicalisation would have lengthened
+// an address and every Ⱥ of a host name. None of that may make the detection of
+// an attacker's failed password one its consumers refuse.
+func TestAnAgentCannotMakeTheDetectionOfItsEventsOneNobodyRaises(t *testing.T) {
+	gateway := startGateway(t, gatewayOptions{})
+	client := gateway.client(t, "web-01")
+
+	record := fixtures.SSHAuthentication{
+		EventID:  "c0ffee00-0000-4000-8000-000000000001",
+		Hostname: strings.Repeat("Ⱥ", 127),
+		At:       time.Now().UTC().Add(-time.Minute),
+	}.Event()
+	record.Origin.Host.Ip = "1::3:4:5:6:7:8%" + strings.Repeat("z", 30)
+	for _, bloated := range []struct {
+		message proto.Message
+		size    int
+	}{
+		{record.GetOrigin().GetHost(), 100 << 10},
+		{record.GetOrigin(), 300 << 10},
+		{record.GetTime().GetEventTime(), 100 << 10},
+	} {
+		if !fixtures.Bloat(bloated.message, bloated.size) {
+			t.Fatalf("no %T encodes to %d bytes", bloated.message, bloated.size)
+		}
+	}
+
+	response, payload := gateway.send(t, client, fixtures.Batch("batch-heavy", record))
+	if response.StatusCode != http.StatusOK || !decodeAck(t, payload).GetDurable() {
+		t.Fatalf("the gateway answered %d: %s", response.StatusCode, payload)
+	}
+
+	var records []analysis.Record
+	for index, admitted := range gateway.backbone.published {
+		encoded, err := proto.Marshal(admitted)
+		if err != nil {
+			t.Fatalf("encode the admitted event: %v", err)
+		}
+		records = append(records, analysis.Record{Offset: int64(index), Key: []byte(admitted.GetOrigin().GetAgentId()), Value: encoded})
+	}
+	made := decidedByTheShippedRules(t, records)
+	if len(made) == 0 {
+		t.Fatal("the shipped rules decided nothing about a failed password from outside")
+	}
+	for _, detected := range made {
+		if err := detection.ValidateContract(detected); err != nil {
+			t.Errorf("%s made a detection its consumers refuse: %v", detected.GetRule().GetId(), err)
+		}
+	}
+	if candidates, _ := consideredByTheShippedDocument(t, made); len(candidates) != len(made) {
+		t.Errorf("%d detections raised %d alerts", len(made), len(candidates))
 	}
 }

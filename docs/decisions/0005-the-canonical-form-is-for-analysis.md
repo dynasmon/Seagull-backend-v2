@@ -1,5 +1,10 @@
 # 5. The canonical form is for analysis, not for storage
 
+> Amended by [ADR 40](0040-a-record-the-platform-makes-is-bounded-where-it-is-made.md):
+> the canonical form of an event is an event the contract takes. A letter whose
+> lower case is written in more bytes keeps its case, and an address whose one
+> form is longer than an address may be is left as it arrived.
+
 ## Context
 
 Detection compares fields. A rule that fires on a service named `ssh` has to

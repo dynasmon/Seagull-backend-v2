@@ -14,6 +14,30 @@ const (
 	longestUndeclared = len("-2147483648")
 )
 
+type question struct {
+	field    Field
+	operator Operator
+	negated  bool
+}
+
+func (c conjunction) asks(negated bool, into map[question]struct{}) {
+	for _, term := range c.terms {
+		term.asks(negated, into)
+	}
+}
+
+func (d disjunction) asks(negated bool, into map[question]struct{}) {
+	for _, term := range d.terms {
+		term.asks(negated, into)
+	}
+}
+
+func (n negation) asks(negated bool, into map[question]struct{}) { n.term.asks(!negated, into) }
+
+func (c comparison) asks(negated bool, into map[question]struct{}) {
+	into[question{field: c.field, operator: c.operator, negated: negated}] = struct{}{}
+}
+
 // Text is written as evidence the way a rule writes a literal, and strconv.Quote
 // spends four bytes on a control character and two on the quotes around it.
 func heldAtMost(field Field) int {

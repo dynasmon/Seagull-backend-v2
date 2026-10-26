@@ -136,6 +136,7 @@ type node interface {
 	fmt.Stringer
 	node()
 	holds(record protoreflect.Message, into *[]Evidence, negated bool) bool
+	asks(negated bool, into map[question]struct{})
 }
 
 type conjunction struct{ terms []node }

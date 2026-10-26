@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/control"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ruleset"
 	rulesetv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ruleset/v1"
 )
@@ -45,7 +47,8 @@ func administer(t *testing.T) (rulesets, *log) {
 	t.Helper()
 
 	written := &log{}
-	return rulesets{catalogue: ruleset.NewCatalogue(), publisher: written}, written
+	shipped := broker.LoadTopology(config.New(func(string) (string, bool) { return "", false }))
+	return rulesets{catalogue: ruleset.NewCatalogue(), publisher: written, largest: shipped.Rulesets.LargestRecord()}, written
 }
 
 func documents(t *testing.T) []*rulesetv1.Document {

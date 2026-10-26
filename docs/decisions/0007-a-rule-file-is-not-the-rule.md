@@ -1,5 +1,9 @@
 # 7. A rule file is not the rule
 
+> Amended by [ADR 40](0040-a-record-the-platform-makes-is-bounded-where-it-is-made.md):
+> a rule a detection of which could encode to more than its consumers take is
+> refused where it is written, like one that can never match.
+
 ## Context
 
 [ADR 6](0006-a-rule-addresses-the-contract.md) settled what a detection rule is.

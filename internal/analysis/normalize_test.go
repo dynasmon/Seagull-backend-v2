@@ -8,6 +8,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/analysis"
+	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 )
@@ -140,6 +141,39 @@ func TestNormalizingAgainChangesNothing(t *testing.T) {
 	}
 	if name := record.GetAuthentication().GetUser().GetName(); name != "Bob" {
 		t.Errorf("the account name reads %q: folding it would merge two Unix accounts", name)
+	}
+}
+
+// Ⱥ is written in two bytes and its lower case in three, and an address that
+// shortens a single zero group is a character longer once it is written the one
+// way, so each fills its field to the longest the contract allows and is still
+// held to it once it is canonical.
+func TestTheCanonicalFormOfAnEventIsOneTheContractTakes(t *testing.T) {
+	longest := map[string]func(int) string{
+		folded:    func(most int) string { return strings.Repeat("Ⱥ", most/2) },
+		named:     func(most int) string { return strings.Repeat("Ⱥ", most/2) },
+		addressed: func(most int) string { return "1::3:4:5:6:7:8%" + strings.Repeat("a", most-len("1::3:4:5:6:7:8%")) },
+		trimmed:   func(most int) string { return strings.Repeat("a", most) },
+		untouched: func(most int) string { return strings.Repeat("a", most) },
+	}
+
+	for path, decided := range decisions {
+		t.Run(path, func(t *testing.T) {
+			most, bounded := event.LongestText(path)
+			if !bounded {
+				t.Fatalf("%s has no longest in the contract", path)
+			}
+			record := fixtures.SSHAuthentication{}.Event()
+			setString(t, record, path, longest[decided.kind](most))
+			if err := event.ValidateContract(record); err != nil {
+				t.Fatalf("the probe is not an event the contract takes: %v", err)
+			}
+
+			canonicalise(t, record)
+			if err := event.ValidateContract(record); err != nil {
+				t.Fatalf("%s is %d bytes once canonical: %v", path, len(getString(t, record, path)), err)
+			}
+		})
 	}
 }
 

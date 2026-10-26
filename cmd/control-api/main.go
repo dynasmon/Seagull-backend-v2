@@ -182,7 +182,7 @@ func controlAPI(ctx context.Context) error {
 		Guard:           guard,
 		Sessions:        sessions,
 		Registry:        registry,
-		Rulesets:        rulesets{catalogue: published.catalogue, publisher: published.publisher},
+		Rulesets:        rulesets{catalogue: published.catalogue, publisher: published.publisher, largest: settings.topology.Rulesets.LargestRecord()},
 		Alerts:          raised,
 		Incidents:       raised.Incidents(),
 		Agents:          raised.Agents(),

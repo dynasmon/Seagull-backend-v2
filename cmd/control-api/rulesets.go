@@ -20,6 +20,7 @@ import (
 type rulesets struct {
 	catalogue *ruleset.Catalogue
 	publisher publisher
+	largest   int
 }
 
 type publisher interface {

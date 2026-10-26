@@ -1,5 +1,11 @@
 # 37. Every topic declares the largest batch it carries, and the gateway admits no record its topic would refuse
 
+> Amended by [ADR 40](0040-a-record-the-platform-makes-is-bounded-where-it-is-made.md):
+> what the platform makes itself is bounded where it is made — a rule by the
+> heaviest detection it could make, refused as it is compiled, and a ruleset by
+> the log it is published to, refused at publication — and every text the event
+> contract carries is bounded, its reception included.
+
 ## Context
 
 [ADR 1](0001-durable-before-acknowledged.md) answers `503` when the backbone did

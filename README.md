@@ -44,7 +44,11 @@ over the fields of the event contract — there is no dictionary between the two
 so a rule naming a field the contract does not declare is refused where it is
 written, with the line and the part that is wrong. Rules carry severity, ATT&CK
 technique, false-positive guidance and provenance, and each one travels with the
-cases it was written for, which the same evaluator checks.
+cases it was written for, which the same evaluator checks. A rule is weighed as it
+is compiled, by the heaviest detection it could make, and refused when its
+consumers could not take that detection: every detection the engine makes is one
+they take, whatever the event it was decided from carried
+([ADR 40](docs/decisions/0040-a-record-the-platform-makes-is-bounded-where-it-is-made.md)).
 
 ### Sigma import
 
@@ -81,8 +85,8 @@ Rulesets are administered through the control plane and published to a compacted
 topic, never by reaching into a running engine. A ruleset is named by its own
 content, so publishing the same rules twice is one version; publishing and
 activating are separate acts, so a rollout can be rolled back to a version that
-cannot have changed underneath it. Nothing that fails to compile, or whose own
-cases do not hold, is ever written.
+cannot have changed underneath it. Nothing that fails to compile, whose own
+cases do not hold, or that is heavier than the topic carries, is ever written.
 
 ### Event hunting
 

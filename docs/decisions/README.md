@@ -43,3 +43,4 @@ rediscovered by reading the code.
 - [37. Every topic declares the largest batch it carries, and the gateway admits no record its topic would refuse](0037-a-record-is-bounded-by-what-its-topic-carries.md)
 - [38. An observation in detection state is named by the agent that sent its event as well as by its identifier](0038-an-observation-is-named-by-the-agent-that-sent-its-event.md)
 - [39. A detection is named by the agent and identifier of every event that decided it, whichever of them arrived last](0039-a-detection-is-named-by-the-agent-and-identifier-of-every-event-that-decided-it.md)
+- [40. What the platform makes is bounded where it is made: a rule by the heaviest detection it could make, a ruleset by the log it is published to](0040-a-record-the-platform-makes-is-bounded-where-it-is-made.md)

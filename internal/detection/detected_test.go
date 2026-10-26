@@ -241,6 +241,21 @@ func TestADetectionCarriesNothingOfItsEventTheContractDoesNotDeclare(t *testing.
 	}
 }
 
+func TestTheLongestTextAnEventCarriesIsEvidenceItsConsumersTake(t *testing.T) {
+	subject := rule()
+	subject.Match = detection.Predicate{Field: "authentication.raw_record", Operator: detection.Present}
+	record := observed(t)
+	record.GetAuthentication().RawRecord = strings.Repeat("\x00", 4096)
+
+	made := detected(t, subject, record)
+	if held := len(made.GetEvidence()[0].GetHeld()); held != 16386 {
+		t.Fatalf("the raw record is evidence of %d bytes", held)
+	}
+	if err := detection.ValidateContract(made); err != nil {
+		t.Fatalf("a detection quoting the longest raw record an event may carry is refused by its consumers: %v", err)
+	}
+}
+
 func undeclaredIn(message protoreflect.Message) int {
 	held := len(message.GetUnknown())
 	message.Range(func(field protoreflect.FieldDescriptor, value protoreflect.Value) bool {

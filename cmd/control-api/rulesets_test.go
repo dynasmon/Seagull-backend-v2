@@ -3,12 +3,18 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
+	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/control"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ruleset"
 	rulesetv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ruleset/v1"
 )
@@ -45,7 +51,8 @@ func administer(t *testing.T) (rulesets, *log) {
 	t.Helper()
 
 	written := &log{}
-	return rulesets{catalogue: ruleset.NewCatalogue(), publisher: written}, written
+	shipped := broker.LoadTopology(config.New(func(string) (string, bool) { return "", false }))
+	return rulesets{catalogue: ruleset.NewCatalogue(), publisher: written, largest: shipped.Rulesets.LargestRecord()}, written
 }
 
 func documents(t *testing.T) []*rulesetv1.Document {
@@ -180,6 +187,59 @@ rules:
 	}
 	if len(written.records) != 0 {
 		t.Fatalf("%d records reached the log", len(written.records))
+	}
+}
+
+func allowlistedFiveTimes() []*rulesetv1.Document {
+	var accounts strings.Builder
+	for index := range 4000 {
+		fmt.Fprintf(&accounts, "        - %s%04d\n", strings.Repeat("u", 56), index)
+	}
+
+	var written strings.Builder
+	written.WriteString("schema_version: 1\nrules:\n")
+	for index := range 5 {
+		fmt.Fprintf(&written, `  - id: allowlist.repeated_%d
+    revision: 1
+    name: An allowlist an alias repeats
+    description: Every rule in this file asks about the same four thousand accounts.
+    class: authentication
+    severity: low
+    status: active
+    match:
+      field: authentication.user.name
+      one_of: `, index)
+		if index == 0 {
+			written.WriteString("&accounts\n" + accounts.String())
+		} else {
+			written.WriteString("*accounts\n")
+		}
+	}
+	return []*rulesetv1.Document{{Name: "allowlists.yml", Content: []byte(written.String())}}
+}
+
+func TestARulesetHeavierThanItsTopicCarriesIsRefusedAndNeverReachesTheLog(t *testing.T) {
+	for name, request := range map[string]*rulesetv1.PublishRequest{
+		"repeated by an alias": {Documents: allowlistedFiveTimes()},
+		"noted at length":      {Documents: documents(t), Note: strings.Repeat("n", control.MaxDocumentBytes-64<<10)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if size := proto.Size(request); size > control.MaxDocumentBytes {
+				t.Fatalf("the request is %d bytes, which no request may be", size)
+			}
+			administrator, written := administer(t)
+
+			answer, err := administrator.Publish(context.Background(), request, "dev-engineer", published)
+			if err != nil {
+				t.Fatalf("a ruleset no topic would carry was answered as an unavailable backbone: %v", err)
+			}
+			if answer.GetPublished() || len(written.records) != 0 {
+				t.Fatalf("a ruleset heavier than its topic carries was published as %d records", len(written.records))
+			}
+			if len(answer.GetValidation().GetFaults()) == 0 {
+				t.Fatal("a refusal that says nothing leaves nothing to fix")
+			}
+		})
 	}
 }
 

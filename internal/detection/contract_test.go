@@ -2,6 +2,7 @@ package detection_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -71,6 +72,20 @@ func TestTwoAgentsMayShareAnEventIdentifierAndOneAgentMayNotNameItTwice(t *testi
 	}
 	if field := refusedAt(t, before); field != "correlation.stages[1].event_id" {
 		t.Errorf("a story naming an identifier twice and no agent was refused at %s", field)
+	}
+}
+
+func TestEvidenceLongerThanAnyFieldIsWrittenInIsRefused(t *testing.T) {
+	held := detected(t, attributed(), observed(t))
+	held.Evidence[0].Held = strings.Repeat("a", 4*4096+3)
+	if field := refusedAt(t, held); field != "evidence[0].held" {
+		t.Errorf("evidence longer than any raw record is quoted in was refused at %s", field)
+	}
+
+	grouped := detected(t, attributed(), observed(t))
+	grouped.Aggregation.Group[0].Value = strings.Repeat("a", 4096+1)
+	if field := refusedAt(t, grouped); field != "aggregation.group[0].value" {
+		t.Errorf("a group value longer than any field holds was refused at %s", field)
 	}
 }
 

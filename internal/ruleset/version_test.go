@@ -1,6 +1,7 @@
 package ruleset_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -140,6 +141,34 @@ func TestARuleThisBuildCannotReadIsRefusedRatherThanDefaulted(t *testing.T) {
 				t.Fatalf("%s was read as something this build understands", name)
 			}
 		})
+	}
+}
+
+func TestARuleWhoseDetectionCouldOutweighItsConsumersIsRefusedWhenReadBack(t *testing.T) {
+	var asked []*rulesetv1.Expression
+	for _, field := range detection.Fields() {
+		if kind, _ := detection.KindOf(field); kind != detection.Text {
+			continue
+		}
+		asked = append(asked, &rulesetv1.Expression{Term: &rulesetv1.Expression_Predicate{
+			Predicate: &rulesetv1.Predicate{Field: string(field), Operator: string(detection.Present)},
+		}})
+		for _, operator := range []detection.Operator{detection.Equals, detection.OneOf, detection.Contains, detection.StartsWith, detection.EndsWith} {
+			holding := func(text string) *rulesetv1.Expression {
+				return &rulesetv1.Expression{Term: &rulesetv1.Expression_Predicate{Predicate: &rulesetv1.Predicate{
+					Field: string(field), Operator: string(operator), Values: []*rulesetv1.Value{{Literal: &rulesetv1.Value_Text{Text: text}}},
+				}}}
+			}
+			asked = append(asked, holding("x"), &rulesetv1.Expression{Term: &rulesetv1.Expression_Negated{Negated: holding("y")}})
+		}
+	}
+	encoded := version(t, nil, compiled(t, rule("ssh.session_opened"))).Encode()
+	encoded.Rules[0].Match = &rulesetv1.Expression{Term: &rulesetv1.Expression_All{All: &rulesetv1.Terms{Terms: asked}}}
+
+	_, err := ruleset.DecodeVersion(encoded)
+	var violation *detection.Violation
+	if !errors.As(err, &violation) || violation.Part != "match" {
+		t.Fatalf("a rule asking everything of every text an event carries was read back as %v", err)
 	}
 }
 

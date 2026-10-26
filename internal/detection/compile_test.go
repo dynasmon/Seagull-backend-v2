@@ -175,3 +175,35 @@ func compileRefusal(t *testing.T, subject detection.Rule) *detection.Violation {
 	}
 	return violation
 }
+
+func askingEverythingOf(fields ...detection.Field) detection.Rule {
+	var questions []detection.Expression
+	for _, field := range fields {
+		questions = append(questions, detection.Predicate{Field: field, Operator: detection.Present})
+		for _, operator := range []detection.Operator{detection.Equals, detection.OneOf, detection.Contains, detection.StartsWith, detection.EndsWith} {
+			questions = append(questions,
+				detection.Predicate{Field: field, Operator: operator, Values: []detection.Value{detection.TextValue("x")}},
+				detection.Not{Term: detection.Predicate{Field: field, Operator: operator, Values: []detection.Value{detection.TextValue("y")}}},
+			)
+		}
+	}
+	subject := rule()
+	subject.Match = detection.All{Terms: questions}
+	return subject
+}
+
+func TestARuleWhoseDetectionCouldOutweighWhatItsConsumersTakeIsRefused(t *testing.T) {
+	var texts []detection.Field
+	for _, field := range detection.Fields() {
+		if kind, _ := detection.KindOf(field); kind == detection.Text {
+			texts = append(texts, field)
+		}
+	}
+
+	if violation := compileRefusal(t, askingEverythingOf(texts...)); violation.Part != "match" {
+		t.Errorf("the refusal names %q", violation.Part)
+	}
+	if _, err := detection.Compile(askingEverythingOf("authentication.raw_record")); err != nil {
+		t.Errorf("a rule asking everything of the raw record alone was refused: %v", err)
+	}
+}

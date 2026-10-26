@@ -5,6 +5,10 @@
 > every event it was decided from rather than by the agent of the event that
 > completed it, so the same events name the same detection whichever arrived
 > last; a correlation across agents is about the agent of its last stage.
+> Amended by [ADR 40](0040-a-record-the-platform-makes-is-bounded-where-it-is-made.md):
+> a detection carries only what the event contract declares of its event's
+> origin and instant, and no rule a detection of which could outweigh what its
+> consumers take compiles.
 
 ## Context
 

@@ -30,7 +30,7 @@ const incidentColumns = `incident_id, schema_version, tenant_id, detection_id,
 	rule_id, rule_revision, rule_name, rule_source_catalogue, rule_source_identifier, ruleset_id,
 	severity, confidence, technique_tactic, technique_id, technique_name,
 	event_class, agent_id,
-	stage_name, stage_event_id, stage_event_time,
+	stage_name, stage_event_id, stage_event_time, stage_agent_id,
 	group_field, group_value, group_absent,
 	window_seconds, clock_spread_millis,
 	first_event_time, last_event_time, raised_at,
@@ -244,7 +244,7 @@ func (i *Incidents) Move(ctx context.Context, id string, tenants []string, asked
 }
 
 func storedIncident(one *incidentv1.Incident) []any {
-	names, events, times := stages(one.GetStages())
+	names, events, times, agents := stages(one.GetStages())
 	fields, values, absent := groupings(one.GetGroup())
 
 	return []any{
@@ -254,7 +254,7 @@ func storedIncident(one *incidentv1.Incident) []any {
 		incident.Severity(one.GetSeverity()), incident.Level(one.GetConfidence()),
 		one.GetTechnique().GetTactic(), one.GetTechnique().GetId(), one.GetTechnique().GetName(),
 		incident.Class(one.GetEventClass()), one.GetAgentId(),
-		names, events, times,
+		names, events, times, agents,
 		fields, values, absent,
 		int64(one.GetWindow().AsDuration() / time.Second),
 		int64(one.GetClockSpread().AsDuration() / time.Millisecond),
@@ -266,16 +266,18 @@ func storedIncident(one *incidentv1.Incident) []any {
 	}
 }
 
-func stages(told []*detectionv1.Stage) ([]string, []string, []time.Time) {
+func stages(told []*detectionv1.Stage) ([]string, []string, []time.Time, []string) {
 	names := make([]string, 0, len(told))
 	events := make([]string, 0, len(told))
 	times := make([]time.Time, 0, len(told))
+	agents := make([]string, 0, len(told))
 	for _, stage := range told {
 		names = append(names, stage.GetName())
 		events = append(events, stage.GetEventId())
 		times = append(times, stage.GetEventTime().AsTime().UTC())
+		agents = append(agents, stage.GetAgentId())
 	}
-	return names, events, times
+	return names, events, times, agents
 }
 
 func groupings(group []*detectionv1.Grouping) ([]string, []string, []bool) {
@@ -306,7 +308,7 @@ func restoreIncident(row pgx.CollectableRow) (*incidentv1.Incident, error) {
 		ruleRevision, revision                  int64
 		severity, confidence, class, named      string
 		tactic, techniqueID, techniqueName      string
-		stageName, stageEvent                   []string
+		stageName, stageEvent, stageAgent       []string
 		stageTime                               []time.Time
 		groupField, groupValue                  []string
 		groupAbsent                             []bool
@@ -322,7 +324,7 @@ func restoreIncident(row pgx.CollectableRow) (*incidentv1.Incident, error) {
 		&ruleID, &ruleRevision, &ruleName, &catalogue, &identifier, &one.RulesetId,
 		&severity, &confidence, &tactic, &techniqueID, &techniqueName,
 		&class, &one.AgentId,
-		&stageName, &stageEvent, &stageTime,
+		&stageName, &stageEvent, &stageTime, &stageAgent,
 		&groupField, &groupValue, &groupAbsent,
 		&windowSeconds, &spreadMillis,
 		&firstEvent, &lastEvent, &raisedAt,
@@ -343,7 +345,7 @@ func restoreIncident(row pgx.CollectableRow) (*incidentv1.Incident, error) {
 		one.Technique = &detectionv1.Technique{Tactic: tactic, Id: techniqueID, Name: techniqueName}
 	}
 	one.EventClass = eventv1.EventClass(eventv1.EventClass_value[enum("EVENT_CLASS_", class)])
-	one.Stages = restoreStages(stageName, stageEvent, stageTime)
+	one.Stages = restoreStages(stageName, stageEvent, stageTime, stageAgent)
 	one.Group = restoreGroupings(groupField, groupValue, groupAbsent)
 	one.Window = durationpb.New(time.Duration(windowSeconds) * time.Second)
 	one.ClockSpread = durationpb.New(time.Duration(spreadMillis) * time.Millisecond)
@@ -364,17 +366,21 @@ func restoreIncident(row pgx.CollectableRow) (*incidentv1.Incident, error) {
 	return &one, nil
 }
 
-func restoreStages(names, events []string, times []time.Time) []*detectionv1.Stage {
+func restoreStages(names, events []string, times []time.Time, agents []string) []*detectionv1.Stage {
 	told := make([]*detectionv1.Stage, 0, len(names))
 	for index := range names {
 		if index >= len(events) || index >= len(times) {
 			break
 		}
-		told = append(told, &detectionv1.Stage{
+		stage := &detectionv1.Stage{
 			Name:      names[index],
 			EventId:   events[index],
 			EventTime: timestamppb.New(times[index].UTC()),
-		})
+		}
+		if index < len(agents) {
+			stage.AgentId = agents[index]
+		}
+		told = append(told, stage)
 	}
 	return told
 }

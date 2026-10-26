@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"time"
@@ -30,19 +31,24 @@ const SchemaVersion = 1
 // found, and merging the two would mean a replay could overwrite somebody's
 // triage.
 func (m Match) Detected(ruleset string, record *eventv1.Event, at time.Time) *detectionv1.Detection {
-	from, happened := []string{record.GetEventId()}, record.GetTime().GetEventTime()
-	if m.Rule.Sequence.Correlates() {
-		from = m.Correlated.Events()
-		happened = timestamppb.New(m.Correlated.Stages[len(m.Correlated.Stages)-1].At.UTC())
-	}
+	from := []sentEvent{{agent: record.GetOrigin().GetAgentId(), event: record.GetEventId()}}
+	events, happened := []string{record.GetEventId()}, record.GetTime().GetEventTime()
 
 	// The origin is copied rather than pointed at: a detection is read after
 	// the event that produced it has been let go, so it may not share memory
 	// with it.
 	origin, _ := proto.Clone(record.GetOrigin()).(*eventv1.Origin)
 
+	if m.Rule.Sequence.Correlates() {
+		last := m.Correlated.Stages[len(m.Correlated.Stages)-1]
+		from, events, happened = m.Correlated.sentEvents(), m.Correlated.Events(), timestamppb.New(last.At.UTC())
+		if m.Correlated.spansAgents() {
+			origin = &eventv1.Origin{AgentId: last.Agent, TenantId: record.GetOrigin().GetTenantId()}
+		}
+	}
+
 	return &detectionv1.Detection{
-		DetectionId:    identify(m.Rule.ID, m.Rule.Revision, record.GetOrigin().GetTenantId(), record.GetOrigin().GetAgentId(), from),
+		DetectionId:    identify(m.Rule.ID, m.Rule.Revision, record.GetOrigin().GetTenantId(), from),
 		SchemaVersion:  SchemaVersion,
 		Rule:           decided(m.Rule),
 		RulesetId:      ruleset,
@@ -50,7 +56,7 @@ func (m Match) Detected(ruleset string, record *eventv1.Event, at time.Time) *de
 		Technique:      attributed(m.Rule.Technique),
 		EventClass:     record.GetEventClass(),
 		Origin:         origin,
-		SourceEventIds: from,
+		SourceEventIds: events,
 		EventTime:      happened,
 		DetectedTime:   timestamppb.New(at.UTC()),
 		Evidence:       gathered(m.Evidence),
@@ -73,6 +79,7 @@ func correlated(sequence Sequence, found Correlated) *detectionv1.Correlation {
 			Name:      stage.Name,
 			EventId:   stage.Event,
 			EventTime: timestamppb.New(stage.At.UTC()),
+			AgentId:   stage.Agent,
 		})
 	}
 	correlation.Group = bindings(found.Group)
@@ -111,9 +118,10 @@ func aggregated(counting Count, found Counted) *detectionv1.Aggregation {
 	return aggregation
 }
 
-// A detection is named by what decided it: the tenant, the agent, the rule, the
-// revision it was decided at, and the events it was decided from. Nothing about
-// when or the process — so a replay rewrites the detection it already wrote
+// A detection is named by what decided it: the tenant, the rule, the revision it
+// was decided at, and the events it was decided from, each by the agent that sent
+// it and the identifier that agent gave it. Nothing about when, the process, or
+// which event arrived last — so a replay rewrites the detection it already wrote
 // instead of adding a second copy of it, which is what lets a stage be retried
 // until it is durable.
 //
@@ -124,22 +132,51 @@ func aggregated(counting Count, found Counted) *detectionv1.Aggregation {
 // identity so that two detections sharing a name and disagreeing about the set
 // they came from is a visible state rather than a silent one.
 //
-// Sorted and counted, as a ruleset names itself, so that the same events in a
-// different order are the same detection and no two sets can write the same
-// bytes.
-func identify(rule ID, revision int, tenant, agent string, events []string) string {
+// Grouped by agent, and each agent's events sorted and counted, as a ruleset
+// names itself: the same events in a different order are the same detection, no
+// two sets can write the same bytes, and the events of one agent are written as
+// they were before a stage named its agent, so only a story across agents was
+// renamed (ADR 39).
+func identify(rule ID, revision int, tenant string, from []sentEvent) string {
 	digest := sha256.New()
 	write := func(value string) { fmt.Fprintf(digest, "%d:%s", len(value), value) }
 
 	write(string(rule))
 	write(strconv.Itoa(revision))
 	write(tenant)
-	write(agent)
-	write(strconv.Itoa(len(events)))
-	for _, event := range slices.Sorted(slices.Values(events)) {
-		write(event)
+
+	byAgent := make(map[string][]string, len(from))
+	for _, one := range from {
+		byAgent[one.agent] = append(byAgent[one.agent], one.event)
+	}
+	for _, agent := range slices.Sorted(maps.Keys(byAgent)) {
+		events := byAgent[agent]
+		write(agent)
+		write(strconv.Itoa(len(events)))
+		for _, event := range slices.Sorted(slices.Values(events)) {
+			write(event)
+		}
 	}
 	return hex.EncodeToString(digest.Sum(nil)[:16])
+}
+
+type sentEvent struct{ agent, event string }
+
+func (c Correlated) sentEvents() []sentEvent {
+	from := make([]sentEvent, 0, len(c.Stages))
+	for _, stage := range c.Stages {
+		from = append(from, sentEvent{agent: stage.Agent, event: stage.Event})
+	}
+	return from
+}
+
+func (c Correlated) spansAgents() bool {
+	for _, stage := range c.Stages {
+		if stage.Agent != c.Stages[0].Agent {
+			return true
+		}
+	}
+	return false
 }
 
 // Which rule fired, at which revision, and where that rule came from — enough

@@ -72,6 +72,7 @@ type Row struct {
 	CorrelationStageName         []string
 	CorrelationStageEventID      []string
 	CorrelationStageEventTime    []time.Time
+	CorrelationStageAgentID      []string
 	CorrelationGroupField        []string
 	CorrelationGroupValue        []string
 	CorrelationGroupAbsent       []bool
@@ -93,6 +94,7 @@ var carried = []string{
 	"correlation.group.absent",
 	"correlation.group.field",
 	"correlation.group.value",
+	"correlation.stages.agent_id",
 	"correlation.stages.event_id",
 	"correlation.stages.event_time",
 	"correlation.stages.name",
@@ -198,10 +200,12 @@ func Project(made *detectionv1.Detection) Row {
 	row.CorrelationStageName = make([]string, 0, len(stages))
 	row.CorrelationStageEventID = make([]string, 0, len(stages))
 	row.CorrelationStageEventTime = make([]time.Time, 0, len(stages))
+	row.CorrelationStageAgentID = make([]string, 0, len(stages))
 	for _, one := range stages {
 		row.CorrelationStageName = append(row.CorrelationStageName, one.GetName())
 		row.CorrelationStageEventID = append(row.CorrelationStageEventID, one.GetEventId())
 		row.CorrelationStageEventTime = append(row.CorrelationStageEventTime, instant(one.GetEventTime()))
+		row.CorrelationStageAgentID = append(row.CorrelationStageAgentID, one.GetAgentId())
 	}
 
 	ordered := told.GetGroup()
@@ -266,6 +270,7 @@ func storable(row Row) error {
 		"aggregation.group.absent":      {len(row.AggregationGroupAbsent), len(row.AggregationGroupField)},
 		"correlation.stages.event_id":   {len(row.CorrelationStageEventID), len(row.CorrelationStageName)},
 		"correlation.stages.event_time": {len(row.CorrelationStageEventTime), len(row.CorrelationStageName)},
+		"correlation.stages.agent_id":   {len(row.CorrelationStageAgentID), len(row.CorrelationStageName)},
 		"correlation.group.value":       {len(row.CorrelationGroupValue), len(row.CorrelationGroupField)},
 		"correlation.group.absent":      {len(row.CorrelationGroupAbsent), len(row.CorrelationGroupField)},
 	}

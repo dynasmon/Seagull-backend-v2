@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -44,8 +45,8 @@ func correlatedIn(tenant, id string, at time.Time, spread time.Duration) *detect
 		DetectedTime:   timestamppb.New(at.Add(time.Minute)),
 		Correlation: &detectionv1.Correlation{
 			Stages: []*detectionv1.Stage{
-				{Name: "a failed password", EventId: id + "-event-1", EventTime: timestamppb.New(at)},
-				{Name: "one that was accepted", EventId: id + "-event-2", EventTime: timestamppb.New(at.Add(40 * time.Second))},
+				{Name: "a failed password", EventId: id + "-event-1", EventTime: timestamppb.New(at), AgentId: "dev-agent-01"},
+				{Name: "one that was accepted", EventId: id + "-event-2", EventTime: timestamppb.New(at.Add(40 * time.Second)), AgentId: "dev-agent-01"},
 			},
 			Window:      durationpb.New(5 * time.Minute),
 			ClockSpread: durationpb.New(spread),
@@ -101,8 +102,8 @@ func TestWhatWasStoredComesBackAsTheStoryThatWasOpened(t *testing.T) {
 	}
 	for index, stage := range read.GetStages() {
 		was := told.GetStages()[index]
-		if stage.GetName() != was.GetName() || stage.GetEventId() != was.GetEventId() {
-			t.Errorf("stage %d came back as %q on %q", index, stage.GetName(), stage.GetEventId())
+		if stage.GetName() != was.GetName() || stage.GetEventId() != was.GetEventId() || stage.GetAgentId() != was.GetAgentId() {
+			t.Errorf("stage %d came back as %q on %q from %q", index, stage.GetName(), stage.GetEventId(), stage.GetAgentId())
 		}
 		if !stage.GetEventTime().AsTime().Equal(was.GetEventTime().AsTime()) {
 			t.Errorf("stage %d came back at %s", index, stage.GetEventTime().AsTime())
@@ -116,6 +117,34 @@ func TestWhatWasStoredComesBackAsTheStoryThatWasOpened(t *testing.T) {
 	}
 	if !read.GetFirstEventTime().AsTime().Equal(at) || !read.GetLastEventTime().AsTime().Equal(at.Add(40*time.Second)) {
 		t.Error("the span the story covers did not survive the store")
+	}
+}
+
+func TestAStoryAcrossAgentsComesBackWithTheAgentOfEveryStage(t *testing.T) {
+	stories := migratedAlertStore(t, alertStoreAddress(t)).Incidents()
+	tenant := isolated(t)
+	at := time.Date(2026, 10, 25, 11, 0, 0, 0, time.UTC)
+
+	across := correlatedIn(tenant, tenant+"-across-agents", at, 0)
+	across.Correlation.Stages[0].AgentId = "web-01"
+	across.Correlation.Stages[1].AgentId = "web-02"
+	across.Origin.AgentId = "web-02"
+	told, err := incident.Raise(across, at.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("raise: %v", err)
+	}
+	opened(t, stories, told)
+
+	read, err := stories.Incident(context.Background(), told.GetIncidentId(), []string{tenant})
+	if err != nil {
+		t.Fatalf("read the incident back: %v", err)
+	}
+	agents := make([]string, 0, 2)
+	for _, stage := range read.GetStages() {
+		agents = append(agents, stage.GetAgentId())
+	}
+	if !slices.Equal(agents, []string{"web-01", "web-02"}) || read.GetAgentId() != "web-02" {
+		t.Errorf("a story web-01 began and web-02 ended came back from %v, about %s", agents, read.GetAgentId())
 	}
 }
 

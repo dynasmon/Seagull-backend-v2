@@ -215,8 +215,8 @@ func TestTheStoreKeepsWhatASequenceFound(t *testing.T) {
 		Window:      durationpb.New(5 * time.Minute),
 		ClockSpread: durationpb.New(1500 * time.Millisecond),
 		Stages: []*detectionv1.Stage{
-			{Name: "a failed password", EventId: made.SourceEventIds[0], EventTime: timestamppb.New(at.Add(-time.Minute))},
-			{Name: "one that was accepted", EventId: made.SourceEventIds[1], EventTime: timestamppb.New(at)},
+			{Name: "a failed password", EventId: made.SourceEventIds[0], EventTime: timestamppb.New(at.Add(-time.Minute)), AgentId: "web-02"},
+			{Name: "one that was accepted", EventId: made.SourceEventIds[1], EventTime: timestamppb.New(at), AgentId: "web-01"},
 		},
 		Group: []*detectionv1.Grouping{
 			{Field: "authentication.network.source.ip", Value: "203.0.113.10"},
@@ -234,6 +234,7 @@ func TestTheStoreKeepsWhatASequenceFound(t *testing.T) {
 		stageName   []string
 		stageEvent  []string
 		stageAt     []time.Time
+		stageAgent  []string
 		groupField  []string
 		groupValue  []string
 		groupAbsent []bool
@@ -241,9 +242,10 @@ func TestTheStoreKeepsWhatASequenceFound(t *testing.T) {
 	err := inspector(t, address).QueryRow(ctx, `
 		SELECT correlation_window_seconds, correlation_clock_spread_millis,
 		       correlation_stage_name, correlation_stage_event_id, correlation_stage_event_time,
+		       correlation_stage_agent_id,
 		       correlation_group_field, correlation_group_value, correlation_group_absent
 		FROM security_detections FINAL WHERE tenant_id = ?`, owner,
-	).Scan(&window, &spread, &stageName, &stageEvent, &stageAt, &groupField, &groupValue, &groupAbsent)
+	).Scan(&window, &spread, &stageName, &stageEvent, &stageAt, &stageAgent, &groupField, &groupValue, &groupAbsent)
 	if err != nil {
 		t.Fatalf("read the detection back: %v", err)
 	}
@@ -259,6 +261,9 @@ func TestTheStoreKeepsWhatASequenceFound(t *testing.T) {
 	}
 	if !stageAt[0].Equal(at.Add(-time.Minute)) || !stageAt[1].Equal(at) {
 		t.Errorf("the stages came back at %s and %s", stageAt[0], stageAt[1])
+	}
+	if len(stageAgent) != 2 || stageAgent[0] != "web-02" || stageAgent[1] != "web-01" {
+		t.Errorf("the stages came back sent by %v", stageAgent)
 	}
 	if len(groupField) != 2 || groupValue[0] != "203.0.113.10" || groupAbsent[0] {
 		t.Errorf("the group came back as %v / %v / %v", groupField, groupValue, groupAbsent)

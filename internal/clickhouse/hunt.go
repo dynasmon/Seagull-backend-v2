@@ -98,6 +98,7 @@ var huntColumns = map[hunt.Dataset]map[hunt.Field]string{
 		"correlation.stages.name":       "correlation_stage_name",
 		"correlation.stages.event_id":   "correlation_stage_event_id",
 		"correlation.stages.event_time": "correlation_stage_event_time",
+		"correlation.stages.agent_id":   "correlation_stage_agent_id",
 		"correlation.group.field":       "correlation_group_field",
 		"correlation.group.value":       "correlation_group_value",
 		"correlation.group.absent":      "correlation_group_absent",

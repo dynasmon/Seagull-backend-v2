@@ -1,27 +1,17 @@
 package analysis_test
 
 import (
-	"errors"
+	"slices"
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/dynasmon/Seagull-backend-v2/internal/analysis"
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
-	"github.com/dynasmon/Seagull-backend-v2/internal/event"
+	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 )
-
-// A test that reproduces the defect of an open card. It is skipped while the
-// defect is there and fails as soon as it is gone, so the marker leaves with the
-// fix and the assertions after it become the regression test.
-func stillOpen(t *testing.T, card string, reproduced bool, defect string) {
-	t.Helper()
-
-	if reproduced {
-		t.Skipf("%s is open: %s", card, defect)
-	}
-	t.Fatalf("%s no longer reproduces: remove this marker so the test guards the fix", card)
-}
 
 func failedOn(t *testing.T, agent, id string, after time.Duration) analysis.Record {
 	t.Helper()
@@ -31,6 +21,193 @@ func failedOn(t *testing.T, agent, id string, after time.Duration) analysis.Reco
 func acceptedOn(t *testing.T, agent, id string, after time.Duration) analysis.Record {
 	t.Helper()
 	return staged(t, timed{at: began.Add(after), outcome: eventv1.Outcome_OUTCOME_SUCCESS, agent: agent, id: id})
+}
+
+func failedForOn(t *testing.T, user, agent, id string, after time.Duration) analysis.Record {
+	t.Helper()
+	return staged(t, timed{at: began.Add(after), outcome: eventv1.Outcome_OUTCOME_FAILURE, agent: agent, id: id, user: user})
+}
+
+func sprayed(t *testing.T) *detection.Program {
+	t.Helper()
+
+	outcome := func(held string) detection.Expression {
+		return detection.Predicate{
+			Field:    "authentication.outcome",
+			Operator: detection.Equals,
+			Values:   []detection.Value{detection.TextValue(held)},
+		}
+	}
+	failedFor := func(user string) detection.Expression {
+		return detection.All{Terms: []detection.Expression{
+			outcome("failure"),
+			detection.Predicate{
+				Field:    "authentication.user.name",
+				Operator: detection.Equals,
+				Values:   []detection.Value{detection.TextValue(user)},
+			},
+		}}
+	}
+	program, err := detection.Compile(detection.Rule{
+		ID:          "ssh.passwords_sprayed_across_hosts_then_accepted",
+		Revision:    1,
+		Name:        "SSH passwords sprayed across hosts, then one accepted",
+		Description: "A failed password for root, one for admin and an accepted one, from one address across the estate.",
+		Class:       eventv1.EventClass_EVENT_CLASS_AUTHENTICATION,
+		Sequence: detection.Sequence{
+			Within:  5 * time.Minute,
+			GroupBy: []detection.Field{"authentication.network.source.ip"},
+			Stages: []detection.Stage{
+				{Name: "a failed password for root", Match: failedFor("root")},
+				{Name: "a failed password for admin", Match: failedFor("admin")},
+				{Name: "one that was accepted", Match: outcome("success")},
+			},
+		},
+		Severity: detection.Critical,
+		Status:   detection.Active,
+	})
+	if err != nil {
+		t.Fatalf("compile a sequence rule across agents: %v", err)
+	}
+	return program
+}
+
+// Every order the backbone may deliver the partitions in: each partition's own
+// records stay in the order it holds them, and the partitions interleave freely.
+func interleavings(partitions ...[]analysis.Record) [][]analysis.Record {
+	var orders [][]analysis.Record
+	var walk func(delivered []analysis.Record, left [][]analysis.Record)
+	walk = func(delivered []analysis.Record, left [][]analysis.Record) {
+		finished := true
+		for index, partition := range left {
+			if len(partition) == 0 {
+				continue
+			}
+			finished = false
+			rest := slices.Clone(left)
+			rest[index] = partition[1:]
+			walk(append(slices.Clone(delivered), partition[0]), rest)
+		}
+		if finished {
+			orders = append(orders, delivered)
+		}
+	}
+	walk(nil, partitions)
+	return orders
+}
+
+func eventIn(t *testing.T, record analysis.Record) *eventv1.Event {
+	t.Helper()
+
+	var decoded eventv1.Event
+	if err := proto.Unmarshal(record.Value, &decoded); err != nil {
+		t.Fatalf("decode event: %v", err)
+	}
+	return &decoded
+}
+
+func stageAgents(made *detectionv1.Detection) []string {
+	agents := make([]string, 0, len(made.GetCorrelation().GetStages()))
+	for _, stage := range made.GetCorrelation().GetStages() {
+		agents = append(agents, stage.GetAgentId())
+	}
+	return agents
+}
+
+func TestADetectionOfOneAgentsEventsKeepsTheNameItCarriedBeforeStagesNamedTheirAgents(t *testing.T) {
+	for _, one := range []struct {
+		kind    string
+		program *detection.Program
+		records []analysis.Record
+		named   string
+	}{
+		{
+			"single event", compiled(t, "ssh.failed_password", "failure"),
+			[]analysis.Record{failedOn(t, "web-01", "web-01-000000001", 0)},
+			"11abba04ffd1954bc9200508a28c7b94",
+		},
+		{
+			"count", threshold(t, 2, 10*time.Minute, "authentication.network.source.ip", "origin.agent_id"),
+			[]analysis.Record{failedOn(t, "web-01", "web-01-000000001", 0), failedOn(t, "web-01", "web-01-000000002", time.Second)},
+			"1ff9410b8395b714884edf9ca321ca55",
+		},
+		{
+			"story", story(t, 5*time.Minute, "authentication.network.source.ip", "origin.agent_id"),
+			[]analysis.Record{failedOn(t, "web-01", "web-01-000000001", 0), acceptedOn(t, "web-01", "web-01-000000002", 30*time.Second)},
+			"cde3c0d403c710646e5d248ae9143a29",
+		},
+	} {
+		t.Run(one.kind, func(t *testing.T) {
+			made := process(t, one.program, one.records)
+			if len(made) != 1 || made[0].GetDetectionId() != one.named {
+				t.Fatalf("one agent's %s is named %v and was named %s before stages named their agents",
+					one.kind, names(made), one.named)
+			}
+		})
+	}
+}
+
+func TestAStoryAcrossAgentsIsOneDetectionUnderOneNameInEveryOrderItsPartitionsInterleave(t *testing.T) {
+	program := sprayed(t)
+	orders := interleavings(
+		[]analysis.Record{
+			failedForOn(t, "root", "web-01", "web-01-000000001", 0),
+			acceptedOn(t, "web-01", "web-01-000000002", 30*time.Second),
+		},
+		[]analysis.Record{failedForOn(t, "admin", "web-02", "web-02-000000001", 10*time.Second)},
+		[]analysis.Record{failedForOn(t, "nobody", "web-03", "web-03-000000001", 20*time.Second)},
+	)
+	if len(orders) != 12 {
+		t.Fatalf("three partitions holding two, one and one records interleave %d ways", len(orders))
+	}
+
+	var named string
+	for _, order := range orders {
+		made := process(t, program, order)
+		if len(made) != 1 {
+			t.Fatalf("one story across agents was told %d times in one order", len(made))
+		}
+		if named == "" {
+			named = made[0].GetDetectionId()
+		}
+		if made[0].GetDetectionId() != named {
+			t.Fatalf("one story across agents was named %s and %s in two orders", named, made[0].GetDetectionId())
+		}
+		if agents := stageAgents(made[0]); !slices.Equal(agents, []string{"web-01", "web-02", "web-01"}) {
+			t.Errorf("the stages name the agents %v", agents)
+		}
+		if origin := made[0].GetOrigin(); origin.GetAgentId() != "web-01" || origin.GetTenantId() != "default" || origin.GetHost() != nil {
+			t.Errorf("a story across agents ending on web-01 is about %v", origin)
+		}
+		if err := detection.ValidateContract(made[0]); err != nil {
+			t.Errorf("the consumers of a story across agents refuse it: %v", err)
+		}
+	}
+}
+
+func TestACountAcrossAgentsDecidesAsOftenInEveryInterleavingAndNamesWhatCarriedItOverItsThreshold(t *testing.T) {
+	program := threshold(t, 2, 10*time.Minute, "authentication.network.source.ip")
+	orders := interleavings(
+		[]analysis.Record{
+			failedOn(t, "web-01", "web-01-000000001", 0),
+			failedOn(t, "web-01", "web-01-000000002", 20*time.Second),
+		},
+		[]analysis.Record{failedOn(t, "web-02", "web-02-000000001", 10*time.Second)},
+	)
+
+	for _, order := range orders {
+		made := process(t, program, order)
+		if len(made) != 2 {
+			t.Fatalf("three failures across agents against a threshold of two made %d detections in one order", len(made))
+		}
+		for index, one := range made {
+			reached := eventIn(t, order[index+1])
+			if one.GetSourceEventIds()[0] != reached.GetEventId() || one.GetOrigin().GetAgentId() != reached.GetOrigin().GetAgentId() {
+				t.Errorf("the detection decided on the fold that kept the count at its threshold names %s from %s, not the event folded there",
+					one.GetSourceEventIds()[0], one.GetOrigin().GetAgentId())
+			}
+		}
+	}
 }
 
 func TestTwoAgentsSendingOneEventIdentifierAreCountedApart(t *testing.T) {
@@ -91,11 +268,7 @@ func TestAStoryTwoAgentsToldUnderOneIdentifierIsADetectionItsConsumersTake(t *te
 		t.Fatalf("two agents sharing an event identifier told the story %d times", len(made))
 	}
 
-	err := detection.ValidateContract(made[0])
-	var violation *event.Violation
-	stillOpen(t, "BE-093", errors.As(err, &violation) && violation.Field == "source_event_ids[1]",
-		"a detection names the events of its stages by identifier alone, so a story two agents told under one names an event twice and its consumers refuse it")
-	if err != nil {
+	if err := detection.ValidateContract(made[0]); err != nil {
 		t.Fatalf("the consumers of a story two agents told under one identifier refuse it: %v", err)
 	}
 }
@@ -112,10 +285,7 @@ func TestAStoryAcrossAgentsIsNamedTheSameWhicheverEventArrivesLast(t *testing.T)
 			len(inOrder), len(reversed))
 	}
 
-	renamed := inOrder[0].GetDetectionId() != reversed[0].GetDetectionId()
-	stillOpen(t, "BE-093", renamed,
-		"a detection is named after the agent of the event that completed it, so the arrival order renames a story")
-	if renamed {
+	if inOrder[0].GetDetectionId() != reversed[0].GetDetectionId() {
 		t.Fatalf("one story was named %s in order and %s reversed",
 			inOrder[0].GetDetectionId(), reversed[0].GetDetectionId())
 	}

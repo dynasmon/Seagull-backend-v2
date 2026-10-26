@@ -59,6 +59,7 @@ type Correlated struct {
 
 type Satisfied struct {
 	Name  string
+	Agent string
 	Event string
 	At    time.Time
 }

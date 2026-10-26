@@ -3,7 +3,10 @@ package analysis
 import (
 	"net/netip"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 )
 
@@ -14,8 +17,25 @@ import (
 // distinction the source *does* consider real is left alone, because a stage
 // that merges two things cannot un-merge them later.
 
-// A vocabulary that is case insensitive by definition.
-func fold(value string) string { return strings.ToLower(strings.TrimSpace(value)) }
+// A vocabulary that is case insensitive by definition, folded a letter at a time
+// and never into more bytes than the letter was written in: Ⱥ and Ⱦ keep their
+// case, so a canonical event is still one the contract takes.
+func fold(value string) string {
+	trimmed := strings.TrimSpace(value)
+	for index := range len(trimmed) {
+		if trimmed[index] >= utf8.RuneSelf {
+			return strings.Map(lower, trimmed)
+		}
+	}
+	return strings.ToLower(trimmed)
+}
+
+func lower(letter rune) rune {
+	if folded := unicode.ToLower(letter); utf8.RuneLen(folded) <= utf8.RuneLen(letter) {
+		return folded
+	}
+	return letter
+}
 
 // A DNS name, without the trailing dot that makes it absolute: `WEB-01.` and
 // `web-01` are one host.
@@ -24,14 +44,19 @@ func hostname(value string) string { return strings.TrimSuffix(fold(value), ".")
 // One text form per address: `::ffff:10.0.0.5` is `10.0.0.5` and
 // `2001:0DB8::0001` is `2001:db8::1`. A zone survives, because it is part of
 // the address. Text that is not an address at all is left as it arrived —
-// something that cannot be parsed is evidence, and rewriting it destroys it.
+// something that cannot be parsed is evidence, and rewriting it destroys it —
+// and so is an address whose one form is longer than the contract lets an
+// address be, which `1::3:4:5:6:7:8` beside a long zone becomes.
 func address(value string) string {
 	trimmed := strings.TrimSpace(value)
 	parsed, err := netip.ParseAddr(trimmed)
 	if err != nil {
 		return trimmed
 	}
-	return parsed.Unmap().String()
+	if canonical := parsed.Unmap().String(); len(canonical) <= event.MaxAddressLength {
+		return canonical
+	}
+	return trimmed
 }
 
 // Reports whether the field had to be rewritten, so a caller can say how much

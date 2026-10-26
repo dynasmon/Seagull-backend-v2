@@ -18,3 +18,7 @@ func carrying(largest int) int32 {
 func quarantining(stream int32) int32 {
 	return stream + framing
 }
+
+// The largest record its topic carries, once the key, the headers and the
+// framing of a record and its batch have taken their room.
+func (t Topic) LargestRecord() int { return int(t.MaxMessageBytes) - framing }

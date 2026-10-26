@@ -229,6 +229,14 @@ func read(record protoreflect.Message, path []protoreflect.FieldDescriptor) (pro
 	return message.Get(leaf), true
 }
 
+func place(record protoreflect.Message, path []protoreflect.FieldDescriptor, value protoreflect.Value) {
+	message := record
+	for _, step := range path[:len(path)-1] {
+		message = message.Mutable(step).Message()
+	}
+	message.Set(path[len(path)-1], value)
+}
+
 func (c comparison) saw(value protoreflect.Value, carried, negated bool) Evidence {
 	seen := Evidence{Field: c.field, Operator: c.operator, Negated: negated, Absent: !carried}
 	if carried {

@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/control"
@@ -67,6 +69,12 @@ func (r rulesets) Publish(ctx context.Context, request *rulesetv1.PublishRequest
 	}
 
 	record := version.Record()
+	if size := proto.Size(record); size > r.largest {
+		answer.Validation = &rulesetv1.ValidationResponse{RulesetId: validation.GetRulesetId(), Faults: []*rulesetv1.Fault{{
+			Reason: fmt.Sprintf("the ruleset encodes to %d bytes with its note, and the log it is published to carries at most %d", size, r.largest),
+		}}}
+		return answer, nil
+	}
 	if err := r.publisher.Publish(ctx, record); err != nil {
 		return nil, err
 	}

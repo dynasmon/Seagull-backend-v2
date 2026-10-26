@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -32,12 +33,14 @@ const SchemaVersion = 1
 // triage.
 func (m Match) Detected(ruleset string, record *eventv1.Event, at time.Time) *detectionv1.Detection {
 	from := []sentEvent{{agent: record.GetOrigin().GetAgentId(), event: record.GetEventId()}}
-	events, happened := []string{record.GetEventId()}, record.GetTime().GetEventTime()
 
-	// The origin is copied rather than pointed at: a detection is read after
-	// the event that produced it has been let go, so it may not share memory
-	// with it.
-	origin, _ := proto.Clone(record.GetOrigin()).(*eventv1.Origin)
+	// The origin and the instant are copied rather than pointed at, and only as
+	// far as the contract declares them: a detection is read after the event
+	// that produced it has been let go, and what a producer wrote in fields this
+	// build does not know is nothing a rule decided, while it would weigh
+	// whatever the producer chose.
+	origin, happened := declared(record.GetOrigin()), declared(record.GetTime().GetEventTime())
+	events := []string{record.GetEventId()}
 
 	if m.Rule.Sequence.Correlates() {
 		last := m.Correlated.Stages[len(m.Correlated.Stages)-1]
@@ -63,6 +66,30 @@ func (m Match) Detected(ruleset string, record *eventv1.Event, at time.Time) *de
 		Aggregation:    aggregated(m.Rule.Count, m.Counted),
 		Correlation:    correlated(m.Rule.Sequence, m.Correlated),
 	}
+}
+
+func declared[M proto.Message](held M) M {
+	copied, _ := proto.Clone(held).(M)
+	if reflected := copied.ProtoReflect(); reflected.IsValid() {
+		forget(reflected)
+	}
+	return copied
+}
+
+func forget(message protoreflect.Message) {
+	message.SetUnknown(nil)
+	message.Range(func(field protoreflect.FieldDescriptor, value protoreflect.Value) bool {
+		switch {
+		case field.Message() == nil || field.IsMap():
+		case field.IsList():
+			for index := range value.List().Len() {
+				forget(value.List().Get(index).Message())
+			}
+		default:
+			forget(value.Message())
+		}
+		return true
+	})
 }
 
 func correlated(sequence Sequence, found Correlated) *detectionv1.Correlation {

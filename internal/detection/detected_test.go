@@ -213,6 +213,51 @@ func TestAStoryOfOneAgentCarriesTheOriginOfTheEventThatCompletedIt(t *testing.T)
 	}
 }
 
+func TestADetectionCarriesNothingOfItsEventTheContractDoesNotDeclare(t *testing.T) {
+	record := observed(t)
+	for _, bloated := range []struct {
+		message proto.Message
+		size    int
+	}{
+		{record.GetOrigin().GetHost(), 60 << 10},
+		{record.GetOrigin(), 180 << 10},
+		{record.GetTime().GetEventTime(), 100 << 10},
+	} {
+		if !fixtures.Bloat(bloated.message, bloated.size) {
+			t.Fatalf("no %T encodes to %d bytes", bloated.message, bloated.size)
+		}
+	}
+
+	for name, made := range map[string]*detectionv1.Detection{
+		"a count":    detected(t, attributed(), record),
+		"a sequence": correlated(t, correlating(), record),
+	} {
+		if undeclared := undeclaredIn(made.ProtoReflect()); undeclared != 0 {
+			t.Errorf("%s carries %d bytes its event held in fields the contract does not declare", name, undeclared)
+		}
+		if err := detection.ValidateContract(made); err != nil {
+			t.Errorf("%s is refused by its consumers: %v", name, err)
+		}
+	}
+}
+
+func undeclaredIn(message protoreflect.Message) int {
+	held := len(message.GetUnknown())
+	message.Range(func(field protoreflect.FieldDescriptor, value protoreflect.Value) bool {
+		switch {
+		case field.Kind() != protoreflect.MessageKind || field.IsMap():
+		case field.IsList():
+			for index := range value.List().Len() {
+				held += undeclaredIn(value.List().Get(index).Message())
+			}
+		default:
+			held += undeclaredIn(value.Message())
+		}
+		return true
+	})
+	return held
+}
+
 // The origin is copied from the event whole, so what it carries is the event
 // contract's business rather than this boundary's. A leaf here for the same
 // reason a repeated message is one.

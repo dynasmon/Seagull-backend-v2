@@ -61,5 +61,6 @@ func provision(ctx context.Context) error {
 		slog.String("detections_topic", settings.topology.Detections.Name),
 		slog.Int("changes", len(changed)),
 	)
+	broker.LogDurability(ctx, logger, settings.topology.Topics()...)
 	return nil
 }

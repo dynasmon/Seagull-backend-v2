@@ -150,7 +150,12 @@ func gateway(ctx context.Context) error {
 	// and what the process may hold are bounded per agent and per process, not
 	// per kind of record, or a collector would buy a second budget by sending an
 	// inventory batch or a status report.
-	limiter := ratelimit.NewLimiter(settings.ratePerSecond, settings.rateBurst, settings.trackedAgents)
+	var limiter *ratelimit.Limiter
+	if settings.rateLimited {
+		limiter = ratelimit.NewLimiter(settings.ratePerSecond, settings.rateBurst, settings.trackedAgents)
+	} else {
+		platform.Logger().Warn("rate_limit_off", slog.String("setting", rateSetting))
+	}
 
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{
 		Admitter:       admitter,

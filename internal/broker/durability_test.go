@@ -1,12 +1,17 @@
 package broker
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
+	platformmetrics "github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 )
 
 func held(durability Durability, replicas, inSync int16) Topic {
@@ -115,5 +120,77 @@ func TestTheMigratorRefusesAnUndeclaredDevelopmentBackboneBeforeReachingIt(t *te
 	}
 	if len(changed) != 0 {
 		t.Errorf("the migrator changed %v before refusing the topology", changed)
+	}
+}
+
+func TestAnAcknowledgementIsHeldByTheFewerOfTheInSyncFloorAndAMajority(t *testing.T) {
+	for _, topic := range []struct{ replicas, inSync, by int16 }{
+		{replicas: 3, inSync: 2, by: 2},
+		{replicas: 3, inSync: 3, by: 2},
+		{replicas: 4, inSync: 4, by: 3},
+		{replicas: 5, inSync: 2, by: 2},
+		{replicas: 5, inSync: 3, by: 3},
+		{replicas: 2, inSync: 2, by: 2},
+		{replicas: 2, inSync: 1, by: 1},
+		{replicas: 1, inSync: 1, by: 1},
+	} {
+		if by := held(Development, topic.replicas, topic.inSync).acknowledgedBy(); by != topic.by {
+			t.Errorf("%d replicas with %d in sync acknowledge a record %d of them hold, and either broker guarantees only %d",
+				topic.replicas, topic.inSync, by, topic.by)
+		}
+	}
+}
+
+type reported struct {
+	Level        string `json:"level"`
+	Message      string `json:"msg"`
+	Durability   string `json:"durability"`
+	Replicas     int    `json:"replicas"`
+	InSync       int    `json:"min_in_sync_replicas"`
+	Acknowledged int    `json:"acknowledged_by"`
+}
+
+func reportOf(t *testing.T, topics ...Topic) []reported {
+	t.Helper()
+
+	var written bytes.Buffer
+	LogDurability(context.Background(), slog.New(slog.NewJSONHandler(&written, nil)), topics...)
+
+	var lines []reported
+	for _, line := range strings.Split(strings.TrimSpace(written.String()), "\n") {
+		var entry reported
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("read %q: %v", line, err)
+		}
+		lines = append(lines, entry)
+	}
+	return lines
+}
+
+func TestABackboneAcknowledgingWhatOneReplicaHoldsIsAWarningAtStartup(t *testing.T) {
+	lines := reportOf(t, held(Development, 1, 1), held(Development, 1, 1))
+
+	want := reported{Level: "WARN", Message: "backbone_durability", Durability: "development", Replicas: 1, InSync: 1, Acknowledged: 1}
+	if len(lines) != 1 || lines[0] != want {
+		t.Fatalf("a development backbone was reported as %+v, want %+v once", lines, want)
+	}
+}
+
+func TestAProductionBackboneIsReportedByTheTopicWhoseAcknowledgementIsWorthLeast(t *testing.T) {
+	lines := reportOf(t, held(Production, 5, 3), held(Production, 3, 2), held(Production, 4, 3))
+
+	want := reported{Level: "INFO", Message: "backbone_durability", Durability: "production", Replicas: 3, InSync: 2, Acknowledged: 2}
+	if len(lines) != 1 || lines[0] != want {
+		t.Fatalf("a production backbone was reported as %+v, want %+v once", lines, want)
+	}
+}
+
+func TestTheReplicasBehindAnAcknowledgementAreAGauge(t *testing.T) {
+	registry := platformmetrics.New("test")
+
+	ObserveDurability(registry, held(Production, 5, 3), held(Production, 3, 2))
+
+	if by := metricValue(t, registry, "seagull_backbone_acknowledging_replicas"); by != 2 {
+		t.Fatalf("the gauge says an acknowledged record is held by %.0f replicas, and the weakest topic holds it on 2", by)
 	}
 }

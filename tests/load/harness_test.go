@@ -160,7 +160,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		options.maxEventsPerBatch = 10_000
 	}
 	if options.maxInflightBytes == 0 {
-		options.maxInflightBytes = 512 << 20
+		options.maxInflightBytes = 1 << 30
 	}
 	if options.maxInflightRequests == 0 {
 		options.maxInflightRequests = 4096

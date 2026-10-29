@@ -144,11 +144,11 @@ func TestAnIncompleteTopicIsRefused(t *testing.T) {
 	complete := Topic{
 		Name:            "security.events.raw",
 		Partitions:      12,
-		Replicas:        1,
+		Replicas:        3,
 		Retention:       time.Hour,
 		Cleanup:         cleanupDelete,
 		Compression:     compressionZstd,
-		MinInSync:       1,
+		MinInSync:       2,
 		MaxMessageBytes: 1 << 20,
 	}
 	if err := complete.Validate(); err != nil {

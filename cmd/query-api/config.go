@@ -10,7 +10,10 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 )
 
-const serviceName = "query-api"
+const (
+	serviceName = "query-api"
+	rateSetting = "SEAGULL_QUERY_API_RATE_PER_SECOND"
+)
 
 type configuration struct {
 	service service.Config
@@ -27,6 +30,7 @@ type configuration struct {
 
 	maxInflight    int
 	ratePerSecond  float64
+	rateLimited    bool
 	rateBurst      int
 	trackedCallers int
 
@@ -69,7 +73,8 @@ func load(parser *config.Parser) (configuration, error) {
 		store: storeConfig(parser),
 	}
 
-	loaded.ratePerSecond = float64(parser.Int("SEAGULL_QUERY_API_RATE_PER_SECOND", 10, 0, 10_000))
+	rate, limited := parser.Limit(rateSetting, 10, 1, 10_000)
+	loaded.ratePerSecond, loaded.rateLimited = float64(rate), limited
 
 	if err := parser.Err(); err != nil {
 		return configuration{}, err

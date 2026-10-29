@@ -74,7 +74,7 @@ func LoadTopology(parser *config.Parser) Topology {
 	if parser.Enum(durabilityKey, Production.String(), Production.String(), Development.String()) == Development.String() {
 		durability = Development
 	}
-	replicas := int16(parser.Int("SEAGULL_BACKBONE_REPLICAS", 1, 1, 15))
+	replicas := int16(parser.Int("SEAGULL_BACKBONE_REPLICAS", productionReplicas, 1, 15))
 	minInSync := int16(parser.Int("SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS", int(replicas)/2+1, 1, 15))
 	return Topology{
 		Events: Topic{
@@ -271,6 +271,12 @@ func (t Topic) Validate() error {
 			t.Name, t.Replicas, t.MinInSync)
 	case t.MaxMessageBytes < 1:
 		return fmt.Errorf("%s needs the largest record batch it carries", t.Name)
+	case t.Durability != Development && t.Replicas < productionReplicas:
+		return fmt.Errorf("%s keeps %d of the %d replicas a production backbone keeps, so losing a broker can lose what it acknowledged: %w; %s=%s declares a backbone that keeps fewer",
+			t.Name, t.Replicas, productionReplicas, ErrBelowProductionDurability, durabilityKey, Development)
+	case t.Durability != Development && t.MinInSync < productionInSync:
+		return fmt.Errorf("%s acknowledges a write once %d of the %d replicas a production backbone waits for hold it: %w; %s=%s declares a backbone that waits for fewer",
+			t.Name, t.MinInSync, productionInSync, ErrBelowProductionDurability, durabilityKey, Development)
 	}
 	return nil
 }

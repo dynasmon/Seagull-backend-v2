@@ -213,7 +213,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	release, admitted := h.capacity.Hold(h.reserving(r))
+	reservation, admitted := h.capacity.Hold(h.reserving(r))
 	if !admitted {
 		h.stream.rejected(CodeAtCapacity)
 		w.Header().Set("Retry-After", "1")
@@ -221,7 +221,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"the gateway is holding as much work as it was bounded to", "", -1)
 		return
 	}
-	defer release()
+	defer reservation.Release()
 
 	payload, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.maxBodyBytes))
 	if err != nil {

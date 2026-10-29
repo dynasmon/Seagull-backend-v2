@@ -97,7 +97,7 @@ func ObserveCapacity(registry *metrics.Registry, capacity *Capacity) {
 			Namespace: metrics.Namespace,
 			Subsystem: "ingest",
 			Name:      "inflight_bytes",
-			Help:      "Request bytes the gateway has reserved and not yet released.",
+			Help:      "Bytes the requests in flight hold: each body, and what decoding it allocates once it is weighed.",
 		}, func() float64 { held, _ := capacity.Held(); return float64(held) }),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
@@ -109,7 +109,7 @@ func ObserveCapacity(registry *metrics.Registry, capacity *Capacity) {
 			Namespace: metrics.Namespace,
 			Subsystem: "ingest",
 			Name:      "inflight_byte_ceiling",
-			Help:      "Request bytes the gateway holds at once before it refuses work.",
+			Help:      "Bytes the requests in flight hold at once before the gateway refuses work.",
 		}, func() float64 { return float64(bytes) }),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,

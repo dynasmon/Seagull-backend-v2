@@ -4,6 +4,12 @@
 > record its topic could never carry is refused by its position, never answered
 > `503`, so sending again stays something that can succeed.
 
+> Amended by [ADR 41](0041-production-is-the-default-and-development-is-declared.md):
+> by default a batch is durable once at least two of the three replicas a
+> production backbone keeps hold it; a backbone that keeps fewer is declared
+> `development`, and every process reports at startup what an acknowledgement is
+> worth.
+
 ## Context
 
 v1's ingest endpoint accepted a batch, put it on a Redis list and answered

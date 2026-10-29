@@ -78,6 +78,8 @@ func writer(ctx context.Context) error {
 	for _, entry := range drift {
 		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
 	}
+	broker.LogDurability(ctx, platform.Logger(), settings.topology.Detections, settings.topology.DetectionsQuarantine)
+	broker.ObserveDurability(platform.Metrics(), settings.topology.Detections, settings.topology.DetectionsQuarantine)
 
 	refused, err := broker.NewQuarantine(broker.Config{
 		Brokers:         settings.brokers,

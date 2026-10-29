@@ -71,6 +71,7 @@ func TestTheEngineConsumesTheBackboneInAGroupOfItsOwn(t *testing.T) {
 		Cleanup:         "delete",
 		Compression:     "zstd",
 		MinInSync:       1,
+		Durability:      broker.Development,
 		MaxMessageBytes: 1 << 20,
 	}); err != nil {
 		t.Fatalf("the engine refused a topic it should accept: %v", err)

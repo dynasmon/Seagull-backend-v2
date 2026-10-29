@@ -42,7 +42,8 @@ type Topic struct {
 	Compression string
 
 	// With one replica in sync, acks from all of them is acks from one.
-	MinInSync int16
+	MinInSync  int16
+	Durability Durability
 
 	MaxMessageBytes int32
 }
@@ -69,7 +70,11 @@ type Topology struct {
 // for something to pick them up. Detections are rarer than the telemetry they
 // are made from, so the topic carrying them is narrower than the one it reads.
 func LoadTopology(parser *config.Parser) Topology {
-	replicas := int16(parser.Int("SEAGULL_BACKBONE_REPLICAS", 1, 1, 15))
+	durability := Production
+	if parser.Enum(durabilityKey, Production.String(), Production.String(), Development.String()) == Development.String() {
+		durability = Development
+	}
+	replicas := int16(parser.Int("SEAGULL_BACKBONE_REPLICAS", productionReplicas, 1, 15))
 	minInSync := int16(parser.Int("SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS", int(replicas)/2+1, 1, 15))
 	return Topology{
 		Events: Topic{
@@ -80,6 +85,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupDelete,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
+			Durability:      durability,
 			MaxMessageBytes: carrying(event.MaxEventBytes),
 		},
 		Quarantine: Topic{
@@ -90,6 +96,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupDelete,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
+			Durability:      durability,
 			MaxMessageBytes: quarantining(carrying(event.MaxEventBytes)),
 		},
 		Detections: Topic{
@@ -100,6 +107,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupDelete,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
+			Durability:      durability,
 			MaxMessageBytes: carrying(detection.MaxDetectionBytes),
 		},
 		// One quarantine per stream, not one for the platform: a refused record
@@ -113,6 +121,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupDelete,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
+			Durability:      durability,
 			MaxMessageBytes: quarantining(carrying(detection.MaxDetectionBytes)),
 		},
 		Inventory: Topic{
@@ -123,6 +132,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupDelete,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
+			Durability:      durability,
 			MaxMessageBytes: carrying(inventory.MaxRecordBytes),
 		},
 		InventoryQuarantine: Topic{
@@ -133,6 +143,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupDelete,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
+			Durability:      durability,
 			MaxMessageBytes: quarantining(carrying(inventory.MaxRecordBytes)),
 		},
 		Advisories: Topic{
@@ -142,6 +153,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupCompact,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
+			Durability:      durability,
 			MaxMessageBytes: carrying(vulnerability.MaxAdvisoryBytes),
 		},
 		AdvisoriesQuarantine: Topic{
@@ -152,6 +164,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupDelete,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
+			Durability:      durability,
 			MaxMessageBytes: quarantining(carrying(vulnerability.MaxAdvisoryBytes)),
 		},
 		Rulesets: Topic{
@@ -161,6 +174,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupCompact,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
+			Durability:      durability,
 			MaxMessageBytes: defaultCarriage,
 		},
 		Agents: Topic{
@@ -170,6 +184,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupCompact,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
+			Durability:      durability,
 			MaxMessageBytes: defaultCarriage,
 		},
 		Status: Topic{
@@ -179,6 +194,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupCompact,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
+			Durability:      durability,
 			MaxMessageBytes: carrying(agentstatus.MaxReportBytes),
 		},
 		StatusQuarantine: Topic{
@@ -189,6 +205,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupDelete,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
+			Durability:      durability,
 			MaxMessageBytes: quarantining(carrying(agentstatus.MaxReportBytes)),
 		},
 		// Every assessment and not the newest of each agent, unlike status: an
@@ -202,6 +219,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupDelete,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
+			Durability:      durability,
 			MaxMessageBytes: carrying(assessment.MaxAssessmentBytes),
 		},
 		AssessmentsQuarantine: Topic{
@@ -212,6 +230,7 @@ func LoadTopology(parser *config.Parser) Topology {
 			Cleanup:         cleanupDelete,
 			Compression:     compressionZstd,
 			MinInSync:       minInSync,
+			Durability:      durability,
 			MaxMessageBytes: quarantining(carrying(assessment.MaxAssessmentBytes)),
 		},
 	}
@@ -252,6 +271,12 @@ func (t Topic) Validate() error {
 			t.Name, t.Replicas, t.MinInSync)
 	case t.MaxMessageBytes < 1:
 		return fmt.Errorf("%s needs the largest record batch it carries", t.Name)
+	case t.Durability != Development && t.Replicas < productionReplicas:
+		return fmt.Errorf("%s keeps %d of the %d replicas a production backbone keeps, so losing a broker can lose what it acknowledged: %w; %s=%s declares a backbone that keeps fewer",
+			t.Name, t.Replicas, productionReplicas, ErrBelowProductionDurability, durabilityKey, Development)
+	case t.Durability != Development && t.MinInSync < productionInSync:
+		return fmt.Errorf("%s acknowledges a write once %d of the %d replicas a production backbone waits for hold it: %w; %s=%s declares a backbone that waits for fewer",
+			t.Name, t.MinInSync, productionInSync, ErrBelowProductionDurability, durabilityKey, Development)
 	}
 	return nil
 }

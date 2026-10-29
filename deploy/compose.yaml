@@ -27,11 +27,14 @@ x-backbone: &backbone
   SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_PARTITIONS: ${SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_PARTITIONS:-1}
   SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_RETENTION: ${SEAGULL_BACKBONE_ADVISORIES_QUARANTINE_RETENTION:-720h}
   SEAGULL_BACKBONE_RULESETS_TOPIC: security.rulesets
+  # One broker, plaintext and unauthenticated is a development posture, stated
+  # rather than inherited: a record is acknowledged once the one replica holds
+  # it. A deployment turns encryption and authentication on together; the two
+  # never separate, because a password on a plaintext connection is a password
+  # given away.
+  SEAGULL_BACKBONE_DURABILITY: ${SEAGULL_BACKBONE_DURABILITY:-development}
   SEAGULL_BACKBONE_REPLICAS: ${SEAGULL_BACKBONE_REPLICAS:-1}
   SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS: ${SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS:-1}
-  # Plaintext and unauthenticated is a development posture, stated rather than
-  # inherited. A deployment turns both on together; the two never separate,
-  # because a password on a plaintext connection is a password given away.
   SEAGULL_BACKBONE_TLS: ${SEAGULL_BACKBONE_TLS:-false}
   SEAGULL_BACKBONE_TLS_CA: ${SEAGULL_BACKBONE_TLS_CA:-}
   SEAGULL_BACKBONE_SASL_MECHANISM: ${SEAGULL_BACKBONE_SASL_MECHANISM:-none}

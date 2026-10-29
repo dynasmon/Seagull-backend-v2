@@ -52,3 +52,21 @@ func TestAGatewayIsNamedNoLongerThanTheNameEveryEventRecords(t *testing.T) {
 		})
 	}
 }
+
+func TestAGatewayRateLimitIsAtLeastOneOrTurnedOffInWords(t *testing.T) {
+	if _, err := load(environment(t, map[string]string{"SEAGULL_GATEWAY_RATE_PER_SECOND": "0"})); err == nil ||
+		!strings.Contains(err.Error(), "SEAGULL_GATEWAY_RATE_PER_SECOND") {
+		t.Errorf("a rate of zero was answered %v, and zero used to turn the limiter off without a word", err)
+	}
+
+	limited, err := load(environment(t, nil))
+	if err != nil || !limited.rateLimited || limited.ratePerSecond != 200 {
+		t.Errorf("a gateway configured with nothing limits each agent to %.0f batches a second, limited=%v (%v)",
+			limited.ratePerSecond, limited.rateLimited, err)
+	}
+
+	off, err := load(environment(t, map[string]string{"SEAGULL_GATEWAY_RATE_PER_SECOND": "unlimited"}))
+	if err != nil || off.rateLimited {
+		t.Errorf("a gateway told unlimited is limited=%v (%v)", off.rateLimited, err)
+	}
+}

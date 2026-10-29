@@ -111,6 +111,8 @@ func engine(ctx context.Context) error {
 	for _, entry := range drift {
 		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
 	}
+	broker.LogDurability(ctx, platform.Logger(), settings.topology.Events, settings.topology.Detections)
+	broker.ObserveDurability(platform.Metrics(), settings.topology.Events, settings.topology.Detections)
 
 	component, err := analysis.NewEngine(analysis.EngineOptions{
 		Source:         source{consumer: consumer},

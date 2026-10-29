@@ -11,7 +11,10 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/postgres"
 )
 
-const serviceName = "control-api"
+const (
+	serviceName = "control-api"
+	rateSetting = "SEAGULL_CONTROL_API_RATE_PER_SECOND"
+)
 
 type configuration struct {
 	service service.Config
@@ -56,6 +59,7 @@ type configuration struct {
 	sessionsPer    int
 	sessionsTotal  int
 	ratePerSecond  float64
+	rateLimited    bool
 	rateBurst      int
 	trackedCallers int
 
@@ -131,7 +135,8 @@ func load(parser *config.Parser) (configuration, error) {
 		idleTimeout:  parser.Duration("SEAGULL_CONTROL_API_IDLE_TIMEOUT", 60*time.Second, time.Second, 30*time.Minute),
 	}
 
-	loaded.ratePerSecond = float64(parser.Int("SEAGULL_CONTROL_API_RATE_PER_SECOND", 20, 0, 10_000))
+	rate, limited := parser.Limit(rateSetting, 20, 1, 10_000)
+	loaded.ratePerSecond, loaded.rateLimited = float64(rate), limited
 	loaded.renewalsPerSecond = 1 / parser.Duration("SEAGULL_CONTROL_API_RENEWAL_INTERVAL",
 		time.Minute, time.Second, 24*time.Hour).Seconds()
 	loaded.policyPullsPerSecond = 1 / parser.Duration("SEAGULL_CONTROL_API_AGENT_POLICY_INTERVAL",

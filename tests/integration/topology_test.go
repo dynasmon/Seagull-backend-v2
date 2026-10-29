@@ -46,6 +46,7 @@ func declaredTopic(t *testing.T, addresses []string, partitions int32, retention
 		Cleanup:         "delete",
 		Compression:     "zstd",
 		MinInSync:       1,
+		Durability:      broker.Development,
 		MaxMessageBytes: 1 << 20,
 	}
 }

@@ -95,7 +95,8 @@ type gate struct {
 }
 
 type Handler struct {
-	stream stream
+	stream  stream
+	weigher *weigher
 	gate
 }
 
@@ -180,7 +181,11 @@ func newHandler(admitting stream, standing gate) (*Handler, error) {
 		return nil, fmt.Errorf("the gateway holds %d bytes at once and admits a body of %d, so no batch could ever be taken",
 			held, standing.maxBodyBytes)
 	}
-	return &Handler{stream: admitting, gate: standing}, nil
+	scale, err := newWeigher(admitting.batch())
+	if err != nil {
+		return nil, fmt.Errorf("the %s route: %w", admitting.name(), err)
+	}
+	return &Handler{stream: admitting, weigher: scale, gate: standing}, nil
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -215,10 +220,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	reservation, admitted := h.capacity.Hold(h.reserving(r))
 	if !admitted {
-		h.stream.rejected(CodeAtCapacity)
-		w.Header().Set("Retry-After", "1")
-		refuse(w, http.StatusServiceUnavailable, CodeAtCapacity,
-			"the gateway is holding as much work as it was bounded to", "", -1)
+		h.refuseAtCapacity(w)
 		return
 	}
 	defer reservation.Release()
@@ -231,6 +233,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		refuse(w, http.StatusBadRequest, "unreadable_body", "the batch body could not be read", "", -1)
+		return
+	}
+
+	weight, err := h.weigher.weigh(payload)
+	if err != nil {
+		h.refuseAdmission(ctx, w, outcome{}, refuseMalformed(h.stream))
+		return
+	}
+	holding := int64(len(payload)) + weight
+	if bound, _ := h.capacity.Bounds(); holding > bound {
+		h.refuseHeavy(ctx, w, len(payload), holding, bound)
+		return
+	}
+	if !reservation.Resize(holding) {
+		h.refuseAtCapacity(w)
 		return
 	}
 
@@ -249,6 +266,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Int("records", carried.records),
 	)
 	respond(w, http.StatusOK, carried.acknowledgement)
+}
+
+func (h *Handler) refuseAtCapacity(w http.ResponseWriter) {
+	h.stream.rejected(CodeAtCapacity)
+	w.Header().Set("Retry-After", "1")
+	refuse(w, http.StatusServiceUnavailable, CodeAtCapacity,
+		"the gateway is holding as much work as it was bounded to", "", -1)
+}
+
+func (h *Handler) refuseHeavy(ctx context.Context, w http.ResponseWriter, body int, holding, bound int64) {
+	h.stream.rejected(string(CodeBatchTooLarge))
+	log.From(ctx).Warn("batch_rejected",
+		slog.String("stream", h.stream.name()),
+		slog.String("code", string(CodeBatchTooLarge)),
+		slog.Int("body_bytes", body),
+		slog.Int64("decoded_bytes", holding-int64(body)),
+	)
+	refuse(w, http.StatusRequestEntityTooLarge, string(CodeBatchTooLarge),
+		fmt.Sprintf("decoding the batch would hold %d bytes and the gateway holds %d at once", holding, bound), "", -1)
 }
 
 func (h *Handler) refuseUnadmitted(w http.ResponseWriter, agentID string) {

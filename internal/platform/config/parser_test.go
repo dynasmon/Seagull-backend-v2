@@ -192,3 +192,40 @@ func TestATruthValueIsReadOrRefused(t *testing.T) {
 		t.Error("an unset value did not fall back")
 	}
 }
+
+func TestALimitIsANumberOrTheWordThatTurnsItOff(t *testing.T) {
+	parser := config.New(lookupFrom(map[string]string{"SEAGULL_RATE": "25", "SEAGULL_OFF": "unlimited"}))
+
+	if rate, limited := parser.Limit("SEAGULL_RATE", 10, 1, 100); rate != 25 || !limited {
+		t.Errorf("a limit of 25 read as %d, limited=%v", rate, limited)
+	}
+	if _, limited := parser.Limit("SEAGULL_OFF", 10, 1, 100); limited {
+		t.Error("the word that turns a limit off left it on")
+	}
+	if rate, limited := parser.Limit("SEAGULL_UNSET", 10, 1, 100); rate != 10 || !limited {
+		t.Errorf("an unset limit read as %d, limited=%v, rather than its default", rate, limited)
+	}
+	if err := parser.Err(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestALimitOfZeroIsRefusedRatherThanReadAsOff(t *testing.T) {
+	parser := config.New(lookupFrom(map[string]string{"SEAGULL_RATE": "0", "SEAGULL_WORD": "none"}))
+
+	for _, key := range []string{"SEAGULL_RATE", "SEAGULL_WORD"} {
+		if _, limited := parser.Limit(key, 10, 1, 100); !limited {
+			t.Errorf("%s turned the limit off without the word that does", key)
+		}
+	}
+
+	err := parser.Err()
+	if err == nil {
+		t.Fatal("a limit of zero and a word nobody defined were both accepted")
+	}
+	for _, key := range []string{"SEAGULL_RATE", "SEAGULL_WORD"} {
+		if !strings.Contains(err.Error(), key) {
+			t.Errorf("the refusal does not name %s: %v", key, err)
+		}
+	}
+}

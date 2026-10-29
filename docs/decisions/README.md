@@ -44,3 +44,4 @@ rediscovered by reading the code.
 - [38. An observation in detection state is named by the agent that sent its event as well as by its identifier](0038-an-observation-is-named-by-the-agent-that-sent-its-event.md)
 - [39. A detection is named by the agent and identifier of every event that decided it, whichever of them arrived last](0039-a-detection-is-named-by-the-agent-and-identifier-of-every-event-that-decided-it.md)
 - [40. What the platform makes is bounded where it is made: a rule by the heaviest detection it could make, a ruleset by the log it is published to](0040-a-record-the-platform-makes-is-bounded-where-it-is-made.md)
+- [41. Production is the default and development is declared: an acknowledgement is held by two of three replicas, a limit is turned off only in words, and a body is weighed by what decoding it costs](0041-production-is-the-default-and-development-is-declared.md)

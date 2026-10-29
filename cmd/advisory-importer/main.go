@@ -64,6 +64,8 @@ func importer(ctx context.Context) error {
 	for _, entry := range drift {
 		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
 	}
+	broker.LogDurability(ctx, platform.Logger(), settings.topology.Advisories)
+	broker.ObserveDurability(platform.Metrics(), settings.topology.Advisories)
 
 	backlog, err := broker.NewStateLog(broker.Config{
 		Brokers:  settings.brokers,

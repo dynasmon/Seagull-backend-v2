@@ -268,3 +268,27 @@ func parseBytes(value string) (int64, error) {
 	}
 	return parsed, nil
 }
+
+const Unlimited = "unlimited"
+
+// A limit is a number or the word that turns it off, and never a number that
+// does: a limit nobody meant to remove is one somebody set to zero.
+func (p *Parser) Limit(key string, fallback, minimum, maximum int) (int, bool) {
+	value, ok := p.raw(key)
+	if !ok {
+		return fallback, true
+	}
+	if value == Unlimited {
+		return 0, false
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		p.fail(key, fmt.Errorf("%q is neither an integer nor %s", value, Unlimited))
+		return fallback, true
+	}
+	if parsed < minimum || parsed > maximum {
+		p.fail(key, fmt.Errorf("%d is outside %d..%d, and %s is how a limit is turned off", parsed, minimum, maximum, Unlimited))
+		return fallback, true
+	}
+	return parsed, true
+}

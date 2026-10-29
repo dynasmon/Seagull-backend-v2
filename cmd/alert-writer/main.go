@@ -90,6 +90,8 @@ func writer(ctx context.Context) error {
 	for _, entry := range drift {
 		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
 	}
+	broker.LogDurability(ctx, platform.Logger(), settings.topology.Detections)
+	broker.ObserveDurability(platform.Metrics(), settings.topology.Detections)
 
 	component, err := alertstore.NewWriter(alertstore.WriterOptions{
 		Source:        source{consumer: consumer},

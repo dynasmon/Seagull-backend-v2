@@ -86,12 +86,19 @@ func queryAPI(ctx context.Context) error {
 		return err
 	}
 
+	var callers *ratelimit.Limiter
+	if settings.rateLimited {
+		callers = ratelimit.NewLimiter(settings.ratePerSecond, settings.rateBurst, settings.trackedCallers)
+	} else {
+		platform.Logger().Warn("rate_limit_off", slog.String("setting", rateSetting))
+	}
+
 	listener, err := hunt.NewServer(hunt.ServerOptions{
 		Address:         settings.address,
 		TLS:             transport,
 		Hunter:          hunter,
 		Capacity:        capacity,
-		Limiter:         ratelimit.NewLimiter(settings.ratePerSecond, settings.rateBurst, settings.trackedCallers),
+		Limiter:         callers,
 		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),
@@ -116,6 +123,7 @@ func queryAPI(ctx context.Context) error {
 		slog.Int("page_max", settings.limits.MaxPage),
 		slog.Duration("read_budget", settings.limits.Timeout),
 		slog.Int("max_inflight", settings.maxInflight),
+		slog.Bool("rate_limited", settings.rateLimited),
 		slog.Float64("rate_per_second", settings.ratePerSecond),
 		slog.Int("rate_burst", settings.rateBurst),
 		slog.Bool("cursor_key_configured", !settings.cursorKey.Empty()),

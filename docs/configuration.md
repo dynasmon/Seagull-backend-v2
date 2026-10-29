@@ -45,14 +45,14 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_GATEWAY_TLS_KEY` | required | server private key |
 | `SEAGULL_GATEWAY_AGENT_CA` | required | authority that agent certificates must chain to |
 | `SEAGULL_GATEWAY_MAX_BODY` | `8MiB` | ceiling on a batch body, counted as it is read |
-| `SEAGULL_GATEWAY_MAX_INFLIGHT_BYTES` | `128MiB` | request bytes held at once across every caller |
+| `SEAGULL_GATEWAY_MAX_INFLIGHT_BYTES` | `128MiB` | what the requests in flight hold at once across every caller: each body and what decoding it allocates, weighed before it is decoded |
 | `SEAGULL_GATEWAY_MAX_INFLIGHT_REQUESTS` | `512` | requests held at once across every caller |
 | `SEAGULL_GATEWAY_MAX_EVENTS_PER_BATCH` | `1000` | ceiling on events in one batch |
 | `SEAGULL_GATEWAY_MAX_RECORDS_PER_BATCH` | `64` | ceiling on inventory records in one batch, alongside the contract's 20,000 items |
 | `SEAGULL_GATEWAY_MAX_REPORTS_PER_BATCH` | `16` | ceiling on status reports in one batch, at most the contract's 16 |
 | `SEAGULL_GATEWAY_MAX_ASSESSMENTS_PER_BATCH` | `16` | ceiling on assessments in one batch, at most the contract's 16 |
 | `SEAGULL_GATEWAY_PUBLISH_TIMEOUT` | `10s` | budget for making a batch durable |
-| `SEAGULL_GATEWAY_RATE_PER_SECOND` | `200` | per-agent batch budget, `0` disables it |
+| `SEAGULL_GATEWAY_RATE_PER_SECOND` | `200` | per-agent batch budget, at least 1; `unlimited` turns the limiter off and is logged as a warning |
 | `SEAGULL_GATEWAY_RATE_BURST` | `400` | per-agent burst |
 | `SEAGULL_GATEWAY_RATE_TRACKED_AGENTS` | `10000` | how many agents the limiter remembers |
 | `SEAGULL_GATEWAY_ID` | `ingest-gateway` | recorded on every admitted event, so at most the 64 bytes the event contract lets it be; a longer one refuses to start |
@@ -90,6 +90,22 @@ it was, and so may an assessment, which an agent keeps until the platform holds
 it. A status report is admitted on the event window: liveness is measured from
 when the platform received a report, never from when the agent says it wrote it.
 
+A body is weighed before it is decoded, for what decoding it would allocate — a
+message the struct it becomes, a text its copy, a list element its slot, a field
+the contract does not declare its bytes — and the capacity holds the body and
+that weight. Decoding allocates 4.8 times an event batch as an agent sends it,
+2.7 times a scan of packages, 5.8 times a batch of status reports and 3.7 times
+one of assessments, and over a hundred times a body of empty messages, which no
+count ceiling above can bound because each is applied once the batch is decoded.
+An honest batch is weighed at up to about twice what decoding it allocates. A
+body whose weight would not fit in everything the gateway holds is refused as
+`413 batch_too_large`, which an agent splits; one that fits, but not beside what
+is in flight, is `503 gateway_at_capacity` with `Retry-After`. Publishing holds
+an encoded copy of the records until the backbone acknowledges them — 2.85 times
+the body of an event batch, about the body for large records — which the
+capacity does not count, so a host is sized for it beside this setting. See
+[ADR 41](decisions/0041-production-is-the-default-and-development-is-declared.md).
+
 ### The backbone, shared by both halves of the data plane and the migrator
 
 | Variable | Default | Meaning |
@@ -123,8 +139,9 @@ when the platform received a report, never from when the agent says it wrote it.
 | `SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_RETENTION` | `720h` | |
 | `SEAGULL_BACKBONE_QUARANTINE_PARTITIONS` | `3` | |
 | `SEAGULL_BACKBONE_QUARANTINE_RETENTION` | `720h` | |
-| `SEAGULL_BACKBONE_REPLICAS` | `1` | replication factor of every topic |
-| `SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS` | `replicas/2 + 1` | replicas that must be in sync for a write to be acknowledged |
+| `SEAGULL_BACKBONE_DURABILITY` | `production` | `production` refuses a topic that keeps fewer than 3 replicas or acknowledges a write fewer than 2 hold; `development`, which the development Compose file sets beside one replica, admits one broker and is reported as a warning |
+| `SEAGULL_BACKBONE_REPLICAS` | `3` | replication factor of every topic; fewer only under a `development` durability |
+| `SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS` | `replicas/2 + 1` | replicas that must hold a write before it is acknowledged; fewer than 2 only under a `development` durability |
 | `SEAGULL_BACKBONE_TLS` | `true` | encrypt the connection to the brokers; the development Compose file explicitly sets `false` |
 | `SEAGULL_BACKBONE_TLS_CA` | unset | authority the brokers must chain to; the system pool when unset |
 | `SEAGULL_BACKBONE_TLS_CERT`, `SEAGULL_BACKBONE_TLS_KEY` | unset | client certificate for mutual TLS to the brokers |
@@ -135,14 +152,23 @@ when the platform received a report, never from when the agent says it wrote it.
 Every process reads the same declaration: `backbone-migrator` applies it, and
 the gateway and the writer verify it before they serve.
 
-Plaintext and unauthenticated is a development posture, written down rather than
-inherited. A deployment turns encryption and authentication on together:
-authenticating without TLS is refused, because a password on a plaintext
-connection is a password given away. Acknowledging on every in-sync replica is
-only a durability statement alongside `SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS`:
-with one replica in sync, acks from all of them is acks from one. Redpanda
-accepts the setting and does not report it back, so the migrator declares it on
-every run and reports drift only for settings a broker answers for.
+Plaintext, unauthenticated and on one broker is a development posture, written
+down rather than inherited. A deployment turns encryption and authentication on
+together: authenticating without TLS is refused, because a password on a
+plaintext connection is a password given away. A production backbone keeps three
+replicas of every record and acknowledges one once two hold it, so losing a
+broker loses nothing it acknowledged; a topology that keeps or waits for fewer is
+refused by every process and by the migrator unless the deployment declares a
+`development` durability. Once its topics are verified, every process logs
+`backbone_durability` and exports `seagull_backbone_acknowledging_replicas`, the
+fewest replicas that hold a record once it is acknowledged: the fewer of the
+in-sync minimum and a majority of the replicas, because Kafka acknowledges a
+write once every in-sync replica holds it and Redpanda once a Raft majority does.
+Redpanda accepts `min.insync.replicas` and does not report it back, so the
+migrator declares it on every run and reports drift only for settings a broker
+answers for. An acknowledgement is a replication guarantee and not that a disk
+holds the record: Redpanda's `write.caching`, which the default configuration
+of its container image turns on, acknowledges from memory. See [ADR 41](decisions/0041-production-is-the-default-and-development-is-declared.md).
 
 ### analysis-engine
 
@@ -543,7 +569,7 @@ detection away from somebody's triage.
 | `SEAGULL_CONTROL_API_SESSION_LIFETIME` | `15m` | how long a session lasts |
 | `SEAGULL_CONTROL_API_SESSIONS_PER_CALLER` | `8` | sessions one subject may hold at once |
 | `SEAGULL_CONTROL_API_SESSIONS_MAX` | `4096` | sessions the process will hold |
-| `SEAGULL_CONTROL_API_RATE_PER_SECOND` | `20` | per-caller request budget |
+| `SEAGULL_CONTROL_API_RATE_PER_SECOND` | `20` | per-caller request budget, at least 1; `unlimited` turns the limiter off and is logged as a warning |
 | `SEAGULL_CONTROL_API_RATE_BURST` | `40` | burst above that budget |
 | `SEAGULL_CONTROL_API_START_TIMEOUT` | `30s` | how long it will spend reading the ruleset log before it gives up |
 | `SEAGULL_CONTROL_API_RULESET_RECORDS` | `256` | ruleset records read per fetch |
@@ -606,6 +632,10 @@ check is held to the contract before the policy is accepted; see
 | `SEAGULL_QUERY_API_MAX_ROWS_READ` | `50000000` | how much of the store one read may examine |
 | `SEAGULL_QUERY_API_CURSOR_KEY` | generated | signs a page token; set it when more than one replica serves one address |
 | `SEAGULL_QUERY_API_MAX_BODY` | `256KiB` | ceiling on a query body |
+| `SEAGULL_QUERY_API_MAX_INFLIGHT` | `32` | queries answered at once |
+| `SEAGULL_QUERY_API_RATE_PER_SECOND` | `10` | per-caller query budget, at least 1; `unlimited` turns the limiter off and is logged as a warning |
+| `SEAGULL_QUERY_API_RATE_BURST` | `20` | burst above that budget |
+| `SEAGULL_QUERY_API_TRACKED_CALLERS` | `4096` | how many callers the limiter remembers |
 | `SEAGULL_QUERY_STORE_ADDRESS` | required | ClickHouse address, read only |
 | `SEAGULL_QUERY_STORE_TLS` | `true` | verify and encrypt the native connection; development Compose explicitly sets `false` |
 | `SEAGULL_QUERY_STORE_TLS_CA` | unset | authority the store must chain to; the system pool when unset |
@@ -628,13 +658,16 @@ other answer means the agent keeps the batch and retries:
 | `200` | the backbone owns the batch; drop the local copy |
 | `400` | the payload is not a valid batch; do not retry unchanged |
 | `403` | the platform takes nothing from this connection: no usable agent identity, no registration placing the agent in a tenant (`agent_not_registered`), or a registration it stopped honouring (`agent_not_admitted`); keep the batch |
-| `413` | the body is above the gateway ceiling; send smaller batches |
+| `413` | the body is above the gateway ceiling (`batch_body_too_large`), or decoding it would hold more than the gateway holds at once (`batch_too_large`); send smaller batches |
 | `415` | the batch was not sent as protobuf |
 | `422` | a record failed admission, or weighs more than its topic carries; the answer names the index and the field, and the record is refused for good |
 | `426` | the protocol version is not supported by this gateway |
 | `429` | the agent is above its budget; back off |
-| `503` | the batch was not made durable; retry |
+| `503` | the batch was not made durable (`backbone_unavailable`), or the gateway has no room for it now (`gateway_at_capacity`); retry after `Retry-After` |
 
+A `durable` answer means every in-sync replica holds the batch: a production
+backbone keeps three replicas and acknowledges nothing fewer than two of them
+hold.
 Delivery is at least once. Duplicate suppression belongs to the consumers,
 keyed on `event_id`, which the producer derives deterministically. The gateway
 holds no deduplication state, which is what keeps it stateless and horizontally

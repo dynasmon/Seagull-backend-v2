@@ -35,7 +35,7 @@ func TestWorkPastTheByteCeilingIsRefusedRatherThanQueued(t *testing.T) {
 		t.Fatal("the gateway took work past what it was bounded to")
 	}
 
-	first()
+	first.Release()
 	if _, held = capacity.Hold(8 << 20); !held {
 		t.Fatal("releasing a batch did not make room for the next one")
 	}
@@ -58,12 +58,12 @@ func TestWorkPastTheRequestCeilingIsRefusedEvenWhenItIsSmall(t *testing.T) {
 func TestReleasingTwiceGivesBackWhatWasHeldOnce(t *testing.T) {
 	capacity := bounded(t, 1<<20, 4)
 
-	release, held := capacity.Hold(1 << 19)
+	reservation, held := capacity.Hold(1 << 19)
 	if !held {
 		t.Fatal("the request was refused")
 	}
-	release()
-	release()
+	reservation.Release()
+	reservation.Release()
 
 	if bytes, requests := capacity.Held(); bytes != 0 || requests != 0 {
 		t.Fatalf("the gateway holds %d bytes over %d requests after everything was released", bytes, requests)
@@ -78,8 +78,9 @@ func TestNothingIsHeldAfterEveryCallerHasFinished(t *testing.T) {
 		callers.Add(1)
 		go func() {
 			defer callers.Done()
-			if release, held := capacity.Hold(1 << 14); held {
-				release()
+			if reservation, held := capacity.Hold(1 << 14); held {
+				reservation.Resize(1 << 15)
+				reservation.Release()
 			}
 		}()
 	}
@@ -87,6 +88,37 @@ func TestNothingIsHeldAfterEveryCallerHasFinished(t *testing.T) {
 
 	if bytes, requests := capacity.Held(); bytes != 0 || requests != 0 {
 		t.Fatalf("the gateway holds %d bytes over %d requests with nobody in flight", bytes, requests)
+	}
+}
+
+func TestAReservationGrowsOnlyIntoTheRoomOthersLeave(t *testing.T) {
+	capacity := bounded(t, 16<<20, 8)
+
+	first, _ := capacity.Hold(4 << 20)
+	second, _ := capacity.Hold(4 << 20)
+	if !first.Resize(12 << 20) {
+		t.Fatal("a reservation could not grow into room nobody held")
+	}
+	if second.Resize(5 << 20) {
+		t.Fatal("a reservation grew into room another one holds")
+	}
+	if bytes, requests := capacity.Held(); bytes != 16<<20 || requests != 2 {
+		t.Fatalf("after a refused resize the gateway holds %d bytes over %d requests", bytes, requests)
+	}
+	if !first.Resize(1 << 20) {
+		t.Fatal("a reservation could not shrink")
+	}
+	if !second.Resize(5 << 20) {
+		t.Fatal("the room a reservation gave back could not be taken")
+	}
+
+	first.Release()
+	if second.Resize(5<<20) && first.Resize(1<<20) {
+		t.Fatal("a released reservation took room again")
+	}
+	second.Release()
+	if bytes, requests := capacity.Held(); bytes != 0 || requests != 0 {
+		t.Fatalf("the gateway holds %d bytes over %d requests after every reservation was released", bytes, requests)
 	}
 }
 

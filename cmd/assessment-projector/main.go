@@ -78,6 +78,8 @@ func projector(ctx context.Context) error {
 	for _, entry := range drift {
 		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
 	}
+	broker.LogDurability(ctx, platform.Logger(), settings.topology.Assessments, settings.topology.AssessmentsQuarantine)
+	broker.ObserveDurability(platform.Metrics(), settings.topology.Assessments, settings.topology.AssessmentsQuarantine)
 
 	refused, err := broker.NewQuarantine(broker.Config{
 		Brokers:         settings.brokers,

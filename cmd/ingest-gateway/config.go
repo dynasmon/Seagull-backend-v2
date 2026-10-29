@@ -11,7 +11,10 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 )
 
-const serviceName = "ingest-gateway"
+const (
+	serviceName = "ingest-gateway"
+	rateSetting = "SEAGULL_GATEWAY_RATE_PER_SECOND"
+)
 
 type configuration struct {
 	service service.Config
@@ -31,6 +34,7 @@ type configuration struct {
 	publishTimeout      time.Duration
 
 	ratePerSecond  float64
+	rateLimited    bool
 	rateBurst      int
 	trackedAgents  int
 	admissionRules ingest.Policy
@@ -76,7 +80,8 @@ func load(parser *config.Parser) (configuration, error) {
 		rosterRecords: parser.Int("SEAGULL_GATEWAY_ROSTER_RECORDS", 500, 1, 100_000),
 	}
 
-	loaded.ratePerSecond = float64(parser.Int("SEAGULL_GATEWAY_RATE_PER_SECOND", 200, 0, 1_000_000))
+	rate, limited := parser.Limit(rateSetting, 200, 1, 1_000_000)
+	loaded.ratePerSecond, loaded.rateLimited = float64(rate), limited
 	gateway := parser.String("SEAGULL_GATEWAY_ID", serviceName)
 	loaded.admissionRules = ingest.Policy{
 		Gateway:           gateway,

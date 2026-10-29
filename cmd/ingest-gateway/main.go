@@ -105,6 +105,10 @@ func gateway(ctx context.Context) error {
 	for _, entry := range drift {
 		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
 	}
+	broker.LogDurability(ctx, platform.Logger(),
+		settings.topology.Events, settings.topology.Inventory, settings.topology.Status, settings.topology.Assessments)
+	broker.ObserveDurability(platform.Metrics(),
+		settings.topology.Events, settings.topology.Inventory, settings.topology.Status, settings.topology.Assessments)
 
 	admitted, err := admissible(ctx, settings, platform)
 	if err != nil {
@@ -146,7 +150,12 @@ func gateway(ctx context.Context) error {
 	// and what the process may hold are bounded per agent and per process, not
 	// per kind of record, or a collector would buy a second budget by sending an
 	// inventory batch or a status report.
-	limiter := ratelimit.NewLimiter(settings.ratePerSecond, settings.rateBurst, settings.trackedAgents)
+	var limiter *ratelimit.Limiter
+	if settings.rateLimited {
+		limiter = ratelimit.NewLimiter(settings.ratePerSecond, settings.rateBurst, settings.trackedAgents)
+	} else {
+		platform.Logger().Warn("rate_limit_off", slog.String("setting", rateSetting))
+	}
 
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{
 		Admitter:       admitter,

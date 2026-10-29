@@ -44,16 +44,18 @@ func TestTrackedCallersAreBounded(t *testing.T) {
 	}
 }
 
-func TestZeroRateDisablesTheLimiter(t *testing.T) {
-	limiter := ratelimit.NewLimiter(0, 0, 8)
+func TestAZeroRateAdmitsItsBurstAndNothingAfter(t *testing.T) {
+	limiter := ratelimit.NewLimiter(0, 2, 8)
 
-	for range 1000 {
+	for range 2 {
 		if !limiter.Allow("web-01") {
-			t.Fatal("a disabled limiter must not refuse anything")
+			t.Fatal("a limiter with no rate refused its burst")
 		}
 	}
-	if limiter.Tracked() != 0 {
-		t.Fatal("a disabled limiter must not allocate per-caller state")
+	for range 1000 {
+		if limiter.Allow("web-01") {
+			t.Fatal("a limiter with no rate admitted past its burst, so a rate of zero turns it off without a word")
+		}
 	}
 }
 

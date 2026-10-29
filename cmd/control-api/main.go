@@ -76,10 +76,17 @@ func controlAPI(ctx context.Context) error {
 		return err
 	}
 
+	var operators *ratelimit.Limiter
+	if settings.rateLimited {
+		operators = ratelimit.NewLimiter(settings.ratePerSecond, settings.rateBurst, settings.trackedCallers)
+	} else {
+		platform.Logger().Warn("rate_limit_off", slog.String("setting", rateSetting))
+	}
+
 	guard, err := control.NewGuard(control.GuardOptions{
 		Sessions: sessions,
 		Registry: registry,
-		Limiter:  ratelimit.NewLimiter(settings.ratePerSecond, settings.rateBurst, settings.trackedCallers),
+		Limiter:  operators,
 		Metrics:  instruments,
 		Logger:   platform.Logger(),
 	})
@@ -126,6 +133,8 @@ func controlAPI(ctx context.Context) error {
 	for _, entry := range drift {
 		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
 	}
+	broker.LogDurability(ctx, platform.Logger(), settings.topology.Rulesets, settings.topology.Agents)
+	broker.ObserveDurability(platform.Metrics(), settings.topology.Rulesets, settings.topology.Agents)
 
 	seen, err := clickhouse.NewLiveness(settings.telemetry, settings.livenessHorizon, settings.livenessBackdating)
 	if err != nil {

@@ -105,6 +105,10 @@ func gateway(ctx context.Context) error {
 	for _, entry := range drift {
 		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
 	}
+	broker.LogDurability(ctx, platform.Logger(),
+		settings.topology.Events, settings.topology.Inventory, settings.topology.Status, settings.topology.Assessments)
+	broker.ObserveDurability(platform.Metrics(),
+		settings.topology.Events, settings.topology.Inventory, settings.topology.Status, settings.topology.Assessments)
 
 	admitted, err := admissible(ctx, settings, platform)
 	if err != nil {

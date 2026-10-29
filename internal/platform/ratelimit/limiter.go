@@ -16,7 +16,9 @@ import (
 //
 // What names a caller is the caller's business — an agent identity at the
 // gateway, a certificate subject at the control plane. The budget is the same
-// shape either way, which is why this is here and not inside one of them.
+// shape either way, which is why this is here and not inside one of them. A
+// limiter always limits, whatever its rate: a process that admits every caller
+// holds none, which is a decision its composition states rather than a number.
 type Limiter struct {
 	perSecond rate.Limit
 	burst     int
@@ -43,7 +45,7 @@ func NewLimiter(perSecond float64, burst, capacity int) *Limiter {
 }
 
 func (l *Limiter) Allow(key string) bool {
-	if l == nil || l.perSecond <= 0 {
+	if l == nil {
 		return true
 	}
 

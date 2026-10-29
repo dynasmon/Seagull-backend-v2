@@ -20,6 +20,7 @@ const CodeMalformedPayload RejectionCode = "malformed_payload"
 // payload, hands it to its admitter and counts what was refused.
 type stream interface {
 	name() string
+	batch() proto.Message
 	admit(ctx context.Context, identity agentidentity.Identity, tenant string, payload []byte) (outcome, error)
 	rejected(code string)
 }
@@ -38,6 +39,8 @@ type eventStream struct {
 }
 
 func (s eventStream) name() string { return "events" }
+
+func (s eventStream) batch() proto.Message { return &ingestv1.EventBatch{} }
 
 func (s eventStream) rejected(code string) { s.metrics.batchRejected(code) }
 
@@ -63,6 +66,8 @@ type inventoryStream struct {
 
 func (s inventoryStream) name() string { return "inventory" }
 
+func (s inventoryStream) batch() proto.Message { return &inventoryv1.RecordBatch{} }
+
 func (s inventoryStream) rejected(code string) { s.metrics.batchRejected(code) }
 
 func (s inventoryStream) admit(ctx context.Context, identity agentidentity.Identity, tenant string, payload []byte) (outcome, error) {
@@ -87,6 +92,8 @@ type statusStream struct {
 
 func (s statusStream) name() string { return "status" }
 
+func (s statusStream) batch() proto.Message { return &agentv1.StatusBatch{} }
+
 func (s statusStream) rejected(code string) { s.metrics.batchRejected(code) }
 
 func (s statusStream) admit(ctx context.Context, identity agentidentity.Identity, tenant string, payload []byte) (outcome, error) {
@@ -110,6 +117,8 @@ type assessmentStream struct {
 }
 
 func (s assessmentStream) name() string { return "assessments" }
+
+func (s assessmentStream) batch() proto.Message { return &assessmentv1.AssessmentBatch{} }
 
 func (s assessmentStream) rejected(code string) { s.metrics.batchRejected(code) }
 

@@ -29,9 +29,13 @@ neither repository depends on the other.
 The gateway terminates mutual TLS, takes the agent's identity from the verified
 certificate rather than from anything the producer sent, admits or refuses the
 batch against explicit size and rate ceilings, and answers only once the
-backbone owns it. An agent may drop its local copy of a batch on that answer and
-on nothing else, so a gateway that crashes mid-batch costs a retry rather than
-telemetry. A retry is only ever asked for when it can succeed: every topic
+backbone owns it — by default, once two of the three replicas a production
+backbone keeps hold it. An agent may drop its local copy of a batch on that
+answer and on nothing else, so a gateway that crashes mid-batch costs a retry
+rather than telemetry. A body is weighed before it is decoded, for what decoding
+it would allocate, so a batch of empty messages that would decode to a hundred
+times its length is refused before it costs that
+([ADR 41](docs/decisions/0041-production-is-the-default-and-development-is-declared.md)). A retry is only ever asked for when it can succeed: every topic
 declares the largest batch it carries, every producer is held to it, and a record
 heavier than its topic takes is refused by its position instead of being admitted
 and answered `503` for as long as it is sent
@@ -547,9 +551,10 @@ container without going through the environment. The settings that matter most:
 | `SEAGULL_DETECTION_RULES` | The rule tree the engine starts on and falls back to. |
 | `SEAGULL_DETECTION_STATE_WINDOW`, `SEAGULL_DETECTION_STATE_OBSERVATIONS`, `SEAGULL_DETECTION_STATE_KEYS` | What a counting or ordering rule may remember: the longest window, the events one key holds, and how many keys at once. The window is also what a restart re-reads. |
 | `SEAGULL_DETECTION_STATE_SOLE_READER` | Declares that this engine reads the whole stream, which is what makes a rule counting across agents answerable. Verified against the assignment; a broken claim stops the engine. |
-| `SEAGULL_GATEWAY_MAX_INFLIGHT_BYTES`, `SEAGULL_GATEWAY_MAX_INFLIGHT_REQUESTS` | What the gateway holds at once across every caller. Past it a batch is refused with `503` and `Retry-After`, never queued. |
+| `SEAGULL_GATEWAY_MAX_INFLIGHT_BYTES`, `SEAGULL_GATEWAY_MAX_INFLIGHT_REQUESTS` | What the gateway holds at once across every caller: each body and what decoding it would allocate, weighed before it is decoded. Past it a batch is refused with `503` and `Retry-After`, never queued, and one that could never fit with `413`. |
+| `SEAGULL_GATEWAY_RATE_PER_SECOND`, `SEAGULL_CONTROL_API_RATE_PER_SECOND`, `SEAGULL_QUERY_API_RATE_PER_SECOND` | What one caller may spend of a process, at least one a second. Only the word `unlimited` turns a limiter off, and a process told it says so at startup. |
 | `SEAGULL_BACKBONE_TLS`, `SEAGULL_BACKBONE_TLS_CA`, `SEAGULL_BACKBONE_SASL_MECHANISM`, `SEAGULL_BACKBONE_SASL_USER`, `SEAGULL_BACKBONE_SASL_PASSWORD` | How every process reaches the backbone. Off is a development posture stated rather than inherited; authenticating without TLS is refused. |
-| `SEAGULL_BACKBONE_REPLICAS`, `SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS` | How many copies of a record the backbone keeps and how many must be in sync to acknowledge one. Acknowledging on every in-sync replica means nothing when one replica is in sync. |
+| `SEAGULL_BACKBONE_REPLICAS`, `SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS`, `SEAGULL_BACKBONE_DURABILITY` | How many copies of a record the backbone keeps and how many must hold it before it is acknowledged: three and two, unless the deployment declares a `development` durability. Every process reports at startup what an acknowledgement is worth. |
 | `SEAGULL_EVENT_STORE_TLS`, `SEAGULL_EVENT_STORE_TLS_CA` | Encryption to the telemetry store. There is no option to skip verification. |
 | `SEAGULL_CONTROL_API_POLICY` | The policy document the control plane is pinned to. |
 | `SEAGULL_CONTROL_API_AGENT_AUTHORITY_CERT`, `SEAGULL_CONTROL_API_AGENT_AUTHORITY_KEY` | The authority the control plane signs agent certificates with. Read once at startup; a plane that cannot read it does not serve. |

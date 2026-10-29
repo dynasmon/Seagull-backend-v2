@@ -126,6 +126,8 @@ func controlAPI(ctx context.Context) error {
 	for _, entry := range drift {
 		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
 	}
+	broker.LogDurability(ctx, platform.Logger(), settings.topology.Rulesets, settings.topology.Agents)
+	broker.ObserveDurability(platform.Metrics(), settings.topology.Rulesets, settings.topology.Agents)
 
 	seen, err := clickhouse.NewLiveness(settings.telemetry, settings.livenessHorizon, settings.livenessBackdating)
 	if err != nil {

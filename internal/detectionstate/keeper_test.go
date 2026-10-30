@@ -212,7 +212,7 @@ func TestCardinalityCountsDistinctValuesAndForgetsThemWithTheWindow(t *testing.T
 }
 
 func TestAFullKeyDiscardsItsOldestAndSaysSo(t *testing.T) {
-	keeper := kept(t, detectionstate.Bounds{Window: window, ObservationsPerKey: 4, Keys: 4})
+	keeper := kept(t, detectionstate.Bounds{Window: window, ObservationsPerKey: 4, Keys: 4, KeysPerTenant: 4, KeysPerRule: 4})
 	key := keyed("203.0.113.10")
 
 	var state detectionstate.State
@@ -229,7 +229,7 @@ func TestAFullKeyDiscardsItsOldestAndSaysSo(t *testing.T) {
 }
 
 func TestANewKeyBeyondTheCeilingIsRefusedAndTheOldOnesSurvive(t *testing.T) {
-	keeper := kept(t, detectionstate.Bounds{Window: window, ObservationsPerKey: 8, Keys: 2})
+	keeper := kept(t, detectionstate.Bounds{Window: window, ObservationsPerKey: 8, Keys: 2, KeysPerTenant: 2, KeysPerRule: 2})
 
 	observe(t, keeper, keyed("203.0.113.10"), saw("e1", 0, ""))
 	observe(t, keeper, keyed("203.0.113.11"), saw("e2", 0, ""))
@@ -248,7 +248,7 @@ func TestANewKeyBeyondTheCeilingIsRefusedAndTheOldOnesSurvive(t *testing.T) {
 }
 
 func TestAKeyNobodyObservesAgainMakesRoomForANewOne(t *testing.T) {
-	keeper := kept(t, detectionstate.Bounds{Window: window, ObservationsPerKey: 8, Keys: 2})
+	keeper := kept(t, detectionstate.Bounds{Window: window, ObservationsPerKey: 8, Keys: 2, KeysPerTenant: 2, KeysPerRule: 2})
 
 	observe(t, keeper, keyed("203.0.113.10"), saw("e1", 0, ""))
 	observe(t, keeper, keyed("203.0.113.11"), saw("e2", 0, ""))
@@ -308,7 +308,7 @@ func TestObservingStopsWhenTheCallerIsGone(t *testing.T) {
 }
 
 func TestConcurrentObserversAgreeOnWhatAKeyHasSeen(t *testing.T) {
-	keeper := kept(t, detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 128, Keys: 8})
+	keeper := kept(t, detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 128, Keys: 8, KeysPerTenant: 8, KeysPerRule: 8})
 	key := keyed("203.0.113.10")
 
 	var writers sync.WaitGroup
@@ -339,7 +339,7 @@ func TestConcurrentObserversAgreeOnWhatAKeyHasSeen(t *testing.T) {
 // and reading in one operation exists for: a window read after a separate fold
 // is a window another event may have moved in between.
 func TestTheWindowIsReadBackInEventTime(t *testing.T) {
-	keeper, err := detectionstate.NewKeeper(detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 8, Keys: 4})
+	keeper, err := detectionstate.NewKeeper(detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 8, Keys: 4, KeysPerTenant: 4, KeysPerRule: 4})
 	if err != nil {
 		t.Fatalf("bound the keeper: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestTheWindowIsReadBackInEventTime(t *testing.T) {
 // A store bounded below what a rule asks is a rule that would run and never
 // fire, which is the quietest way a detection surface can be wrong.
 func TestBoundsRefuseASequenceTheyCouldNeverOrder(t *testing.T) {
-	bounds := detectionstate.Bounds{Window: time.Minute, ObservationsPerKey: 2, Keys: 4}
+	bounds := detectionstate.Bounds{Window: time.Minute, ObservationsPerKey: 2, Keys: 4, KeysPerTenant: 4, KeysPerRule: 4}
 	ordered := func(stages int, within time.Duration) detection.Sequence {
 		sequence := detection.Sequence{Within: within}
 		for index := range stages {

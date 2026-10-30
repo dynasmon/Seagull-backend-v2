@@ -286,7 +286,7 @@ func TestAFloodOfGroupsIsRefusedAndCounted(t *testing.T) {
 
 	_, registry := held(t, bounds, program, flood)
 	body := exposition(t, registry)
-	if !strings.Contains(body, `seagull_detection_state_observations_total{outcome="at_capacity"}`) {
+	if !strings.Contains(body, `seagull_detection_state_observations_total{outcome="tenant_at_capacity"}`) {
 		t.Fatalf("a store that refused a key counted nothing: %s", body)
 	}
 	if !strings.Contains(body, `seagull_detection_state_observations_total{outcome="counted"}`) {

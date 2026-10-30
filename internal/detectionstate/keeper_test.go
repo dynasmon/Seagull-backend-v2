@@ -50,6 +50,10 @@ func keyed(group string) detectionstate.Key {
 	return detectionstate.KeyFor(tenant, rule, 1, []detection.Binding{bound("authentication.source.ip", group)})
 }
 
+func ownedBy(owner string, asking detection.ID, group string) detectionstate.Key {
+	return detectionstate.KeyFor(owner, asking, 1, []detection.Binding{bound("authentication.source.ip", group)})
+}
+
 func TestACountRisesWithWhatOneKeyHasSeenAndTwoKeysCountApart(t *testing.T) {
 	keeper := kept(t, bounded())
 	here, elsewhere := keyed("203.0.113.10"), keyed("198.51.100.9")
@@ -231,14 +235,14 @@ func TestAFullKeyDiscardsItsOldestAndSaysSo(t *testing.T) {
 func TestANewKeyBeyondTheCeilingIsRefusedAndTheOldOnesSurvive(t *testing.T) {
 	keeper := kept(t, detectionstate.Bounds{Window: window, ObservationsPerKey: 8, Keys: 2, KeysPerTenant: 2, KeysPerRule: 2})
 
-	observe(t, keeper, keyed("203.0.113.10"), saw("e1", 0, ""))
-	observe(t, keeper, keyed("203.0.113.11"), saw("e2", 0, ""))
+	observe(t, keeper, ownedBy("one", rule, "203.0.113.10"), saw("e1", 0, ""))
+	observe(t, keeper, ownedBy("two", rule, "203.0.113.11"), saw("e2", 0, ""))
 
-	if _, err := keeper.Observe(context.Background(), keyed("203.0.113.12"), saw("e3", 0, ""), window); !errors.Is(err, detectionstate.ErrAtCapacity) {
+	if _, err := keeper.Observe(context.Background(), ownedBy("three", rule, "203.0.113.12"), saw("e3", 0, ""), window); !errors.Is(err, detectionstate.ErrAtCapacity) {
 		t.Fatalf("a third key in a store bounded to two gave %v", err)
 	}
 
-	state := observe(t, keeper, keyed("203.0.113.10"), saw("e4", 1, ""))
+	state := observe(t, keeper, ownedBy("one", rule, "203.0.113.10"), saw("e4", 1, ""))
 	if state.Count != 2 {
 		t.Errorf("a refused key cost an existing one its count: %+v", state)
 	}
@@ -270,7 +274,7 @@ func TestTheWatermarkOnlyMovesForward(t *testing.T) {
 	observe(t, keeper, key, saw("e1", 100, ""))
 	observe(t, keeper, key, saw("e2", 50, ""))
 
-	if reached := keeper.Watermark(); reached != at(100) {
+	if reached := keeper.Watermark(tenant, 0); reached != at(100) {
 		t.Errorf("an event arriving out of order pulled the watermark back to %s", reached)
 	}
 }
@@ -330,7 +334,7 @@ func TestConcurrentObserversAgreeOnWhatAKeyHasSeen(t *testing.T) {
 	if state.Count != 64 {
 		t.Errorf("eight writers of eight events each came to %d", state.Count)
 	}
-	if reached := keeper.Watermark(); reached != at(7) {
+	if reached := keeper.Watermark(tenant, 0); reached != at(7) {
 		t.Errorf("the watermark reached %s rather than the newest event", reached)
 	}
 }

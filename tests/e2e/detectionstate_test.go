@@ -9,10 +9,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"go.yaml.in/yaml/v3"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -115,5 +118,49 @@ func TestAFloodInOneTenantLeavesTheShippedRulesDecidingForAnother(t *testing.T) 
 	}
 	if !strings.Contains(exposed, `seagull_detection_state_observations_total{outcome="tenant_at_capacity"}`) {
 		t.Error("the flood was not refused at its tenant's quota, so this test proves nothing")
+	}
+}
+
+// Nothing else evaluates a rule file against the process it watches: promtool
+// reads recorded series, and a metric or an outcome renamed here would leave an
+// alert that looks shipped and can never fire.
+func TestTheDetectionStateAlertsReadWhatTheEngineCounts(t *testing.T) {
+	_, exposed := floodedBesideAnotherTenant(t)
+
+	written, err := os.ReadFile(filepath.Join("..", "..", "deploy", "prometheus", "detection-state.yml"))
+	if err != nil {
+		t.Fatalf("read the alert rules: %v", err)
+	}
+	var rules struct {
+		Groups []struct {
+			Rules []struct {
+				Alert string `yaml:"alert"`
+				Expr  string `yaml:"expr"`
+			} `yaml:"rules"`
+		} `yaml:"groups"`
+	}
+	if err := yaml.Unmarshal(written, &rules); err != nil {
+		t.Fatalf("decode the alert rules: %v", err)
+	}
+
+	var outcomes []string
+	for _, group := range rules.Groups {
+		for _, rule := range group.Rules {
+			for _, series := range regexp.MustCompile(`seagull_[a-z_]+`).FindAllString(rule.Expr, -1) {
+				if !strings.Contains(exposed, "# TYPE "+series+" ") {
+					t.Errorf("%s reads %s, which the engine does not export", rule.Alert, series)
+				}
+			}
+			for _, matcher := range regexp.MustCompile(`outcome=~?"([^"]+)"`).FindAllStringSubmatch(rule.Expr, -1) {
+				outcomes = append(outcomes, strings.Split(matcher[1], "|")...)
+			}
+		}
+	}
+
+	slices.Sort(outcomes)
+	expected := []string{analysis.OutcomeAtCapacity, analysis.OutcomeRuleAtCapacity, analysis.OutcomeTenantAtCapacity}
+	slices.Sort(expected)
+	if !slices.Equal(outcomes, expected) {
+		t.Errorf("the alerts read the outcomes %v, and a key is refused as %v", outcomes, expected)
 	}
 }

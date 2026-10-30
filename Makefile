@@ -13,7 +13,7 @@ TEST_EVENT_STORE ?= 127.0.0.1:19000
 TEST_ALERT_STORE ?= 127.0.0.1:15432
 
 .PHONY: help fmt fmt-check vet mod-check lint test test-race test-integration \
-        test-load bench build images vulncheck dev-pki up down logs clean verify
+        test-load test-alerts bench build images vulncheck dev-pki up down logs clean verify
 
 help:
 	@echo "fmt                 format the module"
@@ -25,6 +25,7 @@ help:
 	@echo "test-race           run the same suites under the race detector"
 	@echo "test-integration    run the data plane suites against a live Redpanda, ClickHouse and PostgreSQL"
 	@echo "test-load           run the ingest load scenarios against a live Redpanda"
+	@echo "test-alerts         evaluate the operational alert rules against recorded series"
 	@echo "bench               run the hot-path benchmarks"
 	@echo "build               build every component into $(DIST)"
 	@echo "images              build the container image of every component"
@@ -73,6 +74,10 @@ test-load:
 	$(COMPOSE_TEST) up -d --wait redpanda
 	SEAGULL_TEST_BROKERS=$(TEST_BROKERS) \
 	  $(GO) test -tags load -count=1 -timeout 20m -v ./tests/load/...
+
+test-alerts:
+	$(COMPOSE_TEST) run --rm --no-deps promtool check rules detection-state.yml
+	$(COMPOSE_TEST) run --rm --no-deps promtool test rules detection-state.test.yml
 
 bench:
 	$(GO) test -run '^$$' -bench . -benchmem ./internal/...

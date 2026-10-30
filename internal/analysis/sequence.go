@@ -45,7 +45,7 @@ func (e *Engine) completed(ctx context.Context, program *detection.Program, matc
 		if ctx.Err() != nil {
 			return false, err
 		}
-		e.metrics.observed(refusalOf(err))
+		e.refusedObservation(record, rule.ID, err)
 		return false, nil
 	}
 	if held.Repeated {

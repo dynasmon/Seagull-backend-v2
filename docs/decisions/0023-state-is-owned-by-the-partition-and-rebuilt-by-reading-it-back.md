@@ -11,6 +11,10 @@
 > decides a story with one candidate per stage under the name it carried, and
 > can decide a count across agents under other names, which the alert plane
 > folds into the alert its key already holds.
+> Amended by [ADR 42](0042-a-tenants-detection-state-is-carved-out-of-the-store-and-timed-by-its-own-partitions.md):
+> a revoked partition's keys are still reclaimed like any other, but a watermark no
+> longer belongs to the store, so one that stops delivering is carried on by the
+> rest of the stream from where it stopped.
 
 ## Context
 

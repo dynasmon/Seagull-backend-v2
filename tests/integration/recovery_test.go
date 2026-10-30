@@ -17,11 +17,13 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/analysis"
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
+	"github.com/dynasmon/Seagull-backend-v2/internal/detectionstate"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
+	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
 )
 
 // One analysis engine, run for as long as the caller keeps it. Each replica
@@ -47,6 +49,20 @@ type replicaOptions struct {
 	program   *detection.Program
 	recover   time.Duration
 	sole      bool
+	bounds    detectionstate.Bounds
+}
+
+func (o replicaOptions) state(t *testing.T) *detectionstate.Keeper {
+	t.Helper()
+
+	if o.bounds == (detectionstate.Bounds{}) {
+		return remembering(t)
+	}
+	keeper, err := detectionstate.NewKeeper(o.bounds)
+	if err != nil {
+		t.Fatalf("bound the detection state: %v", err)
+	}
+	return keeper
 }
 
 func start(t *testing.T, options replicaOptions) *replica {
@@ -91,7 +107,7 @@ func start(t *testing.T, options replicaOptions) *replica {
 	engine, err := analysis.NewEngine(analysis.EngineOptions{
 		Source:         analysedBy(consumer),
 		Rules:          pinnedTo(t, options.program),
-		State:          remembering(t),
+		State:          options.state(t),
 		Detections:     detections,
 		Metrics:        analysis.NewMetrics(metrics.New("integration")),
 		Logger:         slog.New(slog.NewJSONHandler(&bytes.Buffer{}, &slog.HandlerOptions{Level: slog.LevelWarn})),
@@ -161,6 +177,20 @@ func admitAt(t *testing.T, addresses []string, topic, owner, agent string, from,
 func admitNamed(t *testing.T, addresses []string, topic, owner, agent, named string, from, count int, at time.Time) {
 	t.Helper()
 
+	batch := fixtures.Batch(fmt.Sprintf("batch-%s-%d", agent, from))
+	for index := from; index < from+count; index++ {
+		batch.Events = append(batch.Events, fixtures.SSHAuthentication{
+			EventID:  fmt.Sprintf("%s-%09d", named, index),
+			At:       at,
+			Sequence: uint64(index),
+		}.Event())
+	}
+	admitBatch(t, addresses, topic, owner, agent, batch)
+}
+
+func admitBatch(t *testing.T, addresses []string, topic, owner, agent string, batch *ingestv1.EventBatch) {
+	t.Helper()
+
 	publisher, err := broker.NewPublisher(broker.Config{Brokers: addresses, Topic: topic, MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"})
 	if err != nil {
 		t.Fatalf("build the publisher: %v", err)
@@ -174,15 +204,6 @@ func admitNamed(t *testing.T, addresses []string, topic, owner, agent, named str
 	}, ingest.NewMetrics(metrics.New("integration")))
 	if err != nil {
 		t.Fatalf("build the admitter: %v", err)
-	}
-
-	batch := fixtures.Batch(fmt.Sprintf("batch-%s-%d", agent, from))
-	for index := from; index < from+count; index++ {
-		batch.Events = append(batch.Events, fixtures.SSHAuthentication{
-			EventID:  fmt.Sprintf("%s-%09d", named, index),
-			At:       at,
-			Sequence: uint64(index),
-		}.Event())
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

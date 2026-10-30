@@ -13,13 +13,15 @@ import (
 )
 
 const (
-	OutcomeCounted    = "counted"
-	OutcomeReached    = "reached"
-	OutcomeRepeated   = "repeated"
-	OutcomeAtCapacity = "at_capacity"
-	OutcomeTooLate    = "too_late"
-	OutcomeUnbounded  = "unbounded"
-	OutcomeRefused    = "refused"
+	OutcomeCounted          = "counted"
+	OutcomeReached          = "reached"
+	OutcomeRepeated         = "repeated"
+	OutcomeAtCapacity       = "at_capacity"
+	OutcomeTenantAtCapacity = "tenant_at_capacity"
+	OutcomeRuleAtCapacity   = "rule_at_capacity"
+	OutcomeTooLate          = "too_late"
+	OutcomeUnbounded        = "unbounded"
+	OutcomeRefused          = "refused"
 )
 
 // Whether a counting rule's window has reached what the rule asks for, and what
@@ -86,6 +88,10 @@ func refusalOf(err error) string {
 	switch {
 	case errors.Is(err, detectionstate.ErrAtCapacity):
 		return OutcomeAtCapacity
+	case errors.Is(err, detectionstate.ErrTenantAtCapacity):
+		return OutcomeTenantAtCapacity
+	case errors.Is(err, detectionstate.ErrRuleAtCapacity):
+		return OutcomeRuleAtCapacity
 	case errors.Is(err, detectionstate.ErrTooLate):
 		return OutcomeTooLate
 	case errors.Is(err, detectionstate.ErrWindowTooLong), errors.Is(err, detectionstate.ErrNoWindow):

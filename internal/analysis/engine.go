@@ -60,6 +60,7 @@ type Engine struct {
 	metrics    *Metrics
 	logger     *slog.Logger
 	now        func() time.Time
+	told       map[atCapacity]struct{}
 
 	publishTimeout time.Duration
 	retryDelay     time.Duration
@@ -94,6 +95,7 @@ func NewEngine(options EngineOptions) (*Engine, error) {
 		metrics:        options.Metrics,
 		logger:         options.Logger,
 		now:            time.Now,
+		told:           make(map[atCapacity]struct{}),
 		publishTimeout: options.PublishTimeout,
 		retryDelay:     options.RetryDelay,
 		maxRetryDelay:  options.MaxRetryDelay,

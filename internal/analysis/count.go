@@ -2,7 +2,6 @@ package analysis
 
 import (
 	"context"
-	"errors"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -48,7 +47,7 @@ func (e *Engine) reached(ctx context.Context, program *detection.Program, match 
 		if ctx.Err() != nil {
 			return false, err
 		}
-		e.metrics.observed(refusalOf(err))
+		e.refusedObservation(record, rule.ID, err)
 		return false, nil
 	}
 	if held.Repeated {
@@ -79,25 +78,6 @@ func (e *Engine) reached(ctx context.Context, program *detection.Program, match 
 // event as another agent's.
 func nameOf(record *eventv1.Event) detectionstate.EventName {
 	return detectionstate.EventName{Agent: record.GetOrigin().GetAgentId(), ID: record.GetEventId()}
-}
-
-// A store that will not take an observation is counted and not logged: a flood
-// of invented group values fills a store on every event it produces, and a line
-// per event would be the flood written down a second time.
-func refusalOf(err error) string {
-	switch {
-	case errors.Is(err, detectionstate.ErrAtCapacity):
-		return OutcomeAtCapacity
-	case errors.Is(err, detectionstate.ErrTenantAtCapacity):
-		return OutcomeTenantAtCapacity
-	case errors.Is(err, detectionstate.ErrRuleAtCapacity):
-		return OutcomeRuleAtCapacity
-	case errors.Is(err, detectionstate.ErrTooLate):
-		return OutcomeTooLate
-	case errors.Is(err, detectionstate.ErrWindowTooLong), errors.Is(err, detectionstate.ErrNoWindow):
-		return OutcomeUnbounded
-	}
-	return OutcomeRefused
 }
 
 // How many keys the store the engine was given is holding, against what it was

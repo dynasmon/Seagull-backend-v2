@@ -23,6 +23,8 @@ var (
 	ErrNoWindow       = fmt.Errorf("a state window is positive and at most %s", MaxWindow)
 	ErrNoObservations = fmt.Errorf("a key holds between 1 and %d observations", MaxObservationsPerKey)
 	ErrNoKeys         = fmt.Errorf("a store holds between 1 and %d keys", MaxKeys)
+	ErrNoTenantKeys   = errors.New("a tenant holds at least one key and at most what the store holds")
+	ErrNoRuleKeys     = errors.New("a rule holds at least one key and at most what its tenant holds")
 	ErrWindowTooLong  = errors.New("a rule may not remember for longer than the store was bounded to")
 	ErrUnreachable    = errors.New("a rule may not count to more than one key of this store holds")
 	ErrUnorderable    = errors.New("a rule may not order more stages than one key of this store holds")
@@ -47,6 +49,10 @@ func (b Bounds) Validate() error {
 		return ErrNoObservations
 	case b.Keys <= 0 || b.Keys > MaxKeys:
 		return ErrNoKeys
+	case b.KeysPerTenant <= 0 || b.KeysPerTenant > b.Keys:
+		return ErrNoTenantKeys
+	case b.KeysPerRule <= 0 || b.KeysPerRule > b.KeysPerTenant:
+		return ErrNoRuleKeys
 	}
 	return nil
 }

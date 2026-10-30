@@ -129,7 +129,7 @@ func decidedByTheShippedRules(t *testing.T, records []analysis.Record) []*detect
 	if err != nil {
 		t.Fatalf("read the shipped rules: %v", err)
 	}
-	keeper, err := detectionstate.NewKeeper(detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 64, Keys: 32})
+	keeper, err := detectionstate.NewKeeper(detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 64, Keys: 32, KeysPerTenant: 32, KeysPerRule: 32})
 	if err != nil {
 		t.Fatalf("bound the detection state: %v", err)
 	}

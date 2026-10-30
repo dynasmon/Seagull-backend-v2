@@ -55,14 +55,7 @@ func load(parser *config.Parser) (configuration, error) {
 		retryDelay:     parser.Duration("SEAGULL_DETECTION_RETRY_DELAY", time.Second, 100*time.Millisecond, time.Minute),
 		maxRetryDelay:  parser.Duration("SEAGULL_DETECTION_RETRY_DELAY_MAX", 30*time.Second, time.Second, 10*time.Minute),
 
-		// The product of the last two is the whole of what a counting rule may
-		// occupy, and the first is what a restart costs: rebuilding state means
-		// reading that much of the backbone again.
-		state: detectionstate.Bounds{
-			Window:             parser.Duration("SEAGULL_DETECTION_STATE_WINDOW", time.Hour, time.Minute, detectionstate.MaxWindow),
-			ObservationsPerKey: parser.Int("SEAGULL_DETECTION_STATE_OBSERVATIONS", 128, 2, detectionstate.MaxObservationsPerKey),
-			Keys:               parser.Int("SEAGULL_DETECTION_STATE_KEYS", 4096, 1, detectionstate.MaxKeys),
-		},
+		state: stateBounds(parser),
 
 		// Checked against the assignment rather than trusted.
 		sole: parser.Bool("SEAGULL_DETECTION_STATE_SOLE_READER", false),
@@ -70,4 +63,22 @@ func load(parser *config.Parser) (configuration, error) {
 	}
 
 	return loaded, parser.Err()
+}
+
+// The observations of a key times the keys is the whole of what a stateful rule
+// may occupy, and the window is what a restart costs: rebuilding state means
+// reading that much of the backbone again. A tenant gets a quarter of the store
+// unless a deployment says otherwise, so one tenant alone cannot fill it, and a
+// rule half of what its tenant gets.
+func stateBounds(parser *config.Parser) detectionstate.Bounds {
+	keys := parser.Int("SEAGULL_DETECTION_STATE_KEYS", 4096, 1, detectionstate.MaxKeys)
+	perTenant := parser.Int("SEAGULL_DETECTION_STATE_KEYS_PER_TENANT", max(keys/4, 1), 1, keys)
+
+	return detectionstate.Bounds{
+		Window:             parser.Duration("SEAGULL_DETECTION_STATE_WINDOW", time.Hour, time.Minute, detectionstate.MaxWindow),
+		ObservationsPerKey: parser.Int("SEAGULL_DETECTION_STATE_OBSERVATIONS", 128, 2, detectionstate.MaxObservationsPerKey),
+		Keys:               keys,
+		KeysPerTenant:      perTenant,
+		KeysPerRule:        parser.Int("SEAGULL_DETECTION_STATE_KEYS_PER_RULE", max(perTenant/2, 1), 1, perTenant),
+	}
 }

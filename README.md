@@ -431,7 +431,12 @@ restart rebuilds it by reading the window again rather than by recovering
 anything. Every ceiling is declared, and a store at its limit refuses a new key
 instead of evicting one: a flood of invented group values must not get to choose
 which real counts an estate forgets.
-[ADR 18](docs/decisions/0018-detection-state-is-a-bounded-window.md).
+[ADR 18](docs/decisions/0018-detection-state-is-a-bounded-window.md). The store is
+carved into a quota per tenant and per rule, so a flood is refused at its own
+tenant's quota and leaves every other tenant's rules deciding; a tenant's room
+comes back only as its own stream moves past its keys, partition by partition, so
+what one tenant sends moves nothing another tenant is counting.
+[ADR 42](docs/decisions/0042-a-tenants-detection-state-is-carved-out-of-the-store-and-timed-by-its-own-partitions.md).
 
 A rule may count what it matches: twenty failed passwords from one address
 against one agent inside a minute is a different security statement from one
@@ -550,6 +555,7 @@ container without going through the environment. The settings that matter most:
 | `SEAGULL_GATEWAY_TLS_CERT`, `SEAGULL_GATEWAY_TLS_KEY`, `SEAGULL_GATEWAY_AGENT_CA` | The gateway's mutual TLS material; there is no plaintext mode. |
 | `SEAGULL_DETECTION_RULES` | The rule tree the engine starts on and falls back to. |
 | `SEAGULL_DETECTION_STATE_WINDOW`, `SEAGULL_DETECTION_STATE_OBSERVATIONS`, `SEAGULL_DETECTION_STATE_KEYS` | What a counting or ordering rule may remember: the longest window, the events one key holds, and how many keys at once. The window is also what a restart re-reads. |
+| `SEAGULL_DETECTION_STATE_KEYS_PER_TENANT`, `SEAGULL_DETECTION_STATE_KEYS_PER_RULE` | What one tenant, and one rule of a tenant, may hold of those keys: a quarter of the store and half of that, unless a deployment says otherwise. [How to size them](docs/configuration.md). |
 | `SEAGULL_DETECTION_STATE_SOLE_READER` | Declares that this engine reads the whole stream, which is what makes a rule counting across agents answerable. Verified against the assignment; a broken claim stops the engine. |
 | `SEAGULL_GATEWAY_MAX_INFLIGHT_BYTES`, `SEAGULL_GATEWAY_MAX_INFLIGHT_REQUESTS` | What the gateway holds at once across every caller: each body and what decoding it would allocate, weighed before it is decoded. Past it a batch is refused with `503` and `Retry-After`, never queued, and one that could never fit with `413`. |
 | `SEAGULL_GATEWAY_RATE_PER_SECOND`, `SEAGULL_CONTROL_API_RATE_PER_SECOND`, `SEAGULL_QUERY_API_RATE_PER_SECOND` | What one caller may spend of a process, at least one a second. Only the word `unlimited` turns a limiter off, and a process told it says so at startup. |
@@ -581,6 +587,7 @@ make test              # unit, architecture and end-to-end suites
 make test-race         # the same suites under the race detector
 make test-integration  # the data plane against a live Redpanda and ClickHouse
 make test-load         # the ingest load scenarios against a live Redpanda
+make test-alerts       # the operational alert rules against recorded series
 make bench             # the hot path, one core, no infrastructure
 ```
 

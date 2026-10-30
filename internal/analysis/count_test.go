@@ -106,7 +106,7 @@ func held(t *testing.T, bounds detectionstate.Bounds, program *detection.Program
 }
 
 func bounded() detectionstate.Bounds {
-	return detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 64, Keys: 16}
+	return detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 64, Keys: 16, KeysPerTenant: 16, KeysPerRule: 16}
 }
 
 func TestARuleSaysNothingUntilItsThresholdIsReached(t *testing.T) {
@@ -268,7 +268,7 @@ func TestAWindowHoldsOnlyWhatIsStillInsideIt(t *testing.T) {
 // forgets. The refusal is answered and counted rather than swallowed.
 func TestAFloodOfGroupsIsRefusedAndCounted(t *testing.T) {
 	program := threshold(t, 2, time.Minute, "authentication.network.source.ip")
-	bounds := detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 8, Keys: 2}
+	bounds := detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 8, Keys: 2, KeysPerTenant: 2, KeysPerRule: 2}
 
 	var flood []analysis.Record
 	for index := range 8 {
@@ -288,7 +288,7 @@ func TestAFloodOfGroupsIsRefusedAndCounted(t *testing.T) {
 
 func TestASaturatedKeyIsCountedAndSaidSo(t *testing.T) {
 	program := threshold(t, 3, time.Minute, "authentication.network.source.ip")
-	bounds := detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 4, Keys: 4}
+	bounds := detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 4, Keys: 4, KeysPerTenant: 4, KeysPerRule: 4}
 
 	made, registry := held(t, bounds, program, failures(t, 8, time.Second, "203.0.113.10"))
 	if len(made) == 0 {

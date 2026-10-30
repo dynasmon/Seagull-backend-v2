@@ -9,7 +9,7 @@ import (
 )
 
 func bounded() detectionstate.Bounds {
-	return detectionstate.Bounds{Window: time.Minute, ObservationsPerKey: 8, Keys: 4}
+	return detectionstate.Bounds{Window: time.Minute, ObservationsPerKey: 8, Keys: 4, KeysPerTenant: 4, KeysPerRule: 4}
 }
 
 func TestEveryBoundIsFiniteAndDeclared(t *testing.T) {
@@ -19,22 +19,22 @@ func TestEveryBoundIsFiniteAndDeclared(t *testing.T) {
 		expected error
 	}{
 		{"whole", bounded(), nil},
-		{"unwindowed", detectionstate.Bounds{ObservationsPerKey: 8, Keys: 4}, detectionstate.ErrNoWindow},
+		{"unwindowed", detectionstate.Bounds{ObservationsPerKey: 8, Keys: 4, KeysPerTenant: 4, KeysPerRule: 4}, detectionstate.ErrNoWindow},
 		{
 			"remembering forever",
-			detectionstate.Bounds{Window: detectionstate.MaxWindow + time.Second, ObservationsPerKey: 8, Keys: 4},
+			detectionstate.Bounds{Window: detectionstate.MaxWindow + time.Second, ObservationsPerKey: 8, Keys: 4, KeysPerTenant: 4, KeysPerRule: 4},
 			detectionstate.ErrNoWindow,
 		},
-		{"holding nothing", detectionstate.Bounds{Window: time.Minute, Keys: 4}, detectionstate.ErrNoObservations},
+		{"holding nothing", detectionstate.Bounds{Window: time.Minute, Keys: 4, KeysPerTenant: 4, KeysPerRule: 4}, detectionstate.ErrNoObservations},
 		{
 			"holding everything",
-			detectionstate.Bounds{Window: time.Minute, ObservationsPerKey: detectionstate.MaxObservationsPerKey + 1, Keys: 4},
+			detectionstate.Bounds{Window: time.Minute, ObservationsPerKey: detectionstate.MaxObservationsPerKey + 1, Keys: 4, KeysPerTenant: 4, KeysPerRule: 4},
 			detectionstate.ErrNoObservations,
 		},
-		{"keyless", detectionstate.Bounds{Window: time.Minute, ObservationsPerKey: 8}, detectionstate.ErrNoKeys},
+		{"keyless", detectionstate.Bounds{Window: time.Minute, ObservationsPerKey: 8, KeysPerTenant: 4, KeysPerRule: 4}, detectionstate.ErrNoKeys},
 		{
 			"unbounded keys",
-			detectionstate.Bounds{Window: time.Minute, ObservationsPerKey: 8, Keys: detectionstate.MaxKeys + 1},
+			detectionstate.Bounds{Window: time.Minute, ObservationsPerKey: 8, Keys: detectionstate.MaxKeys + 1, KeysPerTenant: 4, KeysPerRule: 4},
 			detectionstate.ErrNoKeys,
 		},
 	} {

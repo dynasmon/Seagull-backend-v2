@@ -1,6 +1,7 @@
 package analysis_test
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,7 +10,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/analysis"
+	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	"github.com/dynasmon/Seagull-backend-v2/internal/detectionstate"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 )
@@ -173,5 +176,39 @@ func TestWhatAQuotaRemembersHavingToldIsBounded(t *testing.T) {
 	expected := `seagull_detection_state_observations_total{outcome="at_capacity"} 1099`
 	if body := exposition(t, registry); !strings.Contains(body, expected) {
 		t.Errorf("past the bound the counter went on saying less than %q: %s", expected, body)
+	}
+}
+
+func TestTheFullestTenantAndRuleAreReportedBesideTheirCeilings(t *testing.T) {
+	bounds := shared(8, 4, 2)
+	keeper, err := detectionstate.NewKeeper(bounds)
+	if err != nil {
+		t.Fatalf("bound the detection state: %v", err)
+	}
+	registry := metrics.New(t.Name())
+	analysis.ObserveState(registry, bounds, keeper)
+
+	for index, group := range []string{"203.0.113.10", "203.0.113.11"} {
+		key := detectionstate.KeyFor("one", "a.rule", 1, []detection.Binding{{Field: "authentication.network.source.ip", Value: group}})
+		seen := detectionstate.Observation{
+			Event: detectionstate.EventName{Agent: "web-01", ID: group},
+			At:    began.Add(time.Duration(index) * time.Second),
+		}
+		if _, err := keeper.Observe(context.Background(), key, seen, time.Minute); err != nil {
+			t.Fatalf("observe %s: %v", group, err)
+		}
+	}
+
+	body := exposition(t, registry)
+	for _, expected := range []string{
+		"seagull_detection_state_keys 2",
+		"seagull_detection_state_tenant_key_ceiling 4",
+		"seagull_detection_state_rule_key_ceiling 2",
+		"seagull_detection_state_fullest_tenant_keys 2",
+		"seagull_detection_state_fullest_rule_keys 2",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("%q is missing from the exposition: %s", expected, body)
+		}
 	}
 }

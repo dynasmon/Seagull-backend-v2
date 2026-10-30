@@ -66,7 +66,7 @@ func TestTwoDifferentGroupsAreTwoKeys(t *testing.T) {
 	}
 
 	ungrouped := detectionstate.KeyFor(tenant, rule, 1, nil)
-	if ungrouped == here || ungrouped == "" {
+	if ungrouped == here || ungrouped.Group == "" {
 		t.Error("a rule that groups by nothing has no key of its own")
 	}
 }
@@ -79,7 +79,7 @@ func TestAKeyIsTheSameSizeWhateverTheEventHeld(t *testing.T) {
 	long := strings.Repeat("a", 1024)
 	sprawling := detectionstate.KeyFor(tenant, rule, 1, []detection.Binding{bound("authentication.user.name", long)})
 
-	if len(short) != len(sprawling) {
-		t.Errorf("a %d byte value made a %d byte key against a %d byte one", len(long), len(sprawling), len(short))
+	if len(short.Group) != len(sprawling.Group) {
+		t.Errorf("a %d byte value made a %d byte key against a %d byte one", len(long), len(sprawling.Group), len(short.Group))
 	}
 }

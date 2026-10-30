@@ -345,7 +345,7 @@ func TestTheWindowIsReadBackInEventTime(t *testing.T) {
 	}
 
 	at := time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
-	key := detectionstate.Key("a-key")
+	key := detectionstate.Key{Tenant: tenant, Rule: rule, Group: "a-key"}
 	for _, seen := range []detectionstate.Observation{
 		{Event: named("third"), At: at.Add(2 * time.Minute), Value: "c", Skew: 3 * time.Second},
 		{Event: named("first"), At: at, Value: "a", Skew: time.Second},

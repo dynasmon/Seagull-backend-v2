@@ -77,11 +77,19 @@ func failures(t *testing.T, count int, apart time.Duration, source string) []ana
 func held(t *testing.T, bounds detectionstate.Bounds, program *detection.Program, records []analysis.Record) ([]*detectionv1.Detection, *metrics.Registry) {
 	t.Helper()
 
+	made, registry, _ := heldAndTold(t, bounds, program, records)
+	return made, registry
+}
+
+func heldAndTold(t *testing.T, bounds detectionstate.Bounds, program *detection.Program, records []analysis.Record) ([]*detectionv1.Detection, *metrics.Registry, string) {
+	t.Helper()
+
 	keeper, err := detectionstate.NewKeeper(bounds)
 	if err != nil {
 		t.Fatalf("bound the detection state: %v", err)
 	}
 
+	var told strings.Builder
 	registry := metrics.New(t.Name())
 	sink := &collected{}
 	source := &oneBatch{records: records}
@@ -91,7 +99,7 @@ func held(t *testing.T, bounds detectionstate.Bounds, program *detection.Program
 		State:          keeper,
 		Detections:     sink,
 		Metrics:        analysis.NewMetrics(registry),
-		Logger:         slog.New(slog.NewJSONHandler(&strings.Builder{}, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		Logger:         slog.New(slog.NewJSONHandler(&told, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		PublishTimeout: 5 * time.Second,
 		RetryDelay:     time.Millisecond,
 		MaxRetryDelay:  10 * time.Millisecond,
@@ -102,7 +110,7 @@ func held(t *testing.T, bounds detectionstate.Bounds, program *detection.Program
 	if err := engine.Run(context.Background()); err != nil {
 		t.Fatalf("run the engine: %v", err)
 	}
-	return sink.all(), registry
+	return sink.all(), registry, told.String()
 }
 
 func bounded() detectionstate.Bounds {

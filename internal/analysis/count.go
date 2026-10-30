@@ -34,14 +34,15 @@ const (
 // the alert plane, which is the only place that knows what work is. An event the
 // window already holds decides nothing at all, so a batch redelivered without a
 // restart cannot decide more than the delivery before it did.
-func (e *Engine) reached(ctx context.Context, program *detection.Program, match *detection.Match, record *eventv1.Event) (bool, error) {
+func (e *Engine) reached(ctx context.Context, program *detection.Program, match *detection.Match, record *eventv1.Event, partition int32) (bool, error) {
 	rule := program.Rule()
 	group := program.Group(record)
 	key := detectionstate.KeyFor(record.GetOrigin().GetTenantId(), rule.ID, rule.Revision, group)
 
 	held, err := e.state.Observe(ctx, key, detectionstate.Observation{
-		Event: nameOf(record),
-		At:    record.GetTime().GetEventTime().AsTime(),
+		Event:     nameOf(record),
+		At:        record.GetTime().GetEventTime().AsTime(),
+		Partition: partition,
 	}, rule.Count.Within)
 	if err != nil {
 		if ctx.Err() != nil {

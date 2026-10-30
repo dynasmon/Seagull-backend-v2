@@ -28,12 +28,15 @@ var (
 	ErrUnorderable    = errors.New("a rule may not order more stages than one key of this store holds")
 )
 
-// All three are finite and declared, so the memory a store can occupy is known
-// before it runs rather than discovered under load.
+// All of them are finite and declared, so the memory a store can occupy is known
+// before it runs rather than discovered under load. The two quotas are carved
+// out of Keys and add nothing to it.
 type Bounds struct {
 	Window             time.Duration
 	ObservationsPerKey int
 	Keys               int
+	KeysPerTenant      int
+	KeysPerRule        int
 }
 
 func (b Bounds) Validate() error {

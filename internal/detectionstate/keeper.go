@@ -134,6 +134,30 @@ func (k *Keeper) Keys() int {
 	return len(k.keys)
 }
 
+func (k *Keeper) FullestTenant() int {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	fullest := 0
+	for _, owner := range k.tenants {
+		fullest = max(fullest, owner.held)
+	}
+	return fullest
+}
+
+func (k *Keeper) FullestRule() int {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	fullest := 0
+	for _, owner := range k.tenants {
+		for _, keys := range owner.rules {
+			fullest = max(fullest, keys)
+		}
+	}
+	return fullest
+}
+
 func (k *Keeper) Watermark(tenant string, partition int32) time.Time {
 	k.mu.Lock()
 	defer k.mu.Unlock()

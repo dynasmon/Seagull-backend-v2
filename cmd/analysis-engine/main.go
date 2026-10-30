@@ -81,7 +81,7 @@ func engine(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	analysis.ObserveState(platform.Metrics(), settings.state, keeper.Keys)
+	analysis.ObserveState(platform.Metrics(), settings.state, keeper)
 
 	consumer, err := broker.NewConsumer(broker.ConsumerConfig{
 		Brokers:      settings.brokers,

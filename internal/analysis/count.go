@@ -81,23 +81,53 @@ func nameOf(record *eventv1.Event) detectionstate.EventName {
 	return detectionstate.EventName{Agent: record.GetOrigin().GetAgentId(), ID: record.GetEventId()}
 }
 
+type HeldKeys interface {
+	Keys() int
+	FullestTenant() int
+	FullestRule() int
+}
+
 // How many keys the store the engine was given is holding, against what it was
 // bounded to. Registered by the executable rather than by the store, because a
 // domain package reports nothing, and rather than by the engine, because only
 // the executable knows which store it chose.
-func ObserveState(registry *metrics.Registry, bounds detectionstate.Bounds, keys func() int) {
+func ObserveState(registry *metrics.Registry, bounds detectionstate.Bounds, held HeldKeys) {
 	registry.MustRegister(
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: "detection",
 			Name:      "state_keys",
 			Help:      "Keys the detection state store is holding.",
-		}, func() float64 { return float64(keys()) }),
+		}, func() float64 { return float64(held.Keys()) }),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: "detection",
 			Name:      "state_key_ceiling",
 			Help:      "Keys the detection state store was bounded to and refuses to go past.",
 		}, func() float64 { return float64(bounds.Keys) }),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "detection",
+			Name:      "state_tenant_key_ceiling",
+			Help:      "Keys one tenant may hold of the detection state store.",
+		}, func() float64 { return float64(bounds.KeysPerTenant) }),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "detection",
+			Name:      "state_rule_key_ceiling",
+			Help:      "Keys one rule of a tenant may hold of the detection state store.",
+		}, func() float64 { return float64(bounds.KeysPerRule) }),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "detection",
+			Name:      "state_fullest_tenant_keys",
+			Help:      "Keys held by the tenant holding the most, whichever it is.",
+		}, func() float64 { return float64(held.FullestTenant()) }),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "detection",
+			Name:      "state_fullest_rule_keys",
+			Help:      "Keys held by the rule of a tenant holding the most, whichever it is.",
+		}, func() float64 { return float64(held.FullestRule()) }),
 	)
 }

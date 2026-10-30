@@ -317,10 +317,17 @@ func TestTheKeysAStoreHoldsAreReportedAgainstItsCeiling(t *testing.T) {
 	}
 
 	registry := metrics.New(t.Name())
-	analysis.ObserveState(registry, bounded(), keeper.Keys)
+	analysis.ObserveState(registry, bounded(), keeper)
 
 	body := exposition(t, registry)
-	for _, expected := range []string{"seagull_detection_state_keys 0", "seagull_detection_state_key_ceiling 16"} {
+	for _, expected := range []string{
+		"seagull_detection_state_keys 0",
+		"seagull_detection_state_key_ceiling 16",
+		"seagull_detection_state_tenant_key_ceiling 16",
+		"seagull_detection_state_rule_key_ceiling 16",
+		"seagull_detection_state_fullest_tenant_keys 0",
+		"seagull_detection_state_fullest_rule_keys 0",
+	} {
 		if !strings.Contains(body, expected) {
 			t.Errorf("%q is missing from the exposition: %s", expected, body)
 		}

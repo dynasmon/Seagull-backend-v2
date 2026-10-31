@@ -47,7 +47,7 @@ func composed(t *testing.T, rule detection.Rule) *ruleset.Snapshot {
 }
 
 func bounds() detectionstate.Bounds {
-	return detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 128, Keys: 4096}
+	return detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 128, Keys: 4096, KeysPerTenant: 1024, KeysPerRule: 512}
 }
 
 func deployment() runtime {

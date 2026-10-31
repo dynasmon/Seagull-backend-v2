@@ -273,7 +273,7 @@ func TestASequenceIsToldWithinItsGroup(t *testing.T) {
 }
 
 func TestTemporalStateStaysBounded(t *testing.T) {
-	bounds := detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 1, Keys: 4}
+	bounds := detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 1, Keys: 4, KeysPerTenant: 4, KeysPerRule: 4}
 	if err := bounds.Orders(story(t, time.Minute).Rule().Sequence); err == nil {
 		t.Error("a store holding one observation per key admitted a story of two stages")
 	}
@@ -287,7 +287,7 @@ func TestTemporalStateStaysBounded(t *testing.T) {
 		}))
 	}
 
-	narrow := detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 8, Keys: 4}
+	narrow := detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 8, Keys: 4, KeysPerTenant: 4, KeysPerRule: 4}
 	_, registry := held(t, narrow, story(t, time.Minute, "authentication.network.source.ip"), flood)
 	if body := exposition(t, registry); !strings.Contains(body, analysis.OutcomeAtCapacity) {
 		t.Error("a flood of invented group values was not refused at the key ceiling")

@@ -13,7 +13,14 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 )
 
-type Key string
+// The group is a digest, so what a key costs does not follow what a producer
+// sent; the tenant and the rule stay legible, because they are who a store
+// charges the key to.
+type Key struct {
+	Tenant string
+	Rule   detection.ID
+	Group  string
+}
 
 // The tenant is never declared, because state spanning one is a count somebody
 // could read past; the revision is, because a revised rule asks another
@@ -36,5 +43,5 @@ func KeyFor(tenant string, rule detection.ID, revision int, group []detection.Bi
 		}
 		write(bound.Value)
 	}
-	return Key(hex.EncodeToString(digest.Sum(nil)[:16]))
+	return Key{Tenant: tenant, Rule: rule, Group: hex.EncodeToString(digest.Sum(nil)[:16])}
 }

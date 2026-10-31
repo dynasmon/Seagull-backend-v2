@@ -148,6 +148,8 @@ func engine(ctx context.Context) error {
 		slog.Duration("state_window", settings.state.Window),
 		slog.Int("state_observations_per_key", settings.state.ObservationsPerKey),
 		slog.Int("state_keys", settings.state.Keys),
+		slog.Int("state_keys_per_tenant", settings.state.KeysPerTenant),
+		slog.Int("state_keys_per_rule", settings.state.KeysPerRule),
 		slog.Any("stream_keyed_by", broker.PartitionedBy),
 		slog.Bool("sole_reader", settings.sole),
 		slog.Duration("state_recovery", engineRuntime.recovering(registry.Current())),

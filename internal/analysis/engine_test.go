@@ -230,6 +230,8 @@ func keeping(t *testing.T) *detectionstate.Keeper {
 		Window:             time.Hour,
 		ObservationsPerKey: 64,
 		Keys:               32,
+		KeysPerTenant:      32,
+		KeysPerRule:        32,
 	})
 	if err != nil {
 		t.Fatalf("bound the detection state: %v", err)

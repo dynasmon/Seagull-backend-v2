@@ -478,6 +478,8 @@ func remembering(t *testing.T) *detectionstate.Keeper {
 		Window:             time.Hour,
 		ObservationsPerKey: 128,
 		Keys:               4096,
+		KeysPerTenant:      4096,
+		KeysPerRule:        4096,
 	})
 	if err != nil {
 		t.Fatalf("bound the detection state: %v", err)

@@ -9,6 +9,10 @@
 > Amended by [ADR 38](0038-an-observation-is-named-by-the-agent-that-sent-its-event.md):
 > an observation names the event it came from by the agent that sent it as well
 > as by its identifier, which is the producer's to choose.
+> Amended by [ADR 42](0042-a-tenants-detection-state-is-carved-out-of-the-store-and-timed-by-its-own-partitions.md):
+> the ceiling on keys is carved into a quota per tenant and per rule, a watermark
+> belongs to one tenant on one partition rather than to the store, and keys are
+> reclaimed through an index rather than by walking them.
 
 ## Context
 

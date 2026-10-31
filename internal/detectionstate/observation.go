@@ -29,11 +29,12 @@ type EventName struct {
 // What one event contributes to a key. Event names it, so a replayed batch
 // counts once; At is event time, never the clock; Value is what a cardinality
 // counts distinct of or the stage a sequence reached, empty when the rule only
-// counts.
+// counts; Partition is the part of the stream it was read from.
 type Observation struct {
-	Event EventName
-	At    time.Time
-	Value string
+	Event     EventName
+	At        time.Time
+	Value     string
+	Partition int32
 
 	// What the platform saw of the clock this event was timed by. Ordering is
 	// decided in event time, which is the producer's, so a window read back for

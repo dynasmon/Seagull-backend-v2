@@ -24,7 +24,7 @@ const (
 // satisfied: a sequence is therefore found the same number of times however the
 // backbone happened to deliver it, and only which of several interchangeable
 // earlier events it cites can differ.
-func (e *Engine) completed(ctx context.Context, program *detection.Program, match *detection.Match, record *eventv1.Event) (bool, error) {
+func (e *Engine) completed(ctx context.Context, program *detection.Program, match *detection.Match, record *eventv1.Event, partition int32) (bool, error) {
 	reached, evidence := program.Satisfied(record)
 	if !reached.Any() {
 		return false, nil
@@ -35,17 +35,18 @@ func (e *Engine) completed(ctx context.Context, program *detection.Program, matc
 	key := detectionstate.KeyFor(record.GetOrigin().GetTenantId(), rule.ID, rule.Revision, group)
 
 	seen := detectionstate.Observation{
-		Event: nameOf(record),
-		At:    record.GetTime().GetEventTime().AsTime(),
-		Value: reached.String(),
-		Skew:  skewOf(record),
+		Event:     nameOf(record),
+		At:        record.GetTime().GetEventTime().AsTime(),
+		Value:     reached.String(),
+		Partition: partition,
+		Skew:      skewOf(record),
 	}
 	held, window, err := e.state.Ordered(ctx, key, seen, rule.Sequence.Within)
 	if err != nil {
 		if ctx.Err() != nil {
 			return false, err
 		}
-		e.metrics.observed(refusalOf(err))
+		e.refusedObservation(record, rule.ID, err)
 		return false, nil
 	}
 	if held.Repeated {

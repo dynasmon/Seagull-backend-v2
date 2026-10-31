@@ -58,11 +58,13 @@ jobs:
       - name: pull the backbone and store images
         run: |
           attempt=1
-          until docker compose -f deploy/compose.yaml -f deploy/compose.test.yaml pull --quiet redpanda clickhouse postgres; do
+          until docker compose -f deploy/compose.yaml -f deploy/compose.test.yaml pull --quiet redpanda clickhouse postgres promtool; do
             [ "$attempt" -lt 5 ] || exit 1
             sleep "$((attempt * 15))"
             attempt="$((attempt + 1))"
           done
+      - name: operational alert rules
+        run: make test-alerts
       - name: backbone suite
         run: make test-integration
 

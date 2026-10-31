@@ -186,7 +186,55 @@ of its container image turns on, acknowledges from memory. See [ADR 41](decision
 | `SEAGULL_DETECTION_STATE_WINDOW` | `1h` | the longest window a counting rule may ask for, and what a restart costs to rebuild |
 | `SEAGULL_DETECTION_STATE_OBSERVATIONS` | `128` | events one key holds; past it the count is a floor and says so |
 | `SEAGULL_DETECTION_STATE_KEYS` | `4096` | keys held at once; at the ceiling a new key is refused rather than an old one evicted |
+| `SEAGULL_DETECTION_STATE_KEYS_PER_TENANT` | a quarter of `SEAGULL_DETECTION_STATE_KEYS` | keys one tenant may hold, at most `SEAGULL_DETECTION_STATE_KEYS`; past it that tenant alone is refused new keys |
+| `SEAGULL_DETECTION_STATE_KEYS_PER_RULE` | half of `SEAGULL_DETECTION_STATE_KEYS_PER_TENANT` | keys one rule of a tenant may hold, at most `SEAGULL_DETECTION_STATE_KEYS_PER_TENANT`; past it that rule alone is refused new keys |
 | `SEAGULL_DETECTION_STATE_SOLE_READER` | `false` | declares that this engine reads the whole stream, which is what makes a rule counting across agents answerable |
+
+The store is one bound carved into two quotas, so what one tenant sends cannot
+spend what another tenant's rules depend on. A key is one group a rule is
+watching inside its window: under the shipped rules, one source address against
+one agent. A key already held goes on counting whatever is refused, none is ever
+evicted to make room, and one is taken back only once the partition that fed it
+has moved past its window and somebody needs the room. Size the store from the
+top down:
+
+- **`SEAGULL_DETECTION_STATE_KEYS_PER_RULE`** is the most groups one rule should
+  see inside its window. A failed password from an address nobody saw before
+  opens a key under each of the two stateful rules shipped.
+- **`SEAGULL_DETECTION_STATE_KEYS_PER_TENANT`** is that, times the stateful rules
+  that can be busy at once. A flood of invented group values reaches all of a
+  tenant's rules together, so a quota of one rule only protects the others while
+  it is well below the tenant's.
+- **`SEAGULL_DETECTION_STATE_KEYS`** is what the tenants hold together on an
+  ordinary day, plus `SEAGULL_DETECTION_STATE_KEYS_PER_TENANT` for each tenant
+  that may flood at once: everyone else shares what those leave. At the defaults
+  it takes four tenants flooding together to fill the store.
+- **A deployment with one tenant** gives it the store,
+  `SEAGULL_DETECTION_STATE_KEYS_PER_TENANT` equal to
+  `SEAGULL_DETECTION_STATE_KEYS`, and reads `tenant_at_capacity` as the store
+  being full.
+- **Memory** is bounded by the keys times the observations each holds, about 280
+  bytes an observation: 140 MiB for a default store with every key full. Keys a
+  flood opens hold one observation, about 830 bytes each, so a million of them
+  hold about 830 MiB.
+
+`detection_state_keys` against `detection_state_key_ceiling`,
+`detection_state_fullest_tenant_keys` against
+`detection_state_tenant_key_ceiling`, and `detection_state_fullest_rule_keys`
+against `detection_state_rule_key_ceiling` are the headroom, read before anything
+is refused. `detection_state_observations_total` counts a refusal as what
+overflowed: `at_capacity`, `tenant_at_capacity` or `rule_at_capacity`. No metric
+says whose, so `detection_state_at_capacity` names the tenant and the rule in the
+log, once for each pair and outcome. `deploy/prometheus/detection-state.yml` holds
+the alerts on refusals that last ten minutes, for a Prometheus reading the
+engine's operational listener; `make test-alerts` evaluates them. A flood of
+invented group values is a producer to go and find, and an estate that grew is a
+store to size. Refusals cost next to nothing, so a flood no longer slows the
+engine for anyone else; the one pause is the first time a store runs out of room
+with most of its keys moved since it last had to look, which files them again:
+half a millisecond at the default size, about 300 milliseconds at a million keys,
+once. See
+[ADR 42](decisions/0042-a-tenants-detection-state-is-carved-out-of-the-store-and-timed-by-its-own-partitions.md).
 
 State held in a process does not move with a partition, so whenever the group
 hands the engine one — at startup and at every rebalance — the engine is put back

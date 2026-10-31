@@ -45,3 +45,4 @@ rediscovered by reading the code.
 - [39. A detection is named by the agent and identifier of every event that decided it, whichever of them arrived last](0039-a-detection-is-named-by-the-agent-and-identifier-of-every-event-that-decided-it.md)
 - [40. What the platform makes is bounded where it is made: a rule by the heaviest detection it could make, a ruleset by the log it is published to](0040-a-record-the-platform-makes-is-bounded-where-it-is-made.md)
 - [41. Production is the default and development is declared: an acknowledgement is held by two of three replicas, a limit is turned off only in words, and a body is weighed by what decoding it costs](0041-production-is-the-default-and-development-is-declared.md)
+- [42. A tenant's detection state is carved out of the store and timed by its own partitions](0042-a-tenants-detection-state-is-carved-out-of-the-store-and-timed-by-its-own-partitions.md)

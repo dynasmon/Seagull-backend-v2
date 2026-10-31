@@ -2,7 +2,6 @@ package analysis
 
 import (
 	"context"
-	"errors"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -13,13 +12,15 @@ import (
 )
 
 const (
-	OutcomeCounted    = "counted"
-	OutcomeReached    = "reached"
-	OutcomeRepeated   = "repeated"
-	OutcomeAtCapacity = "at_capacity"
-	OutcomeTooLate    = "too_late"
-	OutcomeUnbounded  = "unbounded"
-	OutcomeRefused    = "refused"
+	OutcomeCounted          = "counted"
+	OutcomeReached          = "reached"
+	OutcomeRepeated         = "repeated"
+	OutcomeAtCapacity       = "at_capacity"
+	OutcomeTenantAtCapacity = "tenant_at_capacity"
+	OutcomeRuleAtCapacity   = "rule_at_capacity"
+	OutcomeTooLate          = "too_late"
+	OutcomeUnbounded        = "unbounded"
+	OutcomeRefused          = "refused"
 )
 
 // Whether a counting rule's window has reached what the rule asks for, and what
@@ -33,20 +34,21 @@ const (
 // the alert plane, which is the only place that knows what work is. An event the
 // window already holds decides nothing at all, so a batch redelivered without a
 // restart cannot decide more than the delivery before it did.
-func (e *Engine) reached(ctx context.Context, program *detection.Program, match *detection.Match, record *eventv1.Event) (bool, error) {
+func (e *Engine) reached(ctx context.Context, program *detection.Program, match *detection.Match, record *eventv1.Event, partition int32) (bool, error) {
 	rule := program.Rule()
 	group := program.Group(record)
 	key := detectionstate.KeyFor(record.GetOrigin().GetTenantId(), rule.ID, rule.Revision, group)
 
 	held, err := e.state.Observe(ctx, key, detectionstate.Observation{
-		Event: nameOf(record),
-		At:    record.GetTime().GetEventTime().AsTime(),
+		Event:     nameOf(record),
+		At:        record.GetTime().GetEventTime().AsTime(),
+		Partition: partition,
 	}, rule.Count.Within)
 	if err != nil {
 		if ctx.Err() != nil {
 			return false, err
 		}
-		e.metrics.observed(refusalOf(err))
+		e.refusedObservation(record, rule.ID, err)
 		return false, nil
 	}
 	if held.Repeated {
@@ -79,38 +81,53 @@ func nameOf(record *eventv1.Event) detectionstate.EventName {
 	return detectionstate.EventName{Agent: record.GetOrigin().GetAgentId(), ID: record.GetEventId()}
 }
 
-// A store that will not take an observation is counted and not logged: a flood
-// of invented group values fills a store on every event it produces, and a line
-// per event would be the flood written down a second time.
-func refusalOf(err error) string {
-	switch {
-	case errors.Is(err, detectionstate.ErrAtCapacity):
-		return OutcomeAtCapacity
-	case errors.Is(err, detectionstate.ErrTooLate):
-		return OutcomeTooLate
-	case errors.Is(err, detectionstate.ErrWindowTooLong), errors.Is(err, detectionstate.ErrNoWindow):
-		return OutcomeUnbounded
-	}
-	return OutcomeRefused
+type HeldKeys interface {
+	Keys() int
+	FullestTenant() int
+	FullestRule() int
 }
 
 // How many keys the store the engine was given is holding, against what it was
 // bounded to. Registered by the executable rather than by the store, because a
 // domain package reports nothing, and rather than by the engine, because only
 // the executable knows which store it chose.
-func ObserveState(registry *metrics.Registry, bounds detectionstate.Bounds, keys func() int) {
+func ObserveState(registry *metrics.Registry, bounds detectionstate.Bounds, held HeldKeys) {
 	registry.MustRegister(
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: "detection",
 			Name:      "state_keys",
 			Help:      "Keys the detection state store is holding.",
-		}, func() float64 { return float64(keys()) }),
+		}, func() float64 { return float64(held.Keys()) }),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: "detection",
 			Name:      "state_key_ceiling",
 			Help:      "Keys the detection state store was bounded to and refuses to go past.",
 		}, func() float64 { return float64(bounds.Keys) }),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "detection",
+			Name:      "state_tenant_key_ceiling",
+			Help:      "Keys one tenant may hold of the detection state store.",
+		}, func() float64 { return float64(bounds.KeysPerTenant) }),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "detection",
+			Name:      "state_rule_key_ceiling",
+			Help:      "Keys one rule of a tenant may hold of the detection state store.",
+		}, func() float64 { return float64(bounds.KeysPerRule) }),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "detection",
+			Name:      "state_fullest_tenant_keys",
+			Help:      "Keys held by the tenant holding the most, whichever it is.",
+		}, func() float64 { return float64(held.FullestTenant()) }),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "detection",
+			Name:      "state_fullest_rule_keys",
+			Help:      "Keys held by the rule of a tenant holding the most, whichever it is.",
+		}, func() float64 { return float64(held.FullestRule()) }),
 	)
 }

@@ -12,6 +12,9 @@ var (
 	// real counts an estate forgets.
 	ErrAtCapacity = errors.New("the store is holding as many keys as it was bounded to")
 
+	ErrTenantAtCapacity = errors.New("a tenant is holding as many keys as one may")
+	ErrRuleAtCapacity   = errors.New("a rule of a tenant is holding as many keys as one may")
+
 	ErrTooLate = errors.New("an observation older than the window it belongs to cannot be folded into it")
 )
 

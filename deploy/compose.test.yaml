@@ -21,3 +21,14 @@ services:
     networks: [backbone, backbone-testing]
     ports:
       - "127.0.0.1:15432:5432"
+
+  # Runs the operational alert rules against recorded series and touches nothing
+  # else, so it has no network and starts only when asked for.
+  promtool:
+    image: prom/prometheus:v3.5.0
+    profiles: [alerts]
+    entrypoint: [promtool]
+    network_mode: none
+    working_dir: /rules
+    volumes:
+      - ./prometheus:/rules:ro

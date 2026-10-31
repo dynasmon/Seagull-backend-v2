@@ -77,11 +77,19 @@ func failures(t *testing.T, count int, apart time.Duration, source string) []ana
 func held(t *testing.T, bounds detectionstate.Bounds, program *detection.Program, records []analysis.Record) ([]*detectionv1.Detection, *metrics.Registry) {
 	t.Helper()
 
+	made, registry, _ := heldAndTold(t, bounds, program, records)
+	return made, registry
+}
+
+func heldAndTold(t *testing.T, bounds detectionstate.Bounds, program *detection.Program, records []analysis.Record) ([]*detectionv1.Detection, *metrics.Registry, string) {
+	t.Helper()
+
 	keeper, err := detectionstate.NewKeeper(bounds)
 	if err != nil {
 		t.Fatalf("bound the detection state: %v", err)
 	}
 
+	var told strings.Builder
 	registry := metrics.New(t.Name())
 	sink := &collected{}
 	source := &oneBatch{records: records}
@@ -91,7 +99,7 @@ func held(t *testing.T, bounds detectionstate.Bounds, program *detection.Program
 		State:          keeper,
 		Detections:     sink,
 		Metrics:        analysis.NewMetrics(registry),
-		Logger:         slog.New(slog.NewJSONHandler(&strings.Builder{}, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		Logger:         slog.New(slog.NewJSONHandler(&told, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		PublishTimeout: 5 * time.Second,
 		RetryDelay:     time.Millisecond,
 		MaxRetryDelay:  10 * time.Millisecond,
@@ -102,11 +110,11 @@ func held(t *testing.T, bounds detectionstate.Bounds, program *detection.Program
 	if err := engine.Run(context.Background()); err != nil {
 		t.Fatalf("run the engine: %v", err)
 	}
-	return sink.all(), registry
+	return sink.all(), registry, told.String()
 }
 
 func bounded() detectionstate.Bounds {
-	return detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 64, Keys: 16}
+	return detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 64, Keys: 16, KeysPerTenant: 16, KeysPerRule: 16}
 }
 
 func TestARuleSaysNothingUntilItsThresholdIsReached(t *testing.T) {
@@ -268,7 +276,7 @@ func TestAWindowHoldsOnlyWhatIsStillInsideIt(t *testing.T) {
 // forgets. The refusal is answered and counted rather than swallowed.
 func TestAFloodOfGroupsIsRefusedAndCounted(t *testing.T) {
 	program := threshold(t, 2, time.Minute, "authentication.network.source.ip")
-	bounds := detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 8, Keys: 2}
+	bounds := detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 8, Keys: 2, KeysPerTenant: 2, KeysPerRule: 2}
 
 	var flood []analysis.Record
 	for index := range 8 {
@@ -278,7 +286,7 @@ func TestAFloodOfGroupsIsRefusedAndCounted(t *testing.T) {
 
 	_, registry := held(t, bounds, program, flood)
 	body := exposition(t, registry)
-	if !strings.Contains(body, `seagull_detection_state_observations_total{outcome="at_capacity"}`) {
+	if !strings.Contains(body, `seagull_detection_state_observations_total{outcome="tenant_at_capacity"}`) {
 		t.Fatalf("a store that refused a key counted nothing: %s", body)
 	}
 	if !strings.Contains(body, `seagull_detection_state_observations_total{outcome="counted"}`) {
@@ -288,7 +296,7 @@ func TestAFloodOfGroupsIsRefusedAndCounted(t *testing.T) {
 
 func TestASaturatedKeyIsCountedAndSaidSo(t *testing.T) {
 	program := threshold(t, 3, time.Minute, "authentication.network.source.ip")
-	bounds := detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 4, Keys: 4}
+	bounds := detectionstate.Bounds{Window: time.Hour, ObservationsPerKey: 4, Keys: 4, KeysPerTenant: 4, KeysPerRule: 4}
 
 	made, registry := held(t, bounds, program, failures(t, 8, time.Second, "203.0.113.10"))
 	if len(made) == 0 {
@@ -309,10 +317,17 @@ func TestTheKeysAStoreHoldsAreReportedAgainstItsCeiling(t *testing.T) {
 	}
 
 	registry := metrics.New(t.Name())
-	analysis.ObserveState(registry, bounded(), keeper.Keys)
+	analysis.ObserveState(registry, bounded(), keeper)
 
 	body := exposition(t, registry)
-	for _, expected := range []string{"seagull_detection_state_keys 0", "seagull_detection_state_key_ceiling 16"} {
+	for _, expected := range []string{
+		"seagull_detection_state_keys 0",
+		"seagull_detection_state_key_ceiling 16",
+		"seagull_detection_state_tenant_key_ceiling 16",
+		"seagull_detection_state_rule_key_ceiling 16",
+		"seagull_detection_state_fullest_tenant_keys 0",
+		"seagull_detection_state_fullest_rule_keys 0",
+	} {
 		if !strings.Contains(body, expected) {
 			t.Errorf("%q is missing from the exposition: %s", expected, body)
 		}

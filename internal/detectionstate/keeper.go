@@ -1,6 +1,7 @@
 package detectionstate
 
 import (
+	"container/heap"
 	"context"
 	"slices"
 	"sort"
@@ -16,16 +17,18 @@ var _ Store = (*Keeper)(nil)
 type Keeper struct {
 	bounds Bounds
 
-	mu        sync.Mutex
-	keys      map[Key]*held
-	watermark time.Time
+	mu      sync.Mutex
+	keys    map[Key]*held
+	tenants map[string]*tenantKeys
+	newest  time.Time
+	swept   time.Time
 }
 
 func NewKeeper(bounds Bounds) (*Keeper, error) {
 	if err := bounds.Validate(); err != nil {
 		return nil, err
 	}
-	return &Keeper{bounds: bounds, keys: make(map[Key]*held)}, nil
+	return &Keeper{bounds: bounds, keys: make(map[Key]*held), tenants: make(map[string]*tenantKeys)}, nil
 }
 
 // An event already folded answers what the key already held, and every window
@@ -57,28 +60,72 @@ func (k *Keeper) fold(ctx context.Context, key Key, seen Observation, window tim
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
-	if seen.At.After(k.watermark) {
-		k.watermark = seen.At
-	}
+	k.advance(key.Tenant, seen)
 
 	entry, opened := k.keys[key]
 	if !opened {
-		if len(k.keys) >= k.bounds.Keys {
-			k.reclaim()
+		if err := k.admit(key); err != nil {
+			return State{}, nil, err
 		}
-		if len(k.keys) >= k.bounds.Keys {
-			return State{}, nil, ErrAtCapacity
-		}
-		entry = &held{ids: make(map[EventName]struct{})}
-		k.keys[key] = entry
+		entry = &held{key: key, ids: make(map[EventName]struct{})}
 	}
 	entry.window = window
 
 	state, err := entry.observe(seen, k.bounds.ObservationsPerKey)
+	if !opened {
+		k.open(entry, seen)
+	}
 	if err != nil || !read {
 		return state, nil, err
 	}
 	return state, slices.Clone(entry.seen), nil
+}
+
+func (k *Keeper) advance(tenant string, seen Observation) {
+	if seen.At.After(k.newest) {
+		k.newest = seen.At
+	}
+	if owner := k.tenants[tenant]; owner != nil {
+		if keys := owner.partitions[seen.Partition]; keys != nil {
+			keys.delivered(seen.At, k.newest)
+		}
+	}
+}
+
+func (k *Keeper) admit(key Key) error {
+	if owner := k.tenants[key.Tenant]; owner != nil {
+		if owner.refuses(key.Rule, k.bounds) != nil || len(k.keys) >= k.bounds.Keys {
+			k.reclaim(owner)
+		}
+		if err := owner.refuses(key.Rule, k.bounds); err != nil {
+			return err
+		}
+	}
+	if len(k.keys) >= k.bounds.Keys {
+		k.sweep()
+	}
+	if len(k.keys) >= k.bounds.Keys {
+		return ErrAtCapacity
+	}
+	return nil
+}
+
+func (k *Keeper) open(entry *held, seen Observation) {
+	owner := k.tenants[entry.key.Tenant]
+	if owner == nil {
+		owner = newTenantKeys(entry.key.Tenant)
+		k.tenants[entry.key.Tenant] = owner
+	}
+	entry.key.Tenant = owner.tenant
+	keys := owner.partitions[seen.Partition]
+	if keys == nil {
+		keys = &partitionKeys{watermark: seen.At, heard: k.newest}
+		owner.partitions[seen.Partition] = keys
+	}
+
+	owner.opened(entry.key.Rule)
+	k.keys[entry.key] = entry
+	heap.Push(&keys.expiring, entry)
 }
 
 func (k *Keeper) Keys() int {
@@ -87,28 +134,44 @@ func (k *Keeper) Keys() int {
 	return len(k.keys)
 }
 
-func (k *Keeper) Watermark() time.Time {
+func (k *Keeper) FullestTenant() int {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	return k.watermark
+
+	fullest := 0
+	for _, owner := range k.tenants {
+		fullest = max(fullest, owner.held)
+	}
+	return fullest
 }
 
-// Keys the stream has moved past, measured by a watermark that only ever moves
-// forward, and only under pressure: nothing here runs a goroutine, and a store
-// that is not full has no reason to walk itself.
-func (k *Keeper) reclaim() int {
-	gone := 0
-	for key, entry := range k.keys {
-		last := entry.last()
-		if last.IsZero() || last.Before(k.watermark.Add(-entry.window)) {
-			delete(k.keys, key)
-			gone++
+func (k *Keeper) FullestRule() int {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	fullest := 0
+	for _, owner := range k.tenants {
+		for _, keys := range owner.rules {
+			fullest = max(fullest, keys)
 		}
 	}
-	return gone
+	return fullest
+}
+
+func (k *Keeper) Watermark(tenant string, partition int32) time.Time {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	if owner := k.tenants[tenant]; owner != nil {
+		if keys := owner.partitions[partition]; keys != nil {
+			return keys.watermark
+		}
+	}
+	return time.Time{}
 }
 
 type held struct {
+	key    Key
 	window time.Duration
 	seen   []Observation
 	ids    map[EventName]struct{}
@@ -181,6 +244,8 @@ func (h *held) last() time.Time {
 	}
 	return h.seen[len(h.seen)-1].At
 }
+
+func (h *held) expires() time.Time { return h.last().Add(h.window) }
 
 func (h *held) state(ceiling int) State {
 	if len(h.seen) == 0 {

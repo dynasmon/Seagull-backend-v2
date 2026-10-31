@@ -58,7 +58,7 @@ func (e *Engine) detect(ctx context.Context, record *eventv1.Event, route Route,
 
 		if program.Correlates() {
 			match := detection.Match{Rule: program.Rule()}
-			complete, err := e.completed(ctx, program, &match, record)
+			complete, err := e.completed(ctx, program, &match, record, position.Partition)
 			if err != nil {
 				e.metrics.evaluated(route, evaluated, time.Since(started))
 				return nil, err
@@ -75,7 +75,7 @@ func (e *Engine) detect(ctx context.Context, record *eventv1.Event, route Route,
 		}
 
 		if program.Counts() {
-			reached, err := e.reached(ctx, program, &match, record)
+			reached, err := e.reached(ctx, program, &match, record, position.Partition)
 			if err != nil {
 				e.metrics.evaluated(route, evaluated, time.Since(started))
 				return nil, err

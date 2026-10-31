@@ -1,0 +1,101 @@
+rule_files:
+  - detection-state.yml
+
+evaluation_interval: 1m
+
+tests:
+  # Sixty refusals a minute: nothing yet at five minutes, an alert past ten.
+  - interval: 1m
+    input_series:
+      - series: 'seagull_detection_state_observations_total{instance="engine-1:9100",outcome="at_capacity"}'
+        values: '0+60x30'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: SeagullDetectionStateRefusingKeys
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: SeagullDetectionStateRefusingKeys
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: engine-1:9100
+              outcome: at_capacity
+            exp_annotations:
+              summary: 'engine-1:9100 has refused new detection state keys for ten minutes (at_capacity)'
+              description: >-
+                A counting or sequence rule cannot open a key for a new group, so
+                what those groups do goes uncounted while this lasts. at_capacity
+                is the whole store, tenant_at_capacity one tenant's quota. The
+                detection_state_at_capacity log line names the tenant and the rule.
+                A flood of invented group values is a producer to go and find; an
+                estate that grew is a store to size, as docs/configuration.md says.
+
+  - interval: 1m
+    input_series:
+      - series: 'seagull_detection_state_observations_total{instance="engine-1:9100",outcome="tenant_at_capacity"}'
+        values: '0+60x30'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: SeagullDetectionStateRefusingKeys
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: engine-1:9100
+              outcome: tenant_at_capacity
+            exp_annotations:
+              summary: 'engine-1:9100 has refused new detection state keys for ten minutes (tenant_at_capacity)'
+              description: >-
+                A counting or sequence rule cannot open a key for a new group, so
+                what those groups do goes uncounted while this lasts. at_capacity
+                is the whole store, tenant_at_capacity one tenant's quota. The
+                detection_state_at_capacity log line names the tenant and the rule.
+                A flood of invented group values is a producer to go and find; an
+                estate that grew is a store to size, as docs/configuration.md says.
+
+  # One rule at its quota is a rule to look at, not an outage of a tenant.
+  - interval: 1m
+    input_series:
+      - series: 'seagull_detection_state_observations_total{instance="engine-1:9100",outcome="rule_at_capacity"}'
+        values: '0+60x30'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: SeagullDetectionStateRefusingKeys
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: SeagullDetectionStateRuleRefusingKeys
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: engine-1:9100
+            exp_annotations:
+              summary: 'engine-1:9100 has refused a rule new detection state keys for ten minutes'
+              description: >-
+                One rule of one tenant cannot open a key for a new group, and its
+                other rules still can. The detection_state_at_capacity log line
+                names both.
+
+  # A burst the quota stopped and that ended is what a ceiling is for.
+  - interval: 1m
+    input_series:
+      - series: 'seagull_detection_state_observations_total{instance="engine-1:9100",outcome="at_capacity"}'
+        values: '0 600 1200 1800 1800x27'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: SeagullDetectionStateRefusingKeys
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: SeagullDetectionStateRefusingKeys
+        exp_alerts: []
+
+  # A rule folding its keys says nothing.
+  - interval: 1m
+    input_series:
+      - series: 'seagull_detection_state_observations_total{instance="engine-1:9100",outcome="counted"}'
+        values: '0+600x30'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: SeagullDetectionStateRefusingKeys
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: SeagullDetectionStateRuleRefusingKeys
+        exp_alerts: []

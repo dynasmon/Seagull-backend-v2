@@ -1,0 +1,29 @@
+groups:
+  - name: seagull-detection-state
+    rules:
+      - alert: SeagullDetectionStateRefusingKeys
+        expr: sum by (instance, outcome) (rate(seagull_detection_state_observations_total{outcome=~"at_capacity|tenant_at_capacity"}[5m])) > 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: '{{ $labels.instance }} has refused new detection state keys for ten minutes ({{ $labels.outcome }})'
+          description: >-
+            A counting or sequence rule cannot open a key for a new group, so
+            what those groups do goes uncounted while this lasts. at_capacity
+            is the whole store, tenant_at_capacity one tenant's quota. The
+            detection_state_at_capacity log line names the tenant and the rule.
+            A flood of invented group values is a producer to go and find; an
+            estate that grew is a store to size, as docs/configuration.md says.
+
+      - alert: SeagullDetectionStateRuleRefusingKeys
+        expr: sum by (instance) (rate(seagull_detection_state_observations_total{outcome="rule_at_capacity"}[5m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: '{{ $labels.instance }} has refused a rule new detection state keys for ten minutes'
+          description: >-
+            One rule of one tenant cannot open a key for a new group, and its
+            other rules still can. The detection_state_at_capacity log line
+            names both.

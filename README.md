@@ -215,6 +215,15 @@ asset has none of that kind left. A record that reaches the store out of order
 loses to the newer one it arrived behind.
 [ADR 27](docs/decisions/0027-inventory-is-a-record-kind-of-its-own.md).
 
+A record keeps apart what one identity would fold. dpkg and apk hold one version of
+a name and architecture, so a package of theirs is never named by its version; rpm
+holds as many as it was given, kernels, keys and what an interrupted transaction
+left, so what decides is the snapshot, which is the whole of what the manager
+holds. Two versions it shows are two items, and a version shown alone keeps the
+identity an upgrade replaces. Two accounts sharing a uid stay two accounts the same
+way, because a second account of uid 0 is how a backdoor is kept.
+[ADR 43](docs/decisions/0043-a-record-keeps-apart-what-one-identity-would-fold.md).
+
 ### Vulnerability intelligence
 
 What is known to be wrong with software is read from its source — OSV's export
@@ -514,11 +523,14 @@ go run ./tools/devprobe -hunt https://127.0.0.1:8444
 
 Send what an asset has — a distribution, a package list and a service — and watch
 it become the current state of that asset; `-packages 10000` sends the widest
-package list one record carries, about 1.9 MB:
+package list one record carries, about 1.9 MB, and `-kernels` and `-accounts` send a
+host holding what one identity would fold, which a later scan without them retires:
 
 ```bash
 go run ./tools/devprobe -inventory
 go run ./tools/devprobe -inventory -packages 10000
+go run ./tools/devprobe -inventory -kernels 2 -accounts root,toor
+go run ./tools/devprobe -inventory -kernels 1 -accounts root
 ```
 
 The development stack follows Debian's advisories; another distribution is one

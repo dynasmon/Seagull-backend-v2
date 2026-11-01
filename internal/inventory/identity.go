@@ -11,13 +11,15 @@ import (
 )
 
 // What one kind of item is, in the one place a kind is described: whether an
-// asset can hold more than one, which body an item of it carries, and what
-// tells two of them apart within the same asset. A kind the contract declares
-// and this table does not name is refused by the suite.
+// asset can hold more than one, which body an item of it carries, what tells two
+// of them apart within the same asset and, where that can cover several items,
+// what tells those apart and whether it can. A kind the contract declares and
+// this table does not name is refused by the suite.
 type shape struct {
 	singleton bool
 	present   func(*inventoryv1.Item) bool
 	identify  func(*inventoryv1.Item) []string
+	instance  func(*inventoryv1.Item) (string, bool)
 }
 
 var shapes = map[inventoryv1.Kind]shape{

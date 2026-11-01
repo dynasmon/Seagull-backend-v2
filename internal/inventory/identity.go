@@ -44,6 +44,10 @@ var shapes = map[inventoryv1.Kind]shape{
 			installed := item.GetPackage()
 			return []string{installed.GetName(), installed.GetArchitecture(), installed.GetManager()}
 		},
+		instance: func(item *inventoryv1.Item) (string, bool) {
+			installed := item.GetPackage()
+			return installed.GetVersion(), !heldOnce[installed.GetManager()]
+		},
 	},
 	inventoryv1.Kind_KIND_SERVICE: {
 		present:  func(item *inventoryv1.Item) bool { return item.GetService() != nil },

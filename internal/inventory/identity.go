@@ -98,7 +98,7 @@ func Singleton(kind inventoryv1.Kind) bool {
 // replay would not land on the row it wrote the first time. The digest covers
 // the kind and the length of every part, so no two identities can be spelled
 // into each other by a name that contains a separator.
-func ItemID(kind inventoryv1.Kind, item *inventoryv1.Item) string {
+func itemID(kind inventoryv1.Kind, item *inventoryv1.Item) string {
 	shape, shaped := shapes[kind]
 	if !shaped {
 		return ""

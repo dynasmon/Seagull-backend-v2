@@ -24,8 +24,8 @@ func TestEveryDeclaredKindIsShaped(t *testing.T) {
 func TestAPackageIsIdentifiedByNameArchitectureAndManager(t *testing.T) {
 	base := packageItem("curl", "8.5.0", "amd64", "dpkg")
 
-	same := ItemID(inventoryv1.Kind_KIND_PACKAGE, packageItem("curl", "8.9.1", "amd64", "dpkg"))
-	if ItemID(inventoryv1.Kind_KIND_PACKAGE, base) != same {
+	same := itemID(inventoryv1.Kind_KIND_PACKAGE, packageItem("curl", "8.9.1", "amd64", "dpkg"))
+	if itemID(inventoryv1.Kind_KIND_PACKAGE, base) != same {
 		t.Error("the same package at two versions is two items, so an upgrade would never replace anything")
 	}
 
@@ -34,7 +34,7 @@ func TestAPackageIsIdentifiedByNameArchitectureAndManager(t *testing.T) {
 		"another architecture": packageItem("curl", "8.5.0", "arm64", "dpkg"),
 		"another manager":      packageItem("curl", "8.5.0", "amd64", "pip"),
 	} {
-		if ItemID(inventoryv1.Kind_KIND_PACKAGE, base) == ItemID(inventoryv1.Kind_KIND_PACKAGE, other) {
+		if itemID(inventoryv1.Kind_KIND_PACKAGE, base) == itemID(inventoryv1.Kind_KIND_PACKAGE, other) {
 			t.Errorf("%s shares an identity with the package it is not", name)
 		}
 	}
@@ -44,8 +44,8 @@ func TestAPackageIsIdentifiedByNameArchitectureAndManager(t *testing.T) {
 // them would let one package's fields spell another's, and an asset would hold
 // one row where it has two packages.
 func TestOnePackageCannotSpellAnother(t *testing.T) {
-	left := ItemID(inventoryv1.Kind_KIND_PACKAGE, packageItem("curl", "1", "amd64", "dpkg"))
-	right := ItemID(inventoryv1.Kind_KIND_PACKAGE, packageItem("curlamd64", "1", "", "dpkg"))
+	left := itemID(inventoryv1.Kind_KIND_PACKAGE, packageItem("curl", "1", "amd64", "dpkg"))
+	right := itemID(inventoryv1.Kind_KIND_PACKAGE, packageItem("curlamd64", "1", "", "dpkg"))
 	if left == right {
 		t.Error("two packages were folded into one identity by concatenation")
 	}
@@ -54,7 +54,7 @@ func TestOnePackageCannotSpellAnother(t *testing.T) {
 func TestAKindOfItsOwnNeverSharesAnIdentity(t *testing.T) {
 	seen := map[string]string{}
 	for kind := range shapes {
-		identifier := ItemID(kind, filled(kind))
+		identifier := itemID(kind, filled(kind))
 		if identifier == "" {
 			t.Errorf("%s has no identity", KindName(kind))
 			continue
@@ -76,20 +76,20 @@ func TestASingletonKeepsOneIdentityWhateverItReports(t *testing.T) {
 		Kernel: &inventoryv1.Kernel{Name: "Linux", Release: "6.8.0-51-generic"},
 	}}
 
-	if ItemID(inventoryv1.Kind_KIND_KERNEL, first) != ItemID(inventoryv1.Kind_KIND_KERNEL, second) {
+	if itemID(inventoryv1.Kind_KIND_KERNEL, first) != itemID(inventoryv1.Kind_KIND_KERNEL, second) {
 		t.Error("a kernel upgrade left the asset holding two kernels")
 	}
 }
 
 func TestAnAccountIsIdentifiedByItsIdentifierAndNotItsName(t *testing.T) {
-	renamed := ItemID(inventoryv1.Kind_KIND_USER, userItem("deploy", "1001"))
-	if ItemID(inventoryv1.Kind_KIND_USER, userItem("deployment", "1001")) != renamed {
+	renamed := itemID(inventoryv1.Kind_KIND_USER, userItem("deploy", "1001"))
+	if itemID(inventoryv1.Kind_KIND_USER, userItem("deployment", "1001")) != renamed {
 		t.Error("a renamed account became a second account")
 	}
-	if ItemID(inventoryv1.Kind_KIND_USER, userItem("deploy", "1002")) == renamed {
+	if itemID(inventoryv1.Kind_KIND_USER, userItem("deploy", "1002")) == renamed {
 		t.Error("a freed name reused by another account shares its identity")
 	}
-	if ItemID(inventoryv1.Kind_KIND_USER, userItem("deploy", "")) == renamed {
+	if itemID(inventoryv1.Kind_KIND_USER, userItem("deploy", "")) == renamed {
 		t.Error("an account with no identifier was folded into one that has one")
 	}
 }
@@ -99,7 +99,7 @@ func TestAnAccountIsIdentifiedByItsIdentifierAndNotItsName(t *testing.T) {
 func TestAReusedProcessIdentifierIsNotTheSameProcess(t *testing.T) {
 	first := processItem(4021, 1_700_000_000)
 	second := processItem(4021, 1_700_000_900)
-	if ItemID(inventoryv1.Kind_KIND_PROCESS, first) == ItemID(inventoryv1.Kind_KIND_PROCESS, second) {
+	if itemID(inventoryv1.Kind_KIND_PROCESS, first) == itemID(inventoryv1.Kind_KIND_PROCESS, second) {
 		t.Error("a recycled pid was read as the process that held it before")
 	}
 }

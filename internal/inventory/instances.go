@@ -24,7 +24,7 @@ func ItemIDs(record *inventoryv1.Record) []string {
 
 	identifiers := make([]string, len(items))
 	for index, item := range items {
-		identifiers[index] = ItemID(kind, item)
+		identifiers[index] = itemID(kind, item)
 	}
 
 	shape := shapes[kind]

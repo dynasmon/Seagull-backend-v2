@@ -97,12 +97,15 @@ func ItemID(kind inventoryv1.Kind, item *inventoryv1.Item) string {
 	if !shaped {
 		return ""
 	}
+	return digestOf(kind, shape.identify(item))
+}
 
+func digestOf(kind inventoryv1.Kind, parts []string) string {
 	digest := sha256.New()
 	var header [8]byte
 	binary.BigEndian.PutUint64(header[:], uint64(kind))
 	digest.Write(header[:])
-	for _, part := range shape.identify(item) {
+	for _, part := range parts {
 		binary.BigEndian.PutUint64(header[:], uint64(len(part)))
 		digest.Write(header[:])
 		digest.Write([]byte(part))

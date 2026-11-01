@@ -14,11 +14,14 @@ const (
 	olderKernel = "5.14.0-687.60.1.el9_8"
 	newerKernel = "5.14.0-687.61.1.el9_8"
 
-	curlUnderDpkg = "a232cc002c99c96b02cdad3672325f0a1d273eafea3b0f62ec289103d37ce1d7"
-	kernelAlone   = "a9e24e281bc79997df13e62c1691392ab7c4c664712fe56eb46c52ecd4cf267d"
-	kernelAtOlder = "9bad24003bc210dbb77c9b2a1204a53fc73606e0cbc1db879e433c746b4b02dd"
-	kernelAtNewer = "32fff66ce2cbaf3b70e183f1600e844f0ecc3a4406ec62f3f2800db86ae58670"
-	uidZeroAlone  = "458b3db87d1aea56f6ad96610eebfead8ea6dad6770b8367989116522298c293"
+	curlUnderDpkg    = "a232cc002c99c96b02cdad3672325f0a1d273eafea3b0f62ec289103d37ce1d7"
+	kernelAlone      = "a9e24e281bc79997df13e62c1691392ab7c4c664712fe56eb46c52ecd4cf267d"
+	kernelAtOlder    = "9bad24003bc210dbb77c9b2a1204a53fc73606e0cbc1db879e433c746b4b02dd"
+	kernelAtNewer    = "32fff66ce2cbaf3b70e183f1600e844f0ecc3a4406ec62f3f2800db86ae58670"
+	uidZeroAlone     = "458b3db87d1aea56f6ad96610eebfead8ea6dad6770b8367989116522298c293"
+	uidZeroAsRoot    = "600fc560f65d8c526445ac945445d514527af912b4c65ac28f7946a2c5acb61b"
+	uidZeroAsToor    = "f20635adb5fafe19f002eb0a996fd35b78566090a8fc4af16e33b50f77e8d60c"
+	accountByItsName = "bb387338218bee71a98acf816aba58ba9cd1badda9de60dca95975c2f7c2136c"
 )
 
 func snapshot(kind inventoryv1.Kind, items ...*inventoryv1.Item) *inventoryv1.Record {
@@ -163,6 +166,28 @@ func TestADeltaOfAManagerThatHoldsOneStillReplaces(t *testing.T) {
 	got := ItemIDs(delta(packages, packageItem("curl", "8.6.0", "amd64", "dpkg")))
 	if !slices.Equal(got, []string{curlUnderDpkg}) {
 		t.Fatalf("a delta names curl %q, so an upgrade would add a row to replace", got)
+	}
+}
+
+func TestEachAccountARecordShowsUnderOneUidIsNamedByItsName(t *testing.T) {
+	got := ItemIDs(snapshot(accounts, userItem("root", "0"), userItem("toor", "0")))
+	if !slices.Equal(got, []string{uidZeroAsRoot, uidZeroAsToor}) {
+		t.Fatalf("two accounts of uid 0 are named %q", got)
+	}
+}
+
+func TestARenamedAccountShownAloneIsTheSameAccount(t *testing.T) {
+	before := ItemIDs(snapshot(accounts, userItem("deploy", "1001")))
+	after := ItemIDs(snapshot(accounts, userItem("deployment", "1001")))
+	if before[0] != after[0] {
+		t.Error("a rename took a new identity")
+	}
+}
+
+func TestAnAccountWithoutAUidIsAlreadyToldApartByItsName(t *testing.T) {
+	alone := ItemIDs(delta(accounts, userItem("deploy", "")))
+	if !slices.Equal(alone, []string{accountByItsName}) {
+		t.Fatalf("an account named by its name is named %q, which names it twice", alone)
 	}
 }
 

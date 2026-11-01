@@ -68,6 +68,10 @@ var shapes = map[inventoryv1.Kind]shape{
 			}
 			return []string{account.GetName()}
 		},
+		instance: func(item *inventoryv1.Item) (string, bool) {
+			account := item.GetUser()
+			return account.GetName(), account.GetUid() != ""
+		},
 	},
 	inventoryv1.Kind_KIND_PROCESS: {
 		present: func(item *inventoryv1.Item) bool { return item.GetProcess() != nil },

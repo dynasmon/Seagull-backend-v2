@@ -14,6 +14,18 @@ import (
 	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 )
 
+const currentAccounts = `
+	SELECT item.user_name, item.user_uid
+	FROM asset_inventory AS item FINAL
+	INNER JOIN (
+		SELECT tenant_id, agent_id, kind, max(scanned_at) AS scanned_at
+		FROM asset_inventory_scans
+		WHERE tenant_id = ?
+		GROUP BY tenant_id, agent_id, kind
+	) AS scan
+	ON item.tenant_id = scan.tenant_id AND item.agent_id = scan.agent_id AND item.kind = scan.kind
+	WHERE item.tenant_id = ? AND item.last_seen >= scan.scanned_at`
+
 // What the database of a Rocky Linux 9 host said once two kernels were installed
 // side by side: one name, one upstream version, two releases.
 const (
@@ -71,6 +83,16 @@ func kernels(versions ...string) []fixtures.Installed {
 		installed[index] = fixtures.Installed{Name: "kernel-core", Version: version, Architecture: "x86_64", Manager: "rpm"}
 	}
 	return installed
+}
+
+func accountRecord(agent string, at time.Time, accounts ...*inventoryv1.User) *inventoryv1.Record {
+	record := fixtures.PackageScan{AgentID: agent, At: at, Packages: []fixtures.Installed{}}.Record()
+	record.Kind = inventoryv1.Kind_KIND_USER
+	record.Collection.Source = "passwd"
+	for _, account := range accounts {
+		record.Items = append(record.Items, &inventoryv1.Item{Body: &inventoryv1.Item_User{User: account}})
+	}
+	return record
 }
 
 func TestTwoInstalledKernelsAreTwoCurrentItems(t *testing.T) {
@@ -152,5 +174,28 @@ func TestADeltaLeavesTheKernelItDidNotNameInstalled(t *testing.T) {
 	want := []string{"kernel-core " + olderKernel, "kernel-core " + newerKernel}
 	if !slices.Equal(held, want) {
 		t.Fatalf("after the delta the asset holds %q, want both kernels", held)
+	}
+}
+
+// A second account of uid 0 is how a backdoor is kept, so a store that folds
+// accounts by uid alone loses sight of the one thing worth seeing.
+func TestTwoAccountsSharingAUidAreTwoCurrentItems(t *testing.T) {
+	address := storeAddress(t)
+	store := migratedInventoryStore(t, address)
+	owner := tenant(t)
+	connection := inspector(t, address)
+	at := time.Date(2026, time.September, 12, 10, 0, 0, 0, time.UTC)
+
+	root := &inventoryv1.User{Name: "root", Uid: "0", Gid: "0", Home: "/root", Shell: "/bin/bash"}
+	toor := &inventoryv1.User{Name: "toor", Uid: "0", Gid: "0", Home: "/root", Shell: "/bin/bash"}
+
+	foldRecord(t, store, owner, accountRecord("web-01", at, root, toor))
+	if held := instances(t, connection, currentAccounts, owner); !slices.Equal(held, []string{"root 0", "toor 0"}) {
+		t.Fatalf("the asset holds %q, want root and toor", held)
+	}
+
+	foldRecord(t, store, owner, accountRecord("web-01", at.Add(time.Hour), root))
+	if held := instances(t, connection, currentAccounts, owner); !slices.Equal(held, []string{"root 0"}) {
+		t.Fatalf("after toor was removed the asset holds %q, want root alone", held)
 	}
 }

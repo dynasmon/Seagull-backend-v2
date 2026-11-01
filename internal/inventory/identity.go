@@ -11,13 +11,15 @@ import (
 )
 
 // What one kind of item is, in the one place a kind is described: whether an
-// asset can hold more than one, which body an item of it carries, and what
-// tells two of them apart within the same asset. A kind the contract declares
-// and this table does not name is refused by the suite.
+// asset can hold more than one, which body an item of it carries, what tells two
+// of them apart within the same asset and, where that can cover several items,
+// what tells those apart and whether it can. A kind the contract declares and
+// this table does not name is refused by the suite.
 type shape struct {
 	singleton bool
 	present   func(*inventoryv1.Item) bool
 	identify  func(*inventoryv1.Item) []string
+	instance  func(*inventoryv1.Item) (string, bool)
 }
 
 var shapes = map[inventoryv1.Kind]shape{
@@ -41,6 +43,10 @@ var shapes = map[inventoryv1.Kind]shape{
 		identify: func(item *inventoryv1.Item) []string {
 			installed := item.GetPackage()
 			return []string{installed.GetName(), installed.GetArchitecture(), installed.GetManager()}
+		},
+		instance: func(item *inventoryv1.Item) (string, bool) {
+			installed := item.GetPackage()
+			return installed.GetVersion(), !heldOnce[installed.GetManager()]
 		},
 	},
 	inventoryv1.Kind_KIND_SERVICE: {
@@ -92,17 +98,20 @@ func Singleton(kind inventoryv1.Kind) bool {
 // replay would not land on the row it wrote the first time. The digest covers
 // the kind and the length of every part, so no two identities can be spelled
 // into each other by a name that contains a separator.
-func ItemID(kind inventoryv1.Kind, item *inventoryv1.Item) string {
+func itemID(kind inventoryv1.Kind, item *inventoryv1.Item) string {
 	shape, shaped := shapes[kind]
 	if !shaped {
 		return ""
 	}
+	return digestOf(kind, shape.identify(item))
+}
 
+func digestOf(kind inventoryv1.Kind, parts []string) string {
 	digest := sha256.New()
 	var header [8]byte
 	binary.BigEndian.PutUint64(header[:], uint64(kind))
 	digest.Write(header[:])
-	for _, part := range shape.identify(item) {
+	for _, part := range parts {
 		binary.BigEndian.PutUint64(header[:], uint64(len(part)))
 		digest.Write(header[:])
 		digest.Write([]byte(part))

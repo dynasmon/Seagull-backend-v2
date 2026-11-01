@@ -64,11 +64,15 @@ func migratedInventoryStore(t *testing.T, address string) *clickhouse.InventoryS
 
 func fold(t *testing.T, store *clickhouse.InventoryStore, owner string, scan fixtures.PackageScan) {
 	t.Helper()
+	foldRecord(t, store, owner, scan.Record())
+}
+
+func foldRecord(t *testing.T, store *clickhouse.InventoryStore, owner string, record *inventoryv1.Record) {
+	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	record := scan.Record()
 	record.Origin.TenantId = owner
 
 	rows := inventorystore.Project(record)

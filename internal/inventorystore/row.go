@@ -218,10 +218,11 @@ func Project(record *inventoryv1.Record) []Row {
 		ProcessStartedAt:   epoch,
 	}
 
+	identifiers := inventory.ItemIDs(record)
 	rows := make([]Row, 0, len(record.GetItems()))
-	for _, item := range record.GetItems() {
+	for index, item := range record.GetItems() {
 		row := common
-		row.ItemID = inventory.ItemID(kind, item)
+		row.ItemID = identifiers[index]
 		fill(&row, item)
 		rows = append(rows, row)
 	}

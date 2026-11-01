@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/encoding/prototext"
@@ -56,6 +57,8 @@ func main() {
 	source := flag.String("source", "203.0.113.10", "address the sample event's session came from")
 	assets := flag.Bool("inventory", false, "send an asset inventory snapshot to the gateway instead of an event batch")
 	packages := flag.Int("packages", 3, "packages the inventory snapshot names, each as dpkg reports one on Debian 12; ten thousand is the most one record carries")
+	kernels := flag.Int("kernels", 0, "kernels the inventory snapshot names instead of its packages, newest first, as an rpm database on Rocky Linux 9 holds them")
+	accounts := flag.String("accounts", "", "accounts of uid 0 the inventory snapshot names, separated by commas")
 	flag.Parse()
 
 	run := func() error { return probe(*endpoint, *registry, *pki, *batchID, *eventID, *outcome, *source) }
@@ -72,7 +75,7 @@ func main() {
 		run = func() error { return enrol(*agentEndpoint, *renewalEndpoint, *pki, *agentID) }
 	}
 	if *assets {
-		run = func() error { return survey(*endpoint, *registry, *pki, *batchID, *packages) }
+		run = func() error { return survey(*endpoint, *registry, *pki, *batchID, *packages, *kernels, *accounts) }
 	}
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "devprobe: %v\n", err)
@@ -536,7 +539,7 @@ func probe(endpoint, registry, pki, batchID, eventID, outcome, source string) er
 	return offer(client, endpoint+ingest.EventsPath, sample(batchID, eventID, outcome, source), registry != "")
 }
 
-func survey(endpoint, registry, pki, batchID string, packages int) error {
+func survey(endpoint, registry, pki, batchID string, packages, kernels int, accounts string) error {
 	client, err := speaker(pki, "agent")
 	if err != nil {
 		return err
@@ -546,7 +549,7 @@ func survey(endpoint, registry, pki, batchID string, packages int) error {
 			return err
 		}
 	}
-	return offer(client, endpoint+ingest.InventoryPath, scanned(batchID, packages), registry != "")
+	return offer(client, endpoint+ingest.InventoryPath, scanned(batchID, packages, kernels, accounts), registry != "")
 }
 
 func offer(client *http.Client, url string, batch proto.Message, registered bool) error {
@@ -689,7 +692,7 @@ func sample(batchID, eventID, outcome, source string) *ingestv1.EventBatch {
 	}
 }
 
-func scanned(batchID string, packages int) *inventoryv1.RecordBatch {
+func scanned(batchID string, packages, kernels int, accounts string) *inventoryv1.RecordBatch {
 	now := timestamppb.New(time.Now().UTC())
 	origin := &eventv1.Origin{
 		AgentId: "ignored-by-the-gateway",
@@ -728,8 +731,19 @@ func scanned(batchID string, packages int) *inventoryv1.RecordBatch {
 			InstalledAt:  now,
 		}}})
 	}
+	if kernels > 0 {
+		listed = listed[:0]
+	}
+	for index := range kernels {
+		listed = append(listed, &inventoryv1.Item{Body: &inventoryv1.Item_Package{Package: &inventoryv1.Package{
+			Name:         "kernel-core",
+			Version:      fmt.Sprintf("5.14.0-687.%d.1.el9_8", 61-index),
+			Architecture: "x86_64",
+			Manager:      "rpm",
+		}}})
+	}
 
-	return &inventoryv1.RecordBatch{
+	batch := &inventoryv1.RecordBatch{
 		BatchId:         batchID,
 		ProtocolVersion: protocol.Version,
 		Records: []*inventoryv1.Record{
@@ -745,6 +759,16 @@ func scanned(batchID string, packages int) *inventoryv1.RecordBatch {
 				}}}),
 		},
 	}
+	if accounts != "" {
+		var named []*inventoryv1.Item
+		for _, name := range strings.Split(accounts, ",") {
+			named = append(named, &inventoryv1.Item{Body: &inventoryv1.Item_User{User: &inventoryv1.User{
+				Name: name, Uid: "0", Gid: "0", Home: "/root", Shell: "/bin/bash",
+			}}})
+		}
+		batch.Records = append(batch.Records, record(batchID+".accounts", inventoryv1.Kind_KIND_USER, named...))
+	}
+	return batch
 }
 
 func keyAndRequest(agentID string) (*ecdsa.PrivateKey, []byte, error) {

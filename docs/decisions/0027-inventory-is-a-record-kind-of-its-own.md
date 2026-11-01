@@ -4,6 +4,12 @@
 > record is bounded by the bytes it encodes to as well as by its items — 4 MiB
 > once the gateway stamped it, refused for good above that — and its topic
 > carries it; a snapshot stays one record rather than arriving in parts.
+> Amended by [ADR 43](0043-a-record-keeps-apart-what-one-identity-would-fold.md):
+> what identifies a package and an account is unchanged, and a record that shows
+> several under one identity names each by its version or its name as well, so two
+> kernels are two items and two accounts of uid 0 are two accounts. An item is named
+> through its record, and "two rows would leave an asset holding both" below is true
+> of a delta only: a snapshot retires what it stops naming.
 
 ## Context
 

@@ -1,0 +1,23 @@
+name: tags
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  signature:
+    name: release tag signature
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: fetch the tag as it was pushed, and main, which names who may sign it
+        run: git fetch --force --no-tags origin "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME" +refs/heads/main:refs/remotes/origin/main
+      - name: refuse a tag no signer of main signed
+        run: make verify-tag TAG="$GITHUB_REF_NAME"

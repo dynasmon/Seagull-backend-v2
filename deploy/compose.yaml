@@ -70,7 +70,7 @@ networks:
 
 services:
   redpanda:
-    image: redpandadata/redpanda:v24.2.20
+    image: redpandadata/redpanda:v26.2.6@sha256:8b1076e0d61bfceb66594dc01536427ce0b529f8ead35fdab9763ab6085891ce
     command:
       - redpanda
       - start
@@ -111,7 +111,7 @@ services:
     <<: *hardening
 
   clickhouse:
-    image: clickhouse/clickhouse-server:24.8
+    image: clickhouse/clickhouse-server:26.8.36.3@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7
     networks: [backbone]
     environment:
       CLICKHOUSE_DB: ${SEAGULL_EVENT_STORE_DATABASE:-seagull}
@@ -155,7 +155,7 @@ services:
   # The relational store. Alerts are mutable, low volume and owned by a person,
   # which is the opposite of the analytical workload beside it.
   postgres:
-    image: postgres:16.4-alpine
+    image: postgres:16.15-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     networks: [backbone]
     environment:
       POSTGRES_DB: ${SEAGULL_ALERT_STORE_DATABASE:-seagull}

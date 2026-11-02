@@ -1,5 +1,10 @@
 # 34. A stored event is named by the agent that sent it, and a sorting key changes by a rebuild the migrator carries out
 
+> Amended by [ADR 44](0044-main-takes-what-every-job-passed-and-a-release-line-moves-by-a-decision.md):
+> step 3 below holds for a synchronous insert. ClickHouse 26.2 made inserts asynchronous by
+> default, and a queued insert holds no table, so every connection now states
+> `async_insert = 0`.
+
 ## Context
 
 [ADR 12](0012-storage-is-owned-per-workload.md) made `security_events` a

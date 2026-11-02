@@ -25,10 +25,30 @@ services:
   # Runs the operational alert rules against recorded series and touches nothing
   # else, so it has no network and starts only when asked for.
   promtool:
-    image: prom/prometheus:v3.5.0
+    image: prom/prometheus:v3.13.5@sha256:aafa9d694e6a883c02db516d9f6e5b84e14195f49a2a6456a4cca815edda72b9
     profiles: [alerts]
     entrypoint: [promtool]
     network_mode: none
     working_dir: /rules
     volumes:
       - ./prometheus:/rules:ro
+
+  # Reads images and writes nothing but its own database, so it runs as the
+  # caller, holds no capability and joins neither the backbone nor the stores.
+  # It reads a saved archive rather than the Docker socket, which would be root.
+  grype:
+    image: anchore/grype:v0.121.0-nonroot@sha256:f9b9a8edd0cbf3a120a150d92d9e98b2d93db297c94766dc60173afc096e714d
+    profiles: [scan]
+    user: ${SEAGULL_RUNTIME_USER:-65532:65532}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    environment:
+      GRYPE_DB_CACHE_DIR: /database
+      GRYPE_CHECK_FOR_APP_UPDATE: "false"
+    volumes:
+      - ../dist/images:/images:ro
+      - ../dist/grype:/database

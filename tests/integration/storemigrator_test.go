@@ -385,8 +385,9 @@ func TestEventsWrittenWhileTheStoreIsRebuiltAreKept(t *testing.T) {
 	store := writerIn(t, address, database)
 	writing, stop := context.WithCancel(context.Background())
 	var (
-		stored []eventstore.Row
-		group  sync.WaitGroup
+		stored  []eventstore.Row
+		refused []error
+		group   sync.WaitGroup
 	)
 	group.Add(1)
 	t.Cleanup(func() { stop(); group.Wait() })
@@ -396,7 +397,9 @@ func TestEventsWrittenWhileTheStoreIsRebuiltAreKept(t *testing.T) {
 			row := sent(fmt.Sprintf("web-%02d", index%7), fmt.Sprintf("bbbbbbbb-0000-4000-8000-%012d", index),
 				time.Now().UTC().Truncate(time.Millisecond))
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			if err := store.Store(ctx, []eventstore.Row{row}); err == nil {
+			if err := store.Store(ctx, []eventstore.Row{row}); err != nil {
+				refused = append(refused, err)
+			} else {
 				stored = append(stored, row)
 			}
 			cancel()
@@ -411,6 +414,10 @@ func TestEventsWrittenWhileTheStoreIsRebuiltAreKept(t *testing.T) {
 	rebuilt(t, connection)
 	if len(stored) == 0 {
 		t.Fatal("nothing was written while the store was rebuilt")
+	}
+	if len(refused) > 0 {
+		t.Errorf("%d of %d writes were refused while the store was rebuilt, the first: %v",
+			len(refused), len(refused)+len(stored), refused[0])
 	}
 	got := held(t, connection, "security_events", true)
 	for _, name := range named(stored...) {

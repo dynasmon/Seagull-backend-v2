@@ -351,6 +351,7 @@ func connect(configuration Config) (driver.Conn, error) {
 			}{{Name: "seagull", Version: buildinfo.Read().Version}},
 		},
 		Compression:  &clickhouse.Compression{Method: clickhouse.CompressionZSTD},
+		Settings:     clickhouse.Settings{"async_insert": 0},
 		DialTimeout:  configuration.Timeout,
 		MaxOpenConns: 2,
 		MaxIdleConns: 1,

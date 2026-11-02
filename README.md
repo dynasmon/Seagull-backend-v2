@@ -1,7 +1,7 @@
 # Seagull v2
 
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
-[![Backend](https://img.shields.io/badge/backend-Go%201.25-00ADD8.svg)](go.mod)
+[![Backend](https://img.shields.io/badge/backend-Go%201.26-00ADD8.svg)](go.mod)
 [![Backbone](https://img.shields.io/badge/backbone-Redpanda-E7407A.svg)](deploy/compose.yaml)
 [![Store](https://img.shields.io/badge/store-ClickHouse-FFCC01.svg)](internal/clickhouse)
 [![Contracts](https://img.shields.io/badge/contracts-Seagull--contracts-00A6A6.svg)](https://github.com/dynasmon/Seagull-contracts)
@@ -500,7 +500,7 @@ so an unsupported rule imported cleanly, compiled and quietly found nothing.
 
 ## Getting started
 
-Requires Docker with the Compose plugin and Go 1.25.
+Requires Docker with the Compose plugin and Go 1.26.
 
 ```bash
 make dev-pki    # mint a development CA, server, agent and caller certificates
@@ -601,6 +601,9 @@ make test-integration  # the data plane against a live Redpanda and ClickHouse
 make test-load         # the ingest load scenarios against a live Redpanda
 make test-alerts       # the operational alert rules against recorded series
 make bench             # the hot path, one core, no infrastructure
+make vulncheck         # refuse a known vulnerability in any package this module links
+make gosec             # refuse what the static security rules find
+make scan-images       # refuse a built image holding a fixable high or critical vulnerability
 ```
 
 The integration suite includes the failure scenarios the guarantees rest on: a
@@ -615,6 +618,18 @@ is what the rest of it is a decomposition of. The load suite fails a run when
 the gateway allocates more than 8 KB per admitted event, when a slow backbone
 produces an acknowledgement the backbone never received, or when a shutdown
 drops a batch it had already answered for.
+
+## Delivery
+
+`main` takes a change only through a pull request every job passed, and nobody can
+bypass that: the rules are declared in [`.github/rulesets`](.github/rulesets) and
+compared with what GitHub enforces every day. Every image is named by its digest,
+every action by its commit, and Go by the one line in `go.mod`. Dependabot proposes
+updates after a week, and only patches within a release line, because a line moves
+by a decision: ClickHouse turned asynchronous inserts on in a release whose whole
+test suite still passed, which cost the writers two thirds of their throughput.
+A release tag is signed, and a tag no signer of `main` signed fails
+`make verify-tag`. [ADR 44](docs/decisions/0044-main-takes-what-every-job-passed-and-a-release-line-moves-by-a-decision.md).
 
 ## Further reading
 

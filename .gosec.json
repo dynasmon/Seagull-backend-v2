@@ -1,0 +1,6 @@
+{
+  "exclude-rules": [
+    { "path": "tools/.*", "rules": ["G301", "G304", "G306"] },
+    { "path": "internal/(control|hunt)/http\\.go", "rules": ["G705"] }
+  ]
+}

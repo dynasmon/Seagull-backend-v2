@@ -25,7 +25,7 @@ services:
   # Runs the operational alert rules against recorded series and touches nothing
   # else, so it has no network and starts only when asked for.
   promtool:
-    image: prom/prometheus:v3.5.0
+    image: prom/prometheus:v3.13.5@sha256:aafa9d694e6a883c02db516d9f6e5b84e14195f49a2a6456a4cca815edda72b9
     profiles: [alerts]
     entrypoint: [promtool]
     network_mode: none

@@ -8,6 +8,7 @@ COMPOSE_TEST := docker compose -f deploy/compose.yaml -f deploy/compose.test.yam
 COMPONENTS := ingest-gateway control-api query-api analysis-engine event-writer detection-writer alert-writer inventory-projector status-projector assessment-projector advisory-importer advisory-writer store-migrator backbone-migrator control-migrator
 VERSION ?= dev
 REVISION ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+REPOSITORY ?= dynasmon/Seagull-backend-v2
 GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.9.0
 GOSEC := github.com/securego/gosec/v2/cmd/gosec@v2.30.0
 SCANNER := SEAGULL_RUNTIME_USER="$$(id -u):$$(id -g)" $(COMPOSE_TEST) run --rm --no-deps grype
@@ -17,7 +18,7 @@ TEST_ALERT_STORE ?= 127.0.0.1:15432
 
 .PHONY: help fmt fmt-check vet mod-check lint test test-race test-integration \
         test-load test-alerts bench build images scan-images scan-infrastructure \
-        vulncheck gosec verify-tag dev-pki up down logs clean verify
+        vulncheck gosec verify-tag check-protection dev-pki up down logs clean verify
 
 help:
 	@echo "fmt                 format the module"
@@ -41,6 +42,7 @@ help:
 	@echo "vulncheck           refuse a known vulnerability in any package this module links"
 	@echo "gosec               refuse what the static security rules find"
 	@echo "verify-tag          refuse TAG unless a signer main names signed it"
+	@echo "check-protection    compare the rules GitHub enforces on main with the ones declared here"
 	@echo "verify              the full gate: lint, mod-check, tests"
 
 fmt:
@@ -137,6 +139,14 @@ verify-tag:
 	@git show origin/main:.github/allowed_signers > $(DIST)/allowed_signers
 	@git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=$(DIST)/allowed_signers -c gpg.minTrustLevel=fully \
 	  verify-tag "$(TAG)"
+
+check-protection:
+	@summary='{rules: (map(.type) | unique), checks: ([.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | sort)}'; \
+	declared="$$(jq -c ".rules | $$summary" .github/rulesets/main.json)"; \
+	enforced="$$(gh api repos/$(REPOSITORY)/rules/branches/main | jq -c "$$summary")"; \
+	if [ "$$declared" != "$$enforced" ]; then \
+	  echo "main is declared as $$declared"; echo "and enforced as   $$enforced"; exit 1; \
+	fi; echo "main is enforced as declared"
 
 dev-pki:
 	$(GO) run ./tools/devpki -directory $(PKI)

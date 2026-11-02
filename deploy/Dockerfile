@@ -1,6 +1,4 @@
-ARG GO_VERSION=1.26.10
-
-FROM golang:${GO_VERSION}-bookworm AS build
+FROM golang:1.26.10-trixie@sha256:a050dcceee6eb9bf110151662dfac7662f3bec40927c7dee48731e3d92083d42 AS build
 
 WORKDIR /src
 

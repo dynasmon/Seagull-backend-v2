@@ -8,12 +8,14 @@ COMPOSE_TEST := docker compose -f deploy/compose.yaml -f deploy/compose.test.yam
 COMPONENTS := ingest-gateway control-api query-api analysis-engine event-writer detection-writer alert-writer inventory-projector status-projector assessment-projector advisory-importer advisory-writer store-migrator backbone-migrator control-migrator
 VERSION ?= dev
 REVISION ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.9.0
+GOSEC := github.com/securego/gosec/v2/cmd/gosec@v2.30.0
 TEST_BROKERS ?= 127.0.0.1:19092
 TEST_EVENT_STORE ?= 127.0.0.1:19000
 TEST_ALERT_STORE ?= 127.0.0.1:15432
 
 .PHONY: help fmt fmt-check vet mod-check lint test test-race test-integration \
-        test-load test-alerts bench build images vulncheck dev-pki up down logs clean verify
+        test-load test-alerts bench build images vulncheck gosec dev-pki up down logs clean verify
 
 help:
 	@echo "fmt                 format the module"
@@ -32,7 +34,8 @@ help:
 	@echo "dev-pki             mint development certificates into $(PKI)"
 	@echo "up                  start the local stack"
 	@echo "down                stop the local stack and drop its volumes"
-	@echo "vulncheck           scan reachable dependencies"
+	@echo "vulncheck           refuse a known vulnerability in any package this module links"
+	@echo "gosec               refuse what the static security rules find"
 	@echo "verify              the full gate: lint, mod-check, tests"
 
 fmt:
@@ -101,7 +104,10 @@ images:
 	done
 
 vulncheck:
-	$(GO) run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+	$(GO) run $(GOVULNCHECK) -scan package ./...
+
+gosec:
+	$(GO) run $(GOSEC) -quiet -conf .gosec.json -exclude=G115 ./...
 
 dev-pki:
 	$(GO) run ./tools/devpki -directory $(PKI)

@@ -70,7 +70,7 @@ networks:
 
 services:
   redpanda:
-    image: redpandadata/redpanda:v24.2.20
+    image: redpandadata/redpanda:v26.2.6@sha256:8b1076e0d61bfceb66594dc01536427ce0b529f8ead35fdab9763ab6085891ce
     command:
       - redpanda
       - start

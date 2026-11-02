@@ -10,12 +10,14 @@ VERSION ?= dev
 REVISION ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.9.0
 GOSEC := github.com/securego/gosec/v2/cmd/gosec@v2.30.0
+SCANNER := SEAGULL_RUNTIME_USER="$$(id -u):$$(id -g)" $(COMPOSE_TEST) run --rm --no-deps grype
 TEST_BROKERS ?= 127.0.0.1:19092
 TEST_EVENT_STORE ?= 127.0.0.1:19000
 TEST_ALERT_STORE ?= 127.0.0.1:15432
 
 .PHONY: help fmt fmt-check vet mod-check lint test test-race test-integration \
-        test-load test-alerts bench build images vulncheck gosec dev-pki up down logs clean verify
+        test-load test-alerts bench build images scan-images scan-infrastructure \
+        vulncheck gosec dev-pki up down logs clean verify
 
 help:
 	@echo "fmt                 format the module"
@@ -31,6 +33,8 @@ help:
 	@echo "bench               run the hot-path benchmarks"
 	@echo "build               build every component into $(DIST)"
 	@echo "images              build the container image of every component"
+	@echo "scan-images         refuse a built image holding a fixable high or critical vulnerability"
+	@echo "scan-infrastructure report what is known of the images this project runs and builds on"
 	@echo "dev-pki             mint development certificates into $(PKI)"
 	@echo "up                  start the local stack"
 	@echo "down                stop the local stack and drop its volumes"
@@ -101,6 +105,23 @@ images:
 	    --build-arg VERSION=$(VERSION) \
 	    --build-arg REVISION=$(REVISION) \
 	    -t seagull-v2/$$component:$(VERSION) . || exit 1; \
+	done
+
+scan-images:
+	@mkdir -p $(DIST)/images $(DIST)/grype
+	@for component in $(COMPONENTS); do \
+	  echo "scanning $$component"; \
+	  docker save -o $(DIST)/images/$$component.tar seagull-v2/$$component:$(VERSION) || exit 1; \
+	  $(SCANNER) docker-archive:/images/$$component.tar --fail-on high --only-fixed || exit 1; \
+	  rm -f $(DIST)/images/$$component.tar; \
+	done
+
+scan-infrastructure:
+	@mkdir -p $(DIST)/images $(DIST)/grype
+	@for image in $$($(COMPOSE_TEST) --profile alerts --profile scan config --images | grep '@sha256:'; \
+	  sed -n 's/^FROM \([^ ]*@sha256:[0-9a-f]*\).*/\1/p' deploy/Dockerfile); do \
+	  echo "scanning $$image"; \
+	  $(SCANNER) registry:$$image --only-fixed || exit 1; \
 	done
 
 vulncheck:

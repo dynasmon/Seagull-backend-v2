@@ -1,0 +1,68 @@
+version: 2
+
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: fix
+    ignore:
+      - dependency-name: github.com/dynasmon/Seagull-contracts
+    groups:
+      modules:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: fix
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # A release line moves by a decision: its defaults are compared first, and the
+  # backbone climbs one feature release at a time. Only patches arrive here.
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: fix
+    ignore:
+      - dependency-name: golang
+        update-types: [version-update:semver-major, version-update:semver-minor]
+
+  - package-ecosystem: docker-compose
+    directory: /deploy
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: fix
+    ignore:
+      - dependency-name: redpandadata/redpanda
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: clickhouse/clickhouse-server
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: prom/prometheus
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: postgres
+        update-types: [version-update:semver-major]
+    groups:
+      images:
+        patterns: ["*"]

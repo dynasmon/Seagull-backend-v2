@@ -17,7 +17,7 @@ TEST_ALERT_STORE ?= 127.0.0.1:15432
 
 .PHONY: help fmt fmt-check vet mod-check lint test test-race test-integration \
         test-load test-alerts bench build images scan-images scan-infrastructure \
-        vulncheck gosec dev-pki up down logs clean verify
+        vulncheck gosec verify-tag dev-pki up down logs clean verify
 
 help:
 	@echo "fmt                 format the module"
@@ -40,6 +40,7 @@ help:
 	@echo "down                stop the local stack and drop its volumes"
 	@echo "vulncheck           refuse a known vulnerability in any package this module links"
 	@echo "gosec               refuse what the static security rules find"
+	@echo "verify-tag          refuse TAG unless a signer main names signed it"
 	@echo "verify              the full gate: lint, mod-check, tests"
 
 fmt:
@@ -129,6 +130,13 @@ vulncheck:
 
 gosec:
 	$(GO) run $(GOSEC) -quiet -conf .gosec.json -exclude=G115 ./...
+
+verify-tag:
+	@test -n "$(TAG)" || { echo "name the tag: make verify-tag TAG=v1.2.3"; exit 1; }
+	@mkdir -p $(DIST)
+	@git show origin/main:.github/allowed_signers > $(DIST)/allowed_signers
+	@git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=$(DIST)/allowed_signers -c gpg.minTrustLevel=fully \
+	  verify-tag "$(TAG)"
 
 dev-pki:
 	$(GO) run ./tools/devpki -directory $(PKI)

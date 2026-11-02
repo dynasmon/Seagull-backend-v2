@@ -1,0 +1,59 @@
+name: scheduled
+
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduled-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  vulnerabilities:
+    name: what is known today of what is linked
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: refuse a known vulnerability in any package this module links
+        run: make vulncheck
+
+  rules:
+    name: what the security rules find today
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: refuse what the static security rules find
+        run: make gosec
+
+  images:
+    name: what is known today of every image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: build every component image
+        run: make images VERSION=scheduled REVISION=${{ github.sha }}
+      - name: refuse a component image holding a fixable high or critical vulnerability
+        run: make scan-images VERSION=scheduled
+      - name: report what is known of the images the platform runs and builds on
+        run: make scan-infrastructure

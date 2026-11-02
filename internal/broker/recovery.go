@@ -156,7 +156,7 @@ func (c *Consumer) answerable(held int32) {
 		return
 	}
 	if _, err := c.recovery(held); err != nil {
-		c.refuse(err)
+		_ = c.refuse(err)
 	}
 }
 

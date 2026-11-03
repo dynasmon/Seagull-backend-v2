@@ -1,5 +1,10 @@
 # 44. Main takes only what every job passed, what runs is named by its digest, and a release line moves by a decision
 
+> Corrected: `backward compatibility` found no break in contracts #28. It compared the
+> merge GitHub made of #28 with `main` as it stood when the job ran, which already held
+> #29's `Stage.agent_id`, so a field that merge never had read as deleted. The job now
+> compares a pull request with the first parent of its merge, the `main` it was made from.
+
 ## Context
 
 Three public repositories make one security product, and until now nothing stopped

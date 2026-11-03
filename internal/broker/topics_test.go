@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentstatus"
 	"github.com/dynasmon/Seagull-backend-v2/internal/assessment"
@@ -231,16 +231,18 @@ func TestAReshapedTopicIsRefusedRatherThanAdopted(t *testing.T) {
 	}
 }
 
-func detailOf(partitions int32, replicas int) kadm.TopicDetail {
-	details := make(kadm.PartitionDetails, partitions)
+func detailOf(partitions int32, replicas int) kmsg.MetadataResponseTopic {
+	held := kmsg.NewMetadataResponseTopic()
+	held.Topic = kmsg.StringPtr("security.events.raw")
 	for partition := range partitions {
-		brokers := make([]int32, replicas)
+		one := kmsg.NewMetadataResponseTopicPartition()
+		one.Partition = partition
 		for replica := range replicas {
-			brokers[replica] = int32(replica)
+			one.Replicas = append(one.Replicas, int32(replica))
 		}
-		details[partition] = kadm.PartitionDetail{Partition: partition, Replicas: brokers}
+		held.Partitions = append(held.Partitions, one)
 	}
-	return kadm.TopicDetail{Topic: "security.events.raw", Partitions: details}
+	return held
 }
 
 // A ruleset is kept for as long as the platform runs, because a detection made

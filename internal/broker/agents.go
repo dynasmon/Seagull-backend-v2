@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
 
@@ -64,5 +63,5 @@ func (a *Agents) Ping(ctx context.Context) error {
 func (a *Agents) Close() { a.client.Close() }
 
 func (a *Agents) VerifyTopics(ctx context.Context, topics ...Topic) ([]string, error) {
-	return verifyTopics(ctx, kadm.NewClient(a.client), topics)
+	return verifyTopics(ctx, a.client, topics)
 }

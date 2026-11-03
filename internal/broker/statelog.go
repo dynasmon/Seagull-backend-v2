@@ -121,5 +121,5 @@ func (l *StateLog) Ping(ctx context.Context) error {
 func (l *StateLog) Close() { l.client.Close() }
 
 func (l *StateLog) VerifyTopics(ctx context.Context, topics ...Topic) ([]string, error) {
-	return verifyTopics(ctx, kadm.NewClient(l.client), topics)
+	return verifyTopics(ctx, l.client, topics)
 }

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
 
@@ -114,5 +113,5 @@ func (r *Rulesets) Ping(ctx context.Context) error {
 func (r *Rulesets) Close() { r.client.Close() }
 
 func (r *Rulesets) VerifyTopics(ctx context.Context, topics ...Topic) ([]string, error) {
-	return verifyTopics(ctx, kadm.NewClient(r.client), topics)
+	return verifyTopics(ctx, r.client, topics)
 }

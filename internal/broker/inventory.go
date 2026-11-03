@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
 
@@ -79,5 +78,5 @@ func (i *Inventory) Ping(ctx context.Context) error {
 func (i *Inventory) Close() { i.client.Close() }
 
 func (i *Inventory) VerifyTopics(ctx context.Context, topics ...Topic) ([]string, error) {
-	return verifyTopics(ctx, kadm.NewClient(i.client), topics)
+	return verifyTopics(ctx, i.client, topics)
 }

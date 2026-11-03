@@ -229,6 +229,11 @@ func TestAReshapedTopicIsRefusedRatherThanAdopted(t *testing.T) {
 	if err := shapeAgrees(declaration, detailOf(12, 3)); err == nil {
 		t.Error("a topic replicated three times was accepted against a declaration of one")
 	}
+	moving := detailOf(12, 1)
+	moving.Partitions[7].Replicas = append(moving.Partitions[7].Replicas, 1, 2)
+	if err := shapeAgrees(declaration, moving); err == nil {
+		t.Error("a topic with one partition replicated three times was accepted against a declaration of one")
+	}
 }
 
 func detailOf(partitions int32, replicas int) kmsg.MetadataResponseTopic {

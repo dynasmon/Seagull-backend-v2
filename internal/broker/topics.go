@@ -11,6 +11,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentstatus"
 	"github.com/dynasmon/Seagull-backend-v2/internal/assessment"
@@ -392,11 +393,11 @@ func (p *Provisioner) Apply(ctx context.Context, topics []Topic) ([]string, erro
 	}
 
 	for _, topic := range topics {
-		detail, err := describe(ctx, p.admin, topic.Name)
+		held, err := describe(ctx, p.client, topic.Name)
 		if err != nil {
 			return changed, err
 		}
-		if detail == nil {
+		if held == nil {
 			created, err := create(ctx, p.admin, topic)
 			if err != nil {
 				return changed, err
@@ -405,11 +406,11 @@ func (p *Provisioner) Apply(ctx context.Context, topics []Topic) ([]string, erro
 				changed = append(changed, "created "+topic.Name)
 				continue
 			}
-			if detail, err = describe(ctx, p.admin, topic.Name); err != nil || detail == nil {
+			if held, err = describe(ctx, p.client, topic.Name); err != nil || held == nil {
 				return changed, fmt.Errorf("%s was created by another run and cannot be read back", topic.Name)
 			}
 		}
-		if err := shapeAgrees(topic, *detail); err != nil {
+		if err := shapeAgrees(topic, *held); err != nil {
 			return changed, err
 		}
 		converged, err := converge(ctx, p.admin, topic)
@@ -431,34 +432,35 @@ func (p *Provisioner) Ping(ctx context.Context) error {
 func (p *Provisioner) Close() { p.client.Close() }
 
 func (p *Publisher) VerifyTopics(ctx context.Context, topics ...Topic) ([]string, error) {
-	return verifyTopics(ctx, kadm.NewClient(p.client), topics)
+	return verifyTopics(ctx, p.client, topics)
 }
 
 func (c *Consumer) VerifyTopics(ctx context.Context, topics ...Topic) ([]string, error) {
-	return verifyTopics(ctx, kadm.NewClient(c.client), topics)
+	return verifyTopics(ctx, c.client, topics)
 }
 
 func (d *Detections) VerifyTopics(ctx context.Context, topics ...Topic) ([]string, error) {
-	return verifyTopics(ctx, kadm.NewClient(d.client), topics)
+	return verifyTopics(ctx, d.client, topics)
 }
 
 // Readiness reaches the brokers, not the topics. A missing topic surfaces only
 // when an agent's first batch fails, and a reshaped one never surfaces at all:
 // one partition instead of twelve works, and only ends per-agent ordering.
-func verifyTopics(ctx context.Context, admin *kadm.Client, topics []Topic) ([]string, error) {
+func verifyTopics(ctx context.Context, client *kgo.Client, topics []Topic) ([]string, error) {
+	admin := kadm.NewClient(client)
 	var drift, broken []string
 	for _, topic := range topics {
 		if err := topic.Validate(); err != nil {
 			return nil, err
 		}
-		detail, err := describe(ctx, admin, topic.Name)
+		held, err := describe(ctx, client, topic.Name)
 		if err != nil {
 			return nil, err
 		}
-		if detail == nil {
+		if held == nil {
 			return nil, fmt.Errorf("the backbone has no topic %s — run backbone-migrator", topic.Name)
 		}
-		if err := shapeAgrees(topic, *detail); err != nil {
+		if err := shapeAgrees(topic, *held); err != nil {
 			return nil, err
 		}
 		diverged, err := diverging(ctx, admin, topic)
@@ -480,19 +482,28 @@ func verifyTopics(ctx context.Context, admin *kadm.Client, topics []Topic) ([]st
 	return drift, nil
 }
 
-func describe(ctx context.Context, admin *kadm.Client, name string) (*kadm.TopicDetail, error) {
-	listed, err := admin.ListTopics(ctx, name)
+func describe(ctx context.Context, client *kgo.Client, name string) (*kmsg.MetadataResponseTopic, error) {
+	asked := kmsg.NewMetadataRequestTopic()
+	asked.Topic = kmsg.StringPtr(name)
+	request := kmsg.NewPtrMetadataRequest()
+	request.Topics = append(request.Topics, asked)
+	answer, err := request.RequestWith(ctx, client)
 	if err != nil {
 		return nil, fmt.Errorf("read the backbone topology: %w", err)
 	}
-	detail, found := listed[name]
-	switch {
-	case !found, errors.Is(detail.Err, kerr.UnknownTopicOrPartition):
-		return nil, nil
-	case detail.Err != nil:
-		return nil, fmt.Errorf("read %s: %w", name, detail.Err)
+	for index, held := range answer.Topics {
+		if held.Topic == nil || *held.Topic != name {
+			continue
+		}
+		switch err := kerr.ErrorForCode(held.ErrorCode); {
+		case errors.Is(err, kerr.UnknownTopicOrPartition):
+			return nil, nil
+		case err != nil:
+			return nil, fmt.Errorf("read %s: %w", name, err)
+		}
+		return &answer.Topics[index], nil
 	}
-	return &detail, nil
+	return nil, nil
 }
 
 func create(ctx context.Context, admin *kadm.Client, topic Topic) (bool, error) {
@@ -518,16 +529,18 @@ func create(ctx context.Context, admin *kadm.Client, topic Topic) (bool, error) 
 	return true, nil
 }
 
-func shapeAgrees(topic Topic, detail kadm.TopicDetail) error {
-	if partitions := int32(len(detail.Partitions)); partitions != topic.Partitions {
+func shapeAgrees(topic Topic, held kmsg.MetadataResponseTopic) error {
+	if partitions := int32(len(held.Partitions)); partitions != topic.Partitions {
 		return fmt.Errorf(
 			"%s has %d partitions and the topology declares %d: repartitioning ends per-agent ordering and is an explicit operation",
 			topic.Name, partitions, topic.Partitions)
 	}
-	if replicas := int16(detail.Partitions.NumReplicas()); replicas != topic.Replicas {
-		return fmt.Errorf(
-			"%s keeps %d replicas and the topology declares %d: changing it needs a partition reassignment",
-			topic.Name, replicas, topic.Replicas)
+	for _, partition := range held.Partitions {
+		if replicas := int16(len(partition.Replicas)); replicas != topic.Replicas {
+			return fmt.Errorf(
+				"%s keeps %d replicas and the topology declares %d: changing it needs a partition reassignment",
+				topic.Name, replicas, topic.Replicas)
+		}
 	}
 	return nil
 }

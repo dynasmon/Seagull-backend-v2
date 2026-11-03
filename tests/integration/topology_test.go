@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -244,6 +245,51 @@ func TestTheMigratorRefusesToRepartitionAnExistingTopic(t *testing.T) {
 
 	if partitions, _ := shapeOf(t, addresses, topic.Name); partitions != 3 {
 		t.Fatalf("the refused run left %s with %d partitions", topic.Name, partitions)
+	}
+}
+
+func TestMigratorsStartedTogetherCreateATopicOnceAndEachFinishes(t *testing.T) {
+	addresses := brokers(t)
+	topic := declaredTopic(t, addresses, 6, 48*time.Hour)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	migrators := make([]*broker.Provisioner, 8)
+	for index := range migrators {
+		migrators[index] = provisioner(t, addresses)
+		if err := migrators[index].Ping(ctx); err != nil {
+			t.Fatalf("reach the backbone: %v", err)
+		}
+	}
+
+	start := make(chan struct{})
+	reported := make([][]string, len(migrators))
+	refused := make([]error, len(migrators))
+	var running sync.WaitGroup
+	for index, migrator := range migrators {
+		running.Go(func() {
+			<-start
+			reported[index], refused[index] = migrator.Apply(ctx, []broker.Topic{topic})
+		})
+	}
+	close(start)
+	running.Wait()
+
+	created := 0
+	for index, err := range refused {
+		if err != nil {
+			t.Errorf("a migrator started beside %d others did not finish: %v", len(migrators)-1, err)
+		}
+		if slices.Contains(reported[index], "created "+topic.Name) {
+			created++
+		}
+	}
+	if created != 1 {
+		t.Fatalf("%s was reported created %d times by %d migrators", topic.Name, created, len(migrators))
+	}
+	if partitions, _ := shapeOf(t, addresses, topic.Name); partitions != topic.Partitions {
+		t.Fatalf("%s holds %d partitions after the race, want %d", topic.Name, partitions, topic.Partitions)
 	}
 }
 

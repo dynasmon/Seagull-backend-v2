@@ -1,5 +1,9 @@
 # 26. An agent sends into the tenant it was registered in, and an agent the registry never named is not admitted
 
+> Amended by [ADR 47](0047-the-query-plane-decides-by-the-policy-and-a-certificate-organisation-authorises-nothing.md):
+> the reader side changed too: a hunt reads the tenants the policy grants its
+> caller, never those its certificate names.
+
 > Corrected: the estate this expected exists. An operator registers a
 > `Seagull-agent-v2` installation and has the platform sign its certificate before
 > its service starts. An installation the registry never named keeps its batches in

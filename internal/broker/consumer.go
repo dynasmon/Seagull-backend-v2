@@ -73,6 +73,7 @@ type Record struct {
 	Offset    int64
 	Key       []byte
 	Value     []byte
+	Timestamp time.Time
 }
 
 type Deliver func(ctx context.Context, records []Record) error
@@ -246,6 +247,7 @@ func collect(fetches kgo.Fetches) []Record {
 			Offset:    record.Offset,
 			Key:       record.Key,
 			Value:     record.Value,
+			Timestamp: record.Timestamp,
 		})
 	})
 	return records

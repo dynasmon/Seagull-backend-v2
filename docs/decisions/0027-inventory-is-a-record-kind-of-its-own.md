@@ -11,6 +11,14 @@
 > through its record, and "two rows would leave an asset holding both" below is true
 > of a delta only: a snapshot retires what it stops naming.
 
+> Corrected: `Seagull-agent-v2` sends inventory, so "No agent" below no longer
+> holds. Its `inventory` module takes complete snapshots of the operating system,
+> kernel, hardware, dpkg packages, systemd services, network interfaces and local
+> accounts, and its `processes` module of the running processes: one record per
+> kind, sent again when the kind changed or once the platform's copy is a day old.
+> It sends no delta, and `tools/devprobe -inventory` still walks the path on
+> `make up`.
+
 ## Context
 
 [ADR 12](0012-storage-is-owned-per-workload.md) decided two classes of data and

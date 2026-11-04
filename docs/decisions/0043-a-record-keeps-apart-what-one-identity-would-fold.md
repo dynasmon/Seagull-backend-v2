@@ -1,4 +1,4 @@
-# 43. A record keeps apart what one identity would fold
+# 43. A record keeps apart what one identity would fold: two versions a manager holds side by side are two items, and so are two accounts of one uid
 
 ## Context
 

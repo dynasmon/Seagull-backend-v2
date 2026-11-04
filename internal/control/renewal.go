@@ -51,7 +51,14 @@ func NewRenewalHandler(options ServerOptions) (http.Handler, error) {
 		return nil, err
 	}
 
+	described, tag, err := server.agentDescriptor()
+	if err != nil {
+		return nil, err
+	}
+
 	mux := http.NewServeMux()
+	mux.Handle(http.MethodGet+" "+DescriptorPath,
+		options.Instrumentation.Handle("agent_descriptor", server.describeToAgents(described, tag)))
 	mux.Handle(http.MethodPost+" "+RenewalPath,
 		options.Instrumentation.Handle("agent_certificate_renew", server.renewCertificate()))
 	mux.Handle(http.MethodGet+" "+PolicyPath,

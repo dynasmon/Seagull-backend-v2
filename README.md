@@ -97,7 +97,11 @@ cases do not hold, or that is heavier than the topic carries, is ever written.
 The query plane holds the only read connection to the store, consumes no topic
 and writes nothing. A query is a scope, a window and a question, and only the
 last comes from the caller: the tenants a caller may read are derived rather
-than requested, so a question cannot widen its own answer.
+than requested, so a question cannot widen its own answer. They are the tenants
+the control plane's policy grants the subject of the caller's certificate, which
+must also be granted `events:read` or `detections:read` for what it asks; what
+the certificate's organisation names authorises nothing
+([ADR 47](docs/decisions/0047-the-query-plane-decides-by-the-policy-and-a-certificate-organisation-authorises-nothing.md)).
 
 ### Access control
 

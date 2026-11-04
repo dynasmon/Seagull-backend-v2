@@ -6,6 +6,11 @@
 > layout of a position is signed with it, so a cursor of another layout is
 > refused.
 
+> Amended by [ADR 47](0047-the-query-plane-decides-by-the-policy-and-a-certificate-organisation-authorises-nothing.md):
+> the scope is the tenants the control plane's policy grants the certificate's
+> subject, with `events:read` or `detections:read` for the dataset asked; the
+> certificate's organisation authorises nothing.
+
 ## Context
 
 [ADR 12](0012-storage-is-owned-per-workload.md) made the store a materialisation

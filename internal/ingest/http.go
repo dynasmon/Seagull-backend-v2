@@ -288,15 +288,16 @@ func (h *Handler) refuseHeavy(ctx context.Context, w http.ResponseWriter, body i
 }
 
 func (h *Handler) refuseUnadmitted(w http.ResponseWriter, agentID string) {
-	if !h.roster.Knows(agentID) {
-		h.stream.rejected(CodeNotRegistered)
-		refuse(w, http.StatusForbidden, CodeNotRegistered,
-			"the platform has no registration for this agent, so its telemetry belongs to no tenant", "", -1)
-		return
+	code, detail := unadmitted(h.roster, agentID)
+	h.stream.rejected(code)
+	refuse(w, http.StatusForbidden, code, detail, "", -1)
+}
+
+func unadmitted(roster Roster, agentID string) (string, string) {
+	if !roster.Knows(agentID) {
+		return CodeNotRegistered, "the platform has no registration for this agent, so its telemetry belongs to no tenant"
 	}
-	h.stream.rejected(CodeNotAdmitted)
-	refuse(w, http.StatusForbidden, CodeNotAdmitted,
-		"the platform no longer admits telemetry from this agent", "", -1)
+	return CodeNotAdmitted, "the platform no longer admits telemetry from this agent"
 }
 
 func (h *Handler) refuseAdmission(ctx context.Context, w http.ResponseWriter, carried outcome, err error) {

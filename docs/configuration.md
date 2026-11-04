@@ -67,6 +67,11 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_ASSESSMENT_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock an assessment may be |
 | `SEAGULL_ASSESSMENT_MAX_AGE` | `720h` | how old an assessment may be and still be admitted |
 
+What bounds a batch or a record above — the body, the records a batch carries,
+and how old and how far ahead a record may be, per stream — is served to agents as
+it is in force, at `GET /v1/descriptor` on this listener, with the contract's own
+bounds on a record and its items ([ADR 45](decisions/0045-a-listener-tells-an-agent-what-it-serves-and-decides-nothing-by-it.md)).
+
 The batch ceiling is measured, not chosen. No event in a batch is published until
 every event in it has been decoded and validated, so a larger batch is a larger
 body that must be fully materialised before one byte reaches the backbone. At a
@@ -74,10 +79,11 @@ thousand the gateway sustains 727k events/s with a p99 of 139ms; at ten thousand
 it sustains 300k with a p99 of three seconds. `make test-load` is where those
 numbers come from.
 
-The gateway serves four routes on one listener: `POST /v1/events`,
-`POST /v1/inventory`, `POST /v1/status` and `POST /v1/assessments`. They stand
-behind the same certificate, the same registry answer, the same rate limiter and
-the same capacity bound, so a collector cannot buy a second budget by sending
+The gateway serves four streams on one listener: `POST /v1/events`,
+`POST /v1/inventory`, `POST /v1/status` and `POST /v1/assessments`, and
+`GET /v1/descriptor`, which describes them. They stand behind the same
+certificate, the same registry answer, the same rate limiter and the same
+capacity bound, so a collector cannot buy a second budget by sending
 inventory, a status report or an assessment. Each record is weighed as the
 gateway publishes it, once its identity, tenant and reception are stamped: an
 inventory record may encode to 4 MiB, and an event, a status report or an

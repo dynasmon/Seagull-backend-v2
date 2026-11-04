@@ -1,5 +1,11 @@
 # 25. The platform signs the identity it binds, and an agent renews with the certificate it is replacing
 
+> Corrected: `Seagull-agent-v2` is no longer empty, and it enrolls through the
+> operator-mediated path below. An installation draws its own key and prints a
+> request, an operator has the platform sign it, and the agent imports the answer
+> and renews on its own from then on. Bootstrap tokens are still not built: an
+> agent that enrolls itself is BE-054, which the agent's AG-006 waits for.
+
 ## Context
 
 [ADR 2](0002-identity-comes-from-the-certificate.md) settled that an agent is

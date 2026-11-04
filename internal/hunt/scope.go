@@ -7,13 +7,22 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/authz"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 )
 
 var (
 	ErrNoClientCertificate = errors.New("the connection carries no verified client certificate")
-	ErrNoScope             = errors.New("the client certificate names no tenant this caller may read")
+	ErrNotGranted          = errors.New("the policy grants this caller nothing")
+	ErrNotPermitted        = errors.New("the policy does not let this caller read this dataset")
+	ErrNoScope             = errors.New("the policy names no tenant this caller may read")
 )
+
+// Who may ask the query plane what: the policy the control plane decides by,
+// which a pinned *authz.Policy answers.
+type Grants interface {
+	Grant(subject string) (authz.Grant, error)
+}
 
 // The tenants a caller may read. It is not a filter the caller supplies and not
 // a predicate a query may relax: a query cannot be compiled without one, and the
@@ -45,11 +54,29 @@ func (s Scope) Tenants() []string { return slices.Clone(s.tenants) }
 
 func (s Scope) Empty() bool { return len(s.tenants) == 0 }
 
-// The caller is named by the certificate's common name and the tenants it may
-// read are named by its organisation, so authorisation arrives from the
-// certificate authority rather than from the request: a header is chosen by
-// whoever sends it. When there is an identity service to ask, the scope comes
-// from there instead and nothing below this line changes.
+// The caller is the common name of its verified certificate, and everything
+// else is the policy's: whether it may read the dataset, and in which tenants.
+// What a certificate's organisation names authorises nothing, so removing a
+// subject from the policy removes its answers whatever certificate it holds.
+func Authorize(state *tls.ConnectionState, grants Grants, dataset Dataset) (Scope, error) {
+	caller := CallerFromConnection(state)
+	if caller == "" {
+		return Scope{}, ErrNoClientCertificate
+	}
+	grant, err := grants.Grant(caller)
+	if err != nil {
+		return Scope{}, fmt.Errorf("%w: %q", ErrNotGranted, caller)
+	}
+	permission := authz.Permission{Resource: authz.Events, Action: authz.Read}
+	if dataset == Detections {
+		permission.Resource = authz.Detections
+	}
+	if !grant.Allows(permission) {
+		return Scope{}, fmt.Errorf("%w: it needs %s", ErrNotPermitted, permission)
+	}
+	return NewScope(grant.Tenants())
+}
+
 func ScopeFromConnection(state *tls.ConnectionState) (Scope, error) {
 	if state == nil || len(state.VerifiedChains) == 0 || len(state.VerifiedChains[0]) == 0 {
 		return Scope{}, ErrNoClientCertificate
@@ -68,8 +95,6 @@ func ScopeFromCertificate(certificate *x509.Certificate) (Scope, error) {
 	return scope, nil
 }
 
-// Who asked, for the log and for nothing else: a caller is not a tenant and
-// never narrows what the scope already decided.
 func CallerFromConnection(state *tls.ConnectionState) string {
 	if state == nil || len(state.VerifiedChains) == 0 || len(state.VerifiedChains[0]) == 0 {
 		return ""

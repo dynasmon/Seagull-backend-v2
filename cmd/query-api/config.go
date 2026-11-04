@@ -22,6 +22,7 @@ type configuration struct {
 	certificateFile string
 	keyFile         string
 	callerCAFile    string
+	policyFile      string
 
 	readTimeout  time.Duration
 	writeTimeout time.Duration
@@ -51,6 +52,7 @@ func load(parser *config.Parser) (configuration, error) {
 		certificateFile: parser.RequiredFilePath("SEAGULL_QUERY_API_TLS_CERT"),
 		keyFile:         parser.RequiredFilePath("SEAGULL_QUERY_API_TLS_KEY"),
 		callerCAFile:    parser.RequiredFilePath("SEAGULL_QUERY_API_CALLER_CA"),
+		policyFile:      parser.RequiredFilePath("SEAGULL_QUERY_API_POLICY"),
 
 		readTimeout:  parser.Duration("SEAGULL_QUERY_API_READ_TIMEOUT", 15*time.Second, time.Second, 5*time.Minute),
 		writeTimeout: parser.Duration("SEAGULL_QUERY_API_WRITE_TIMEOUT", 60*time.Second, time.Second, 10*time.Minute),

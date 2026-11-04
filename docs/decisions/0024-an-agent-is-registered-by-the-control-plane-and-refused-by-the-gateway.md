@@ -1,5 +1,11 @@
 # 24. An agent is registered by the control plane, and the gateway is told when to stop honouring it
 
+> Amended by [ADR 25](0025-the-platform-signs-the-identity-it-binds.md): the
+> control plane signs the certificate it binds, in one act, at
+> `POST /v1/agents/{id}/certificate`, and an agent renews its own on a listener in
+> the agent trust domain. Binding a certificate another authority issued remains,
+> at `POST /v1/agents/{id}/identity`.
+
 > Amended by [ADR 26](0026-an-agent-sends-into-the-tenant-it-was-registered-in.md).
 > An agent the roster has never heard of is no longer admitted: the roster now
 > also says which tenant an agent's telemetry belongs to, and an agent the

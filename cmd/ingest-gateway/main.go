@@ -9,7 +9,6 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
-	"github.com/dynasmon/Seagull-backend-v2/internal/platform/ratelimit"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/run"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/tlsx"
@@ -116,113 +115,20 @@ func gateway(ctx context.Context) error {
 	}
 	defer admitted.close()
 
-	instruments := ingest.NewMetrics(platform.Metrics())
-	admitter, err := ingest.NewAdmitter(publisher, settings.admissionRules, instruments)
+	served, err := routes(settings, sinks{events: publisher, inventory: assets, status: reports, assessments: findings},
+		admitted.held, platform.Metrics(), platform.Logger())
 	if err != nil {
 		return err
 	}
-
-	inventoryInstruments := ingest.NewInventoryMetrics(platform.Metrics())
-	inventoryAdmitter, err := ingest.NewInventoryAdmitter(assets, settings.inventoryRules, inventoryInstruments)
-	if err != nil {
-		return err
-	}
-
-	statusInstruments := ingest.NewStatusMetrics(platform.Metrics())
-	statusAdmitter, err := ingest.NewStatusAdmitter(reports, settings.statusRules, statusInstruments)
-	if err != nil {
-		return err
-	}
-
-	assessmentInstruments := ingest.NewAssessmentMetrics(platform.Metrics())
-	assessmentAdmitter, err := ingest.NewAssessmentAdmitter(findings, settings.assessments, assessmentInstruments)
-	if err != nil {
-		return err
-	}
-
-	capacity, err := ingest.NewCapacity(settings.maxInflightBytes, settings.maxInflightRequests)
-	if err != nil {
-		return err
-	}
-	ingest.ObserveCapacity(platform.Metrics(), capacity)
-
-	// One limiter and one capacity across every route: what an agent may spend
-	// and what the process may hold are bounded per agent and per process, not
-	// per kind of record, or a collector would buy a second budget by sending an
-	// inventory batch or a status report.
-	var limiter *ratelimit.Limiter
-	if settings.rateLimited {
-		limiter = ratelimit.NewLimiter(settings.ratePerSecond, settings.rateBurst, settings.trackedAgents)
-	} else {
-		platform.Logger().Warn("rate_limit_off", slog.String("setting", rateSetting))
-	}
-
-	handler, err := ingest.NewHandler(ingest.HandlerOptions{
-		Admitter:       admitter,
-		Roster:         admitted.held,
-		Limiter:        limiter,
-		Capacity:       capacity,
-		Metrics:        instruments,
-		MaxBodyBytes:   settings.maxBodyBytes,
-		PublishTimeout: settings.publishTimeout,
-	})
-	if err != nil {
-		return err
-	}
-
-	inventoryHandler, err := ingest.NewInventoryHandler(ingest.InventoryHandlerOptions{
-		Admitter:       inventoryAdmitter,
-		Roster:         admitted.held,
-		Limiter:        limiter,
-		Capacity:       capacity,
-		Metrics:        inventoryInstruments,
-		MaxBodyBytes:   settings.maxBodyBytes,
-		PublishTimeout: settings.publishTimeout,
-	})
-	if err != nil {
-		return err
-	}
-
-	statusHandler, err := ingest.NewStatusHandler(ingest.StatusHandlerOptions{
-		Admitter:       statusAdmitter,
-		Roster:         admitted.held,
-		Limiter:        limiter,
-		Capacity:       capacity,
-		Metrics:        statusInstruments,
-		MaxBodyBytes:   settings.maxBodyBytes,
-		PublishTimeout: settings.publishTimeout,
-	})
-	if err != nil {
-		return err
-	}
-
-	assessmentHandler, err := ingest.NewAssessmentHandler(ingest.AssessmentHandlerOptions{
-		Admitter:       assessmentAdmitter,
-		Roster:         admitted.held,
-		Limiter:        limiter,
-		Capacity:       capacity,
-		Metrics:        assessmentInstruments,
-		MaxBodyBytes:   settings.maxBodyBytes,
-		PublishTimeout: settings.publishTimeout,
-	})
-	if err != nil {
-		return err
-	}
-
-	listener, err := ingest.NewServer(ingest.ServerOptions{
-		Address:         settings.address,
-		TLS:             mutual,
-		Handler:         handler,
-		Inventory:       inventoryHandler,
-		Status:          statusHandler,
-		Assessments:     assessmentHandler,
-		Instrumentation: platform.HTTP(),
-		Logger:          platform.Logger(),
-		ReadTimeout:     settings.readTimeout,
-		WriteTimeout:    settings.writeTimeout,
-		IdleTimeout:     settings.idleTimeout,
-		ShutdownTimeout: platform.ShutdownTimeout(),
-	})
+	served.Address = settings.address
+	served.TLS = mutual
+	served.Instrumentation = platform.HTTP()
+	served.Logger = platform.Logger()
+	served.ReadTimeout = settings.readTimeout
+	served.WriteTimeout = settings.writeTimeout
+	served.IdleTimeout = settings.idleTimeout
+	served.ShutdownTimeout = platform.ShutdownTimeout()
+	listener, err := ingest.NewServer(served)
 	if err != nil {
 		return err
 	}

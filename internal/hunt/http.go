@@ -26,9 +26,11 @@ const (
 
 	CodeAtCapacity  = "query_plane_at_capacity"
 	CodeRateLimited = "rate_limited"
+	CodeForbidden   = "forbidden"
 )
 
 type HandlerOptions struct {
+	Grants       Grants
 	Hunter       *Hunter
 	Capacity     *Capacity
 	Limiter      *ratelimit.Limiter
@@ -37,6 +39,7 @@ type HandlerOptions struct {
 }
 
 type Handler struct {
+	grants       Grants
 	hunter       *Hunter
 	capacity     *Capacity
 	limiter      *ratelimit.Limiter
@@ -47,6 +50,8 @@ type Handler struct {
 
 func NewHandler(dataset Dataset, options HandlerOptions) (*Handler, error) {
 	switch {
+	case options.Grants == nil:
+		return nil, errors.New("the hunt handler needs the policy that says who may ask what")
 	case options.Hunter == nil:
 		return nil, errors.New("the hunt handler needs a hunter")
 	case options.MaxBodyBytes <= 0:
@@ -59,6 +64,7 @@ func NewHandler(dataset Dataset, options HandlerOptions) (*Handler, error) {
 		return nil, errors.New("the hunt handler needs metrics")
 	}
 	return &Handler{
+		grants:       options.Grants,
 		hunter:       options.Hunter,
 		capacity:     options.Capacity,
 		limiter:      options.Limiter,
@@ -75,9 +81,14 @@ func NewHandler(dataset Dataset, options HandlerOptions) (*Handler, error) {
 // and a ceiling on the whole of it, so one analyst asking expensive questions
 // cannot become every analyst waiting.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	scope, err := ScopeFromConnection(r.TLS)
+	scope, err := Authorize(r.TLS, h.grants, h.dataset)
 	if err != nil {
-		refuse(w, http.StatusForbidden, CodeUnscoped, err.Error(), "")
+		code := CodeUnscoped
+		if errors.Is(err, ErrNotGranted) || errors.Is(err, ErrNotPermitted) {
+			code = CodeForbidden
+		}
+		h.metrics.refused(h.dataset, code)
+		refuse(w, http.StatusForbidden, code, err.Error(), "")
 		return
 	}
 

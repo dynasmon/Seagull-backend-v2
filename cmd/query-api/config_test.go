@@ -13,7 +13,7 @@ func environment(t *testing.T, set map[string]string) *config.Parser {
 	t.Helper()
 
 	values := map[string]string{"SEAGULL_QUERY_STORE_ADDRESS": "127.0.0.1:9000"}
-	for _, key := range []string{"SEAGULL_QUERY_API_TLS_CERT", "SEAGULL_QUERY_API_TLS_KEY", "SEAGULL_QUERY_API_CALLER_CA"} {
+	for _, key := range []string{"SEAGULL_QUERY_API_TLS_CERT", "SEAGULL_QUERY_API_TLS_KEY", "SEAGULL_QUERY_API_CALLER_CA", "SEAGULL_QUERY_API_POLICY"} {
 		path := filepath.Join(t.TempDir(), key)
 		if err := os.WriteFile(path, nil, 0o600); err != nil {
 			t.Fatalf("write %s: %v", key, err)

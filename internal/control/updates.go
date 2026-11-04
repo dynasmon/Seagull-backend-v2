@@ -14,6 +14,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentupdate"
 	"github.com/dynasmon/Seagull-backend-v2/internal/authz"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/httpx"
 	updatev1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/update/v1"
 )
 
@@ -295,7 +296,7 @@ func (s *Server) serveUpdate() http.Handler {
 		tag := strconv.Quote(agentupdate.Digest(offer))
 		w.Header().Set("ETag", tag)
 		w.Header().Set("Cache-Control", "no-store")
-		if unchanged(r.Header.Get("If-None-Match"), tag) {
+		if httpx.Unchanged(r, tag) {
 			s.metrics.updateOffered("unchanged")
 			w.WriteHeader(http.StatusNotModified)
 			return

@@ -673,6 +673,7 @@ check is held to the contract before the policy is accepted; see
 | `SEAGULL_QUERY_API_TLS_CERT` | required | server certificate |
 | `SEAGULL_QUERY_API_TLS_KEY` | required | server private key |
 | `SEAGULL_QUERY_API_CALLER_CA` | required | the authority that signs a caller's certificate |
+| `SEAGULL_QUERY_API_POLICY` | required | the policy `control-api` decides by, which decides every hunt: the subject of the caller's certificate, `events:read` or `detections:read`, and the tenants it may read; read at startup |
 | `SEAGULL_QUERY_API_WINDOW` | `720h` | the widest stretch of time a query may ask about |
 | `SEAGULL_QUERY_API_PAGE` | `50` | records in a page when the caller asks for no limit |
 | `SEAGULL_QUERY_API_PAGE_MAX` | `500` | ceiling on the page a caller may ask for |

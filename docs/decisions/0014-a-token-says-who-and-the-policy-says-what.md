@@ -1,5 +1,9 @@
 # 14. A token says who, and the policy says what
 
+> Amended by [ADR 47](0047-the-query-plane-decides-by-the-policy-and-a-certificate-organisation-authorises-nothing.md):
+> the query plane pins the same policy and decides every hunt by it, so tenancy
+> is read from one place by one path; `hunt.Scope` no longer reads the certificate.
+
 ## Context
 
 [ADR 2](0002-identity-comes-from-the-certificate.md) settled how the platform

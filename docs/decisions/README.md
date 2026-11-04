@@ -48,4 +48,5 @@ rediscovered by reading the code.
 - [42. A tenant's detection state is carved out of the store and timed by its own partitions](0042-a-tenants-detection-state-is-carved-out-of-the-store-and-timed-by-its-own-partitions.md)
 - [43. A record keeps apart what one identity would fold: two versions a manager holds side by side are two items, and so are two accounts of one uid](0043-a-record-keeps-apart-what-one-identity-would-fold.md)
 - [44. Main takes only what every job passed, what runs is named by its digest, and a release line moves by a decision](0044-main-takes-what-every-job-passed-and-a-release-line-moves-by-a-decision.md)
+- [45. A listener tells an agent what it serves, from what it runs with, and decides nothing by it](0045-a-listener-tells-an-agent-what-it-serves-and-decides-nothing-by-it.md)
 - [47. The query plane decides by the policy the control plane decides by, and a certificate's organisation authorises nothing](0047-the-query-plane-decides-by-the-policy-and-a-certificate-organisation-authorises-nothing.md)

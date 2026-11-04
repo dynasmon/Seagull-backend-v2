@@ -28,6 +28,7 @@ func holding(t *testing.T, dataset hunt.Dataset, source hunt.Source, held *hunt.
 	t.Helper()
 
 	built, err := hunt.NewHandler(dataset, hunt.HandlerOptions{
+		Grants:       policy(t),
 		Hunter:       hunter(t, source),
 		Capacity:     held,
 		Metrics:      hunt.NewMetrics(metrics.New("test")),
@@ -194,10 +195,14 @@ func TestAStoreThatRanOutOfTimeSaysSo(t *testing.T) {
 }
 
 func TestAHandlerNeedsAHunterACeilingAndADataset(t *testing.T) {
-	if _, err := hunt.NewHandler(hunt.Events, hunt.HandlerOptions{MaxBodyBytes: 1024, Capacity: capacity(t, 1)}); err == nil {
+	if _, err := hunt.NewHandler(hunt.Events, hunt.HandlerOptions{Hunter: hunter(t, &store{}), MaxBodyBytes: 1024, Capacity: capacity(t, 1),
+		Metrics: hunt.NewMetrics(metrics.New("test"))}); err == nil {
+		t.Error("a handler without the policy that says who may ask was built")
+	}
+	if _, err := hunt.NewHandler(hunt.Events, hunt.HandlerOptions{Grants: policy(t), MaxBodyBytes: 1024, Capacity: capacity(t, 1)}); err == nil {
 		t.Error("a handler was built with nothing to ask")
 	}
-	if _, err := hunt.NewHandler("alerts", hunt.HandlerOptions{Hunter: hunter(t, &store{}), MaxBodyBytes: 1024, Capacity: capacity(t, 1)}); err == nil {
+	if _, err := hunt.NewHandler("alerts", hunt.HandlerOptions{Grants: policy(t), Hunter: hunter(t, &store{}), MaxBodyBytes: 1024, Capacity: capacity(t, 1)}); err == nil {
 		t.Error("a handler was built for a dataset no store holds")
 	}
 }
@@ -260,5 +265,24 @@ func TestAnUnscopedCallerSpendsNoCapacity(t *testing.T) {
 	}
 	if held.Held() != 0 {
 		t.Errorf("an unauthenticated caller held %d questions", held.Held())
+	}
+}
+
+// The permission is the dataset's: a caller who may read detections and not
+// events is refused events before its query is read, and never reaches the store.
+func TestACallerThePolicyDoesNotLetReadTheDatasetIsRefusedBeforeTheQueryIsRead(t *testing.T) {
+	source := &store{events: []*eventv1.Event{stored("aaaa", day)}}
+	request := query(t, asked(nil))
+	request.TLS = verified(certificate("auditor-01", []string{"acme"}))
+	recorder := httptest.NewRecorder()
+	handler(t, hunt.Events, source).ServeHTTP(recorder, request)
+
+	var refusal huntv1.Refusal
+	answered(t, recorder, &refusal)
+	if recorder.Code != http.StatusForbidden || refusal.GetCode() != hunt.CodeForbidden {
+		t.Fatalf("a caller without events:read was answered %d %q", recorder.Code, refusal.GetCode())
+	}
+	if len(source.seen.Scope().Tenants()) != 0 {
+		t.Error("a caller the policy does not let read events reached the store")
 	}
 }

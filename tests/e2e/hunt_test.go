@@ -7,7 +7,9 @@ import (
 	"crypto/x509"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/hunt"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/tlsx"
+	"github.com/dynasmon/Seagull-backend-v2/internal/policyfile"
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	huntv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/hunt/v1"
@@ -37,6 +40,26 @@ func (a *answering) Detections(_ context.Context, query hunt.Query) ([]*detectio
 	a.asked = query
 	return nil, nil
 }
+
+const queryPolicy = `schema_version: 1
+roles:
+  - name: analyst
+    description: reads what was observed and what was decided
+    permissions: [events:read, detections:read]
+  - name: responder
+    description: works alerts without hunting
+    permissions: [alerts:read]
+bindings:
+  - subject: analyst-01
+    roles: [analyst]
+    tenants: [acme]
+  - subject: analyst-03
+    roles: [analyst]
+    tenants: [globex]
+  - subject: responder-01
+    roles: [responder]
+    tenants: [acme]
+`
 
 type queryPlane struct {
 	address   string
@@ -72,6 +95,12 @@ func startQueryAPI(t *testing.T, store *answering) *queryPlane {
 	mutual, err := material.MutualServerConfig()
 	if err != nil {
 		t.Fatalf("build mutual tls: %v", err)
+	}
+
+	write(t, filepath.Join(directory, "policy.yml"), []byte(queryPolicy))
+	policy, err := policyfile.Policy(os.DirFS(directory), "policy.yml")
+	if err != nil {
+		t.Fatalf("read the policy: %v", err)
 	}
 
 	platform, err := service.New(service.Config{
@@ -116,6 +145,7 @@ func startQueryAPI(t *testing.T, store *answering) *queryPlane {
 	listener, err := hunt.NewServer(hunt.ServerOptions{
 		Address:         "127.0.0.1:0",
 		TLS:             mutual,
+		Grants:          policy,
 		Hunter:          hunter,
 		Capacity:        held,
 		Metrics:         instruments,
@@ -261,26 +291,37 @@ func TestACallerWithNoCertificateNeverReachesTheStore(t *testing.T) {
 	}
 }
 
-// A certificate the authority signed but which names no tenant authorises
-// nothing. An empty scope reads nothing rather than everything.
-func TestACallerAuthorisedForNothingReadsNothing(t *testing.T) {
+// A certificate the authority signed authorises nothing by itself: a subject the
+// policy does not name, or names without a permission to hunt, is refused
+// whatever tenants its certificate's organisation lists.
+func TestACallerThePolicyDoesNotGrantAHuntReadsNothing(t *testing.T) {
+	for _, caller := range []string{"analyst-02", "responder-01"} {
+		store := &answering{}
+		plane := startQueryAPI(t, store)
+
+		response, body := plane.ask(t, plane.caller(t, caller, []string{"acme"}), &huntv1.Query{Range: lastHour()})
+		var refusal huntv1.Refusal
+		if err := proto.Unmarshal(body, &refusal); err != nil || response.StatusCode != http.StatusForbidden || refusal.GetCode() != hunt.CodeForbidden {
+			t.Fatalf("%s, its certificate naming acme, was answered %d %q (%v)", caller, response.StatusCode, refusal.GetCode(), err)
+		}
+		if store.asked.Limit() != 0 {
+			t.Errorf("%s reached the store", caller)
+		}
+	}
+}
+
+// The tenants a hunt reads are the policy's: a certificate issued naming acme to
+// a subject the policy grants globex reads globex and nothing else.
+func TestAHuntReadsTheTenantsThePolicyGrantsAndNotThoseItsCertificateNames(t *testing.T) {
 	store := &answering{}
 	plane := startQueryAPI(t, store)
 
-	response, body := plane.ask(t, plane.caller(t, "analyst-02", nil), &huntv1.Query{Range: lastHour()})
-	if response.StatusCode != http.StatusForbidden {
-		t.Fatalf("a caller with no tenant was answered with %d: %s", response.StatusCode, body)
+	response, body := plane.ask(t, plane.caller(t, "analyst-03", []string{"acme"}), &huntv1.Query{Range: lastHour()})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("a caller the policy lets hunt was answered %d: %s", response.StatusCode, body)
 	}
-
-	var refusal huntv1.Refusal
-	if err := proto.Unmarshal(body, &refusal); err != nil {
-		t.Fatalf("read the refusal: %v", err)
-	}
-	if refusal.GetCode() != hunt.CodeUnscoped {
-		t.Errorf("refused as %q", refusal.GetCode())
-	}
-	if store.asked.Limit() != 0 {
-		t.Error("a caller authorised for nothing reached the store")
+	if tenants := store.asked.Scope().Tenants(); !slices.Equal(tenants, []string{"globex"}) {
+		t.Fatalf("the hunt read %v, and the policy grants globex alone", tenants)
 	}
 }
 

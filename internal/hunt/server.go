@@ -14,6 +14,7 @@ import (
 type ServerOptions struct {
 	Address         string
 	TLS             *tls.Config
+	Grants          Grants
 	Hunter          *Hunter
 	Capacity        *Capacity
 	Limiter         *ratelimit.Limiter
@@ -52,6 +53,7 @@ func NewServer(options ServerOptions) (*httpx.Server, error) {
 	}
 	for _, entry := range routes {
 		handler, err := NewHandler(entry.route, HandlerOptions{
+			Grants:       options.Grants,
 			Hunter:       options.Hunter,
 			Capacity:     options.Capacity,
 			Limiter:      options.Limiter,

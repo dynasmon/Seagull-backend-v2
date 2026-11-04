@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/clickhouse"
 	"github.com/dynasmon/Seagull-backend-v2/internal/hunt"
@@ -14,6 +15,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/run"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/tlsx"
+	"github.com/dynasmon/Seagull-backend-v2/internal/policyfile"
 )
 
 func main() {
@@ -56,6 +58,20 @@ func queryAPI(ctx context.Context) error {
 		return err
 	}
 
+	directory, name := filepath.Split(settings.policyFile)
+	if directory == "" {
+		directory = "."
+	}
+	policy, err := policyfile.Policy(os.DirFS(directory), name)
+	if err != nil {
+		return err
+	}
+	platform.Logger().Info("policy_pinned",
+		slog.String("policy", policy.ID().String()),
+		slog.Int("roles", policy.Roles()),
+		slog.Int("bindings", policy.Bindings()),
+	)
+
 	key, err := cursorKey(settings)
 	if err != nil {
 		return err
@@ -96,6 +112,7 @@ func queryAPI(ctx context.Context) error {
 	listener, err := hunt.NewServer(hunt.ServerOptions{
 		Address:         settings.address,
 		TLS:             transport,
+		Grants:          policy,
 		Hunter:          hunter,
 		Capacity:        capacity,
 		Limiter:         callers,
@@ -132,9 +149,9 @@ func queryAPI(ctx context.Context) error {
 	return platform.Run(ctx)
 }
 
-// The scope a query is answered within comes from the caller's certificate, so
-// this listener has no plaintext mode and no mode without a client certificate
-// authority: without one there is nobody to be authorised as.
+// The caller a query is authorised as is named by its certificate, so this
+// listener has no plaintext mode and no mode without a client certificate
+// authority: without one there is nobody for the policy to grant anything to.
 func mutualTransport(settings configuration) (*tls.Config, error) {
 	material, err := tlsx.NewMaterial(settings.certificateFile, settings.keyFile, settings.callerCAFile)
 	if err != nil {

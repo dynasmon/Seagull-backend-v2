@@ -2,7 +2,6 @@ package hunt
 
 import (
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"slices"
@@ -75,24 +74,6 @@ func Authorize(state *tls.ConnectionState, grants Grants, dataset Dataset) (Scop
 		return Scope{}, fmt.Errorf("%w: it needs %s", ErrNotPermitted, permission)
 	}
 	return NewScope(grant.Tenants())
-}
-
-func ScopeFromConnection(state *tls.ConnectionState) (Scope, error) {
-	if state == nil || len(state.VerifiedChains) == 0 || len(state.VerifiedChains[0]) == 0 {
-		return Scope{}, ErrNoClientCertificate
-	}
-	return ScopeFromCertificate(state.VerifiedChains[0][0])
-}
-
-func ScopeFromCertificate(certificate *x509.Certificate) (Scope, error) {
-	if certificate == nil {
-		return Scope{}, ErrNoClientCertificate
-	}
-	scope, err := NewScope(certificate.Subject.Organization)
-	if err != nil {
-		return Scope{}, fmt.Errorf("%w: %s", ErrNoScope, err)
-	}
-	return scope, nil
 }
 
 func CallerFromConnection(state *tls.ConnectionState) string {

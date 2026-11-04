@@ -1,5 +1,12 @@
 # 26. An agent sends into the tenant it was registered in, and an agent the registry never named is not admitted
 
+> Corrected: the estate this expected exists. An operator registers a
+> `Seagull-agent-v2` installation and has the platform sign its certificate before
+> its service starts. An installation the registry never named keeps its batches in
+> its spool and waits for an operator: it reads `agent_not_registered` as a refusal
+> of itself rather than of its records, which its compatibility suite holds against
+> answers this gateway recorded.
+
 ## Context
 
 [ADR 2](0002-identity-comes-from-the-certificate.md) made the gateway overwrite

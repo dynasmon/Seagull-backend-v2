@@ -41,6 +41,17 @@ heavier than its topic takes is refused by its position instead of being admitte
 and answered `503` for as long as it is sent
 ([ADR 37](docs/decisions/0037-a-record-is-bounded-by-what-its-topic-carries.md)).
 
+An agent learns what the platform admits before it sends anything. The gateway's
+`GET /v1/descriptor`, behind the certificate, registry and limiter of the streams,
+lists every stream it routes with the record it carries, the schema versions it
+reads and the limits a batch and a record are admitted under, as the admitters
+that judge them hold them; a record's is what an agent may send, room left for
+what the gateway stamps on it. The control plane's agent listener lists what it
+offers beside them: renewal, the policy route and, once updates are configured,
+the update route. A descriptor carries an entity tag, is answered `304` when it
+did not change, and decides nothing: a batch is judged on its own
+([ADR 45](docs/decisions/0045-a-listener-tells-an-agent-what-it-serves-and-decides-nothing-by-it.md)).
+
 ### Detection engineering
 
 A rule names the class of event it reads and matches with a typed expression

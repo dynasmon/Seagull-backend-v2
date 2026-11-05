@@ -17,8 +17,9 @@ TEST_EVENT_STORE ?= 127.0.0.1:19000
 TEST_ALERT_STORE ?= 127.0.0.1:15432
 
 .PHONY: help fmt fmt-check vet mod-check lint test test-race test-integration \
-        test-load test-alerts bench build images scan-images scan-infrastructure \
-        vulncheck gosec verify-tag check-protection dev-pki up down logs clean verify
+        test-load test-alerts record-agent-answers bench build images scan-images \
+        scan-infrastructure vulncheck gosec verify-tag check-protection dev-pki up \
+        down logs clean verify
 
 help:
 	@echo "fmt                 format the module"
@@ -31,6 +32,7 @@ help:
 	@echo "test-integration    run the data plane suites against a live Redpanda, ClickHouse and PostgreSQL"
 	@echo "test-load           run the ingest load scenarios against a live Redpanda"
 	@echo "test-alerts         evaluate the operational alert rules against recorded series"
+	@echo "record-agent-answers record every answer an agent reads into tests/e2e/testdata/agent"
 	@echo "bench               run the hot-path benchmarks"
 	@echo "build               build every component into $(DIST)"
 	@echo "images              build the container image of every component"
@@ -90,6 +92,10 @@ test-load:
 test-alerts:
 	$(COMPOSE_TEST) run --rm --no-deps promtool check rules detection-state.yml agent-roster.yml
 	$(COMPOSE_TEST) run --rm --no-deps promtool test rules detection-state.test.yml agent-roster.test.yml
+
+record-agent-answers:
+	SEAGULL_RECORD_AGENT_ANSWERS=$(CURDIR)/tests/e2e/testdata/agent/protocol-1 \
+	  $(GO) test -count=1 -run '^TestTheAnswersAnAgentReadsAreTheOnesRecorded$$' ./tests/e2e/
 
 bench:
 	$(GO) test -run '^$$' -bench . -benchmem ./internal/...

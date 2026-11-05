@@ -185,7 +185,7 @@ func TestTheRenewalListenerServesNothingElse(t *testing.T) {
 	held := newStubAgents()
 	handler := renewals(t, held, nil)
 
-	for _, path := range []string{control.AgentsPath, control.SessionPath, control.DescriptorPath} {
+	for _, path := range []string{control.AgentsPath, control.SessionPath} {
 		if response := call(t, handler, http.MethodGet, path, "web-01", "", nil); response.Code != http.StatusNotFound {
 			t.Fatalf("the renewal listener answered %s with %d", path, response.Code)
 		}

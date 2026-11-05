@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/control"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
 	"github.com/dynasmon/Seagull-backend-v2/internal/protocol"
 	platformv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/platform/v1"
@@ -73,5 +74,40 @@ func TestAnAgentLearnsWhatTheGatewayAdmitsBeforeItSendsAnything(t *testing.T) {
 	}
 	if _, _, err := describedAt(t, gateway.anonymousClient(t), url, ""); err == nil {
 		t.Fatal("a caller without a certificate reached the descriptor")
+	}
+}
+
+func TestAnAgentLearnsWhatTheControlPlaneOffersItBeforeAskingForAnything(t *testing.T) {
+	plane := startControlAPI(t, nil)
+	operator := plane.caller(t, "e2e-admin")
+	token := plane.open(t, operator).GetToken()
+	plane.register(t, operator, token, "e2e-agent-90")
+	key, requestPEM := keyAndRequest(t, "e2e-agent-90")
+	agent := plane.agentClient(t, key, plane.issue(t, operator, token, "e2e-agent-90", requestPEM))
+
+	response, body, err := describedAt(t, agent, "https://"+plane.renewalAddress+control.DescriptorPath, "")
+	if err != nil {
+		t.Fatalf("ask for the descriptor: %v", err)
+	}
+	offered := map[string]string{}
+	for _, capability := range decodeDescriptor(t, response, body).GetCapabilities() {
+		offered[capability.GetName()] = capability.GetRoute()
+	}
+	want := map[string]string{
+		protocol.CapabilityRenewal: http.MethodPost + " " + control.RenewalPath,
+		protocol.CapabilityPolicy:  http.MethodGet + " " + control.PolicyPath,
+		protocol.CapabilityUpdate:  http.MethodGet + " " + control.UpdatePath,
+	}
+	if len(offered) != len(want) {
+		t.Fatalf("a plane that renews, hands policies and updates offers %v", offered)
+	}
+	for name, route := range want {
+		if offered[name] != route {
+			t.Errorf("%s is offered at %q, and it is served at %q", name, offered[name], route)
+		}
+	}
+
+	if _, _, err := describedAt(t, operator, "https://"+plane.renewalAddress+control.DescriptorPath, ""); err == nil {
+		t.Fatal("an operator certificate reached the agent listener's descriptor")
 	}
 }

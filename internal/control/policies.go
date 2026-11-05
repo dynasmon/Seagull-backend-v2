@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"google.golang.org/protobuf/proto"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentpolicy"
 	"github.com/dynasmon/Seagull-backend-v2/internal/authz"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/httpx"
 	policyv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/policy/v1"
 )
 
@@ -184,7 +184,7 @@ func (s *Server) servePolicy() http.Handler {
 		tag := strconv.Quote(served.Digest)
 		w.Header().Set("ETag", tag)
 		w.Header().Set("Cache-Control", "no-store")
-		if unchanged(r.Header.Get("If-None-Match"), tag) {
+		if httpx.Unchanged(r, tag) {
 			s.metrics.policyServed("unchanged")
 			w.WriteHeader(http.StatusNotModified)
 			return
@@ -194,16 +194,6 @@ func (s *Server) servePolicy() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(served.Envelope)
 	})
-}
-
-func unchanged(asked, tag string) bool {
-	for candidate := range strings.SplitSeq(asked, ",") {
-		candidate = strings.TrimPrefix(strings.TrimSpace(candidate), "W/")
-		if candidate == "*" || candidate == tag {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *Server) refusePolicy(w http.ResponseWriter, err error) {

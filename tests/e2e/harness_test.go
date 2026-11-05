@@ -109,6 +109,7 @@ type gatewayOptions struct {
 	maxInflightRequests int
 	backbone            *backbone
 	roster              *agent.Roster
+	currency            ingest.Current
 }
 
 func startGateway(t *testing.T, options gatewayOptions) *gateway {
@@ -140,6 +141,9 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	}
 	if options.roster == nil {
 		options.roster = agent.NewRoster()
+	}
+	if options.currency == nil {
+		options.currency = current{}
 	}
 
 	authority, err := devpki.NewAuthority("Seagull Test CA", time.Hour)
@@ -204,7 +208,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{
 		Admitter:       admitter,
 		Roster:         options.roster,
-		Currency:       current{},
+		Currency:       options.currency,
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        instruments,
@@ -228,7 +232,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	inventory, err := ingest.NewInventoryHandler(ingest.InventoryHandlerOptions{
 		Admitter:       collector,
 		Roster:         options.roster,
-		Currency:       current{},
+		Currency:       options.currency,
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        assets,
@@ -252,7 +256,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	status, err := ingest.NewStatusHandler(ingest.StatusHandlerOptions{
 		Admitter:       reporter,
 		Roster:         options.roster,
-		Currency:       current{},
+		Currency:       options.currency,
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        reported,
@@ -276,7 +280,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	assessments, err := ingest.NewAssessmentHandler(ingest.AssessmentHandlerOptions{
 		Admitter:       assessor,
 		Roster:         options.roster,
-		Currency:       current{},
+		Currency:       options.currency,
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        assessed,

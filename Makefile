@@ -83,6 +83,8 @@ test-integration:
 test-load:
 	$(COMPOSE_TEST) up -d --wait redpanda
 	SEAGULL_TEST_BROKERS=$(TEST_BROKERS) \
+	SEAGULL_TEST_BROKER_STOP="$(COMPOSE_TEST) stop redpanda" \
+	SEAGULL_TEST_BROKER_START="$(COMPOSE_TEST) start redpanda" \
 	  $(GO) test -tags load -count=1 -timeout 20m -v ./tests/load/...
 
 test-alerts:

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 )
@@ -68,5 +69,19 @@ func TestAGatewayRateLimitIsAtLeastOneOrTurnedOffInWords(t *testing.T) {
 	off, err := load(environment(t, map[string]string{"SEAGULL_GATEWAY_RATE_PER_SECOND": "unlimited"}))
 	if err != nil || off.rateLimited {
 		t.Errorf("a gateway told unlimited is limited=%v (%v)", off.rateLimited, err)
+	}
+}
+
+func TestARosterGoesStaleOnlyOnceTwoConfirmationsWereMissed(t *testing.T) {
+	loaded, err := load(environment(t, nil))
+	if err != nil || loaded.rosterCheck != 5*time.Second || loaded.rosterStale != 30*time.Second {
+		t.Fatalf("a gateway configured with nothing confirms its roster every %s and goes stale after %s (%v)",
+			loaded.rosterCheck, loaded.rosterStale, err)
+	}
+	if _, err := load(environment(t, map[string]string{
+		"SEAGULL_GATEWAY_ROSTER_CHECK_INTERVAL": "20s",
+		"SEAGULL_GATEWAY_ROSTER_STALE_AFTER":    "30s",
+	})); err == nil || !strings.Contains(err.Error(), "SEAGULL_GATEWAY_ROSTER_STALE_AFTER") {
+		t.Errorf("a roster that would go stale after one missed confirmation was answered %v", err)
 	}
 }

@@ -11,6 +11,11 @@
 > also says which tenant an agent's telemetry belongs to, and an agent the
 > registry never named has none. Registering still takes nothing away.
 
+> Amended by [ADR 46](0046-a-revocation-is-enforced-within-the-bound-a-gateway-confirms-its-roster-by.md):
+> a gateway admits only by a roster it found current within its bound, 30 seconds
+> by default, and answers every batch `503 roster_stale` past it, so a revocation
+> that reached the log is enforced within that bound or nothing is admitted.
+
 ## Context
 
 [ADR 2](0002-identity-comes-from-the-certificate.md) settled where an agent's

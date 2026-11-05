@@ -578,6 +578,19 @@ Stop everything and drop its state with `make down`. If a port is taken, publish
 elsewhere with `SEAGULL_GATEWAY_PUBLISH`, `SEAGULL_QUERY_API_PUBLISH`,
 `SEAGULL_CONTROL_API_PUBLISH` or `SEAGULL_CONTROL_API_RENEWAL_PUBLISH`.
 
+## Agent compatibility
+
+A platform serves the newest agent release and the one before it: it accepts the
+protocol and schema versions both speak, and within a protocol version a refusal
+keeps its code and status. Every answer an agent reads — each stream's
+acknowledgement and refusals, both descriptors, issuance, renewal, the policy and
+the update it is handed — is recorded from the real listeners in
+`tests/e2e/testdata/agent/protocol-1`, and every build compares what the listeners
+answer with the recording: an answer that changes fails until it is recorded
+again with `make record-agent-answers`, which is where its version is decided.
+The agent takes its evidence from that directory of a tag or a commit alone
+([ADR 48](docs/decisions/0048-every-answer-an-agent-reads-is-recorded-here-and-changes-only-by-a-version-decision.md)).
+
 ## Configuration
 
 Every setting is an environment variable, typed, validated at startup, and

@@ -47,6 +47,8 @@ type configuration struct {
 	security      broker.Security
 	startTimeout  time.Duration
 	rosterRecords int
+	rosterCheck   time.Duration
+	rosterStale   time.Duration
 }
 
 func load(parser *config.Parser) (configuration, error) {
@@ -78,6 +80,8 @@ func load(parser *config.Parser) (configuration, error) {
 		security:      broker.LoadSecurity(parser),
 		startTimeout:  parser.Duration("SEAGULL_GATEWAY_START_TIMEOUT", 30*time.Second, time.Second, 5*time.Minute),
 		rosterRecords: parser.Int("SEAGULL_GATEWAY_ROSTER_RECORDS", 500, 1, 100_000),
+		rosterCheck:   parser.Duration("SEAGULL_GATEWAY_ROSTER_CHECK_INTERVAL", 5*time.Second, time.Second, time.Minute),
+		rosterStale:   parser.Duration("SEAGULL_GATEWAY_ROSTER_STALE_AFTER", 30*time.Second, 2*time.Second, 10*time.Minute),
 	}
 
 	rate, limited := parser.Limit(rateSetting, 200, 1, 1_000_000)
@@ -126,6 +130,11 @@ func load(parser *config.Parser) (configuration, error) {
 
 	if err := parser.Err(); err != nil {
 		return configuration{}, err
+	}
+	if loaded.rosterStale < 2*loaded.rosterCheck {
+		return configuration{}, fmt.Errorf(
+			"invalid configuration: SEAGULL_GATEWAY_ROSTER_STALE_AFTER is %s and must outlast two SEAGULL_GATEWAY_ROSTER_CHECK_INTERVAL of %s",
+			loaded.rosterStale, loaded.rosterCheck)
 	}
 	if len(gateway) > event.MaxGatewayLength {
 		return configuration{}, fmt.Errorf(

@@ -127,7 +127,7 @@ func load(parser *config.Parser) (configuration, error) {
 			clickhouse.DefaultLivenessHorizon, time.Hour, 365*24*time.Hour),
 		livenessBackdating: parser.Duration("SEAGULL_CONTROL_API_LIVENESS_BACKDATING",
 			clickhouse.DefaultLivenessBackdating, 0, 365*24*time.Hour),
-		announceEvery: parser.Duration("SEAGULL_CONTROL_API_ANNOUNCE_INTERVAL", 30*time.Second, time.Second, time.Hour),
+		announceEvery: parser.Duration("SEAGULL_CONTROL_API_ANNOUNCE_INTERVAL", 5*time.Second, time.Second, time.Hour),
 		announceBatch: parser.Int("SEAGULL_CONTROL_API_ANNOUNCE_BATCH", 100, 1, 500),
 
 		readTimeout:  parser.Duration("SEAGULL_CONTROL_API_READ_TIMEOUT", 15*time.Second, time.Second, 5*time.Minute),

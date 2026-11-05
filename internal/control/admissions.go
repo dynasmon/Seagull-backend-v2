@@ -116,10 +116,9 @@ func (a *Announcer) Sweep(ctx context.Context) {
 		a.logger.Warn("agent_admissions_unreadable", slog.String("error", err.Error()))
 		return
 	}
-	a.metrics.agentsOutstanding(len(outstanding))
-
-	for _, record := range outstanding {
+	for index, record := range outstanding {
 		if err := carry(ctx, a.agents, a.admissions, a.metrics, record); err != nil {
+			a.metrics.agentsOutstanding(len(outstanding)-index, oldestOf(outstanding[index:]))
 			a.logger.Warn("agent_admission_not_published",
 				slog.String("agent_id", record.GetAgentId()),
 				slog.Uint64("revision", record.GetRevision()),
@@ -128,4 +127,15 @@ func (a *Announcer) Sweep(ctx context.Context) {
 			return
 		}
 	}
+	a.metrics.agentsOutstanding(0, time.Time{})
+}
+
+func oldestOf(outstanding []*agentv1.Admission) time.Time {
+	var oldest time.Time
+	for _, record := range outstanding {
+		if changed := record.GetChangedAt(); changed != nil && (oldest.IsZero() || changed.AsTime().Before(oldest)) {
+			oldest = changed.AsTime()
+		}
+	}
+	return oldest
 }

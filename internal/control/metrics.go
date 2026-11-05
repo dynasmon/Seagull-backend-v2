@@ -1,6 +1,7 @@
 package control
 
 import (
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -30,6 +31,7 @@ type Metrics struct {
 	signed      *prometheus.CounterVec
 	renewed     *prometheus.CounterVec
 	outstanding prometheus.Gauge
+	oldest      atomic.Int64
 	instructed  *prometheus.CounterVec
 	handed      *prometheus.CounterVec
 	authorized  *prometheus.CounterVec
@@ -222,6 +224,17 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 		instruments.instructed, instruments.handed,
 		instruments.authorized, instruments.offered, instruments.downloaded,
 		instruments.inForce, instruments.readings, instruments.gated,
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "agent_admissions_oldest_outstanding_seconds",
+			Help:      "Time since the oldest decision about an agent the data plane has not been told about was recorded; zero when none is.",
+		}, func() float64 {
+			if at := instruments.oldest.Load(); at > 0 {
+				return time.Since(time.Unix(0, at)).Seconds()
+			}
+			return 0
+		}),
 	)
 	return instruments
 }
@@ -333,10 +346,16 @@ func (m *Metrics) agentAnnounced(outcome string) {
 	}
 }
 
-func (m *Metrics) agentsOutstanding(count int) {
-	if m != nil {
-		m.outstanding.Set(float64(count))
+func (m *Metrics) agentsOutstanding(count int, oldest time.Time) {
+	if m == nil {
+		return
 	}
+	m.outstanding.Set(float64(count))
+	if count == 0 || oldest.IsZero() {
+		m.oldest.Store(0)
+		return
+	}
+	m.oldest.Store(oldest.UnixNano())
 }
 
 func (m *Metrics) policyPublished(outcome string) {

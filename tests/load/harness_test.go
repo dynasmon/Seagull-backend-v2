@@ -48,6 +48,10 @@ func brokers(t *testing.T) []string {
 	return strings.Split(value, ",")
 }
 
+type current struct{}
+
+func (current) Stale() bool { return false }
+
 // A backbone that counts what it was given and can be held open, so a scenario
 // can measure what the gateway does while its only durable destination is slow.
 type controlledBackbone struct {
@@ -238,6 +242,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{
 		Admitter:       admitter,
 		Roster:         roster,
+		Currency:       current{},
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        instruments,

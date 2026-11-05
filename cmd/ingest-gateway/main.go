@@ -115,8 +115,20 @@ func gateway(ctx context.Context) error {
 	}
 	defer admitted.close()
 
+	currency, err := ingest.NewCurrency(ingest.CurrencyOptions{
+		Log:        admitted.reader,
+		Every:      settings.rosterCheck,
+		StaleAfter: settings.rosterStale,
+		Registry:   platform.Metrics(),
+		Logger:     platform.Logger(),
+	})
+	if err != nil {
+		return err
+	}
+	currency.Confirm(ctx)
+
 	served, err := routes(settings, sinks{events: publisher, inventory: assets, status: reports, assessments: findings},
-		admitted.held, platform.Metrics(), platform.Logger())
+		admitted.held, currency, platform.Metrics(), platform.Logger())
 	if err != nil {
 		return err
 	}
@@ -144,6 +156,7 @@ func gateway(ctx context.Context) error {
 	platform.Health().Register("status-backbone", reports.Ping)
 	platform.Health().Register("assessment-backbone", findings.Ping)
 	platform.Add(admitted.follower(platform.Logger()))
+	platform.Add(currency)
 	platform.Add(listener)
 
 	return platform.Run(ctx)

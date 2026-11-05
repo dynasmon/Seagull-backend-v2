@@ -26,29 +26,15 @@ type ServerOptions struct {
 }
 
 func NewServer(options ServerOptions) (*httpx.Server, error) {
-	if options.Handler == nil {
-		return nil, errors.New("the ingest listener needs a handler")
-	}
-	if options.Instrumentation == nil {
-		return nil, errors.New("the ingest listener shares the process http instrumentation")
-	}
-
-	mux := http.NewServeMux()
-	mux.Handle(EventsRoute, options.Instrumentation.Handle("ingest_events", options.Handler))
-	if options.Inventory != nil {
-		mux.Handle(InventoryRoute, options.Instrumentation.Handle("ingest_inventory", options.Inventory))
-	}
-	if options.Status != nil {
-		mux.Handle(StatusRoute, options.Instrumentation.Handle("ingest_status", options.Status))
-	}
-	if options.Assessments != nil {
-		mux.Handle(AssessmentsRoute, options.Instrumentation.Handle("ingest_assessments", options.Assessments))
+	routed, err := Routes(options)
+	if err != nil {
+		return nil, err
 	}
 
 	return httpx.NewServer(httpx.ServerOptions{
 		Name:              "ingest",
 		Address:           options.Address,
-		Handler:           mux,
+		Handler:           routed,
 		TLS:               options.TLS,
 		Logger:            options.Logger,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -58,4 +44,32 @@ func NewServer(options ServerOptions) (*httpx.Server, error) {
 		ShutdownTimeout:   options.ShutdownTimeout,
 		MaxHeaderBytes:    16 << 10,
 	})
+}
+
+// Every stream is routed where its own description says it is sent, and the
+// descriptor is built from the same handlers, so the listener cannot describe a
+// stream it does not route or route one it does not describe.
+func Routes(options ServerOptions) (http.Handler, error) {
+	if options.Handler == nil {
+		return nil, errors.New("the ingest listener needs a handler")
+	}
+	if options.Instrumentation == nil {
+		return nil, errors.New("the ingest listener shares the process http instrumentation")
+	}
+
+	mux := http.NewServeMux()
+	var served []*Handler
+	for _, handler := range []*Handler{options.Handler, options.Inventory, options.Status, options.Assessments} {
+		if handler == nil {
+			continue
+		}
+		mux.Handle(handler.stream.describe().GetRoute(), options.Instrumentation.Handle("ingest_"+handler.stream.name(), handler))
+		served = append(served, handler)
+	}
+	describing, err := newDescriber(served)
+	if err != nil {
+		return nil, err
+	}
+	mux.Handle(DescriptorRoute, options.Instrumentation.Handle("ingest_descriptor", describing))
+	return mux, nil
 }

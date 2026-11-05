@@ -31,6 +31,10 @@ func (discarded) PublishInventory(context.Context, []*inventoryv1.Record) error 
 func (discarded) PublishStatus(context.Context, []*agentv1.Status) error               { return nil }
 func (discarded) PublishAssessments(context.Context, []*assessmentv1.Assessment) error { return nil }
 
+type current struct{}
+
+func (current) Stale() bool { return false }
+
 type admitsOne string
 
 func (a admitsOne) Tenant(agentID string) (string, bool) { return "acme", agentID == string(a) }
@@ -56,7 +60,7 @@ func TestTheDescriptorServesTheLimitsTheGatewayIsConfiguredWith(t *testing.T) {
 		t.Fatal(err)
 	}
 	served, err := routes(settings, sinks{events: discarded{}, inventory: discarded{}, status: discarded{}, assessments: discarded{}},
-		admitsOne("web-01"), metrics.New("ingest-gateway"), slog.New(slog.DiscardHandler))
+		admitsOne("web-01"), current{}, metrics.New("ingest-gateway"), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}

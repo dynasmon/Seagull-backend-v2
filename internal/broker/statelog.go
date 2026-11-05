@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -18,6 +20,10 @@ type StateLog struct {
 	admin      *kadm.Client
 	topic      string
 	maxRecords int
+
+	mu        sync.Mutex
+	delivered map[int32]int64
+	newest    time.Time
 }
 
 func NewStateLog(config Config, maxRecords int) (*StateLog, error) {
@@ -45,7 +51,7 @@ func NewStateLog(config Config, maxRecords int) (*StateLog, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create backbone client: %w", err)
 	}
-	return &StateLog{client: client, admin: kadm.NewClient(client), topic: config.Topic, maxRecords: maxRecords}, nil
+	return &StateLog{client: client, admin: kadm.NewClient(client), topic: config.Topic, maxRecords: maxRecords, delivered: map[int32]int64{}}, nil
 }
 
 // Everything written before this call, and then nothing. A process reads the
@@ -72,6 +78,7 @@ func (l *StateLog) Replay(ctx context.Context, deliver Deliver) error {
 		if err := deliver(ctx, records); err != nil {
 			return err
 		}
+		l.advance(records)
 		for _, record := range records {
 			if end, waiting := remaining[record.Partition]; waiting && record.Offset >= end-1 {
 				delete(remaining, record.Partition)
@@ -93,6 +100,41 @@ func (l *StateLog) Follow(ctx context.Context, deliver Deliver) error {
 		}
 		if err := deliver(ctx, records); err != nil {
 			return err
+		}
+		l.advance(records)
+	}
+}
+
+// Behind says how many records the log held when it was asked that this reader
+// has not delivered yet, and when the newest record it delivered was written. A
+// reader is current as of the moment it asked when nothing is behind.
+func (l *StateLog) Behind(ctx context.Context) (int64, time.Time, error) {
+	ends, err := l.admin.ListEndOffsets(ctx, l.topic)
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("read the end of %s: %w", l.topic, err)
+	}
+	if err := ends.Error(); err != nil {
+		return 0, time.Time{}, fmt.Errorf("read the end of %s: %w", l.topic, err)
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var behind int64
+	ends.Each(func(end kadm.ListedOffset) {
+		if gap := end.Offset - l.delivered[end.Partition]; gap > 0 {
+			behind += gap
+		}
+	})
+	return behind, l.newest, nil
+}
+
+func (l *StateLog) advance(records []Record) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, record := range records {
+		l.delivered[record.Partition] = max(l.delivered[record.Partition], record.Offset+1)
+		if record.Timestamp.After(l.newest) {
+			l.newest = record.Timestamp
 		}
 	}
 }

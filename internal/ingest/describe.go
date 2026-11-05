@@ -32,6 +32,7 @@ const latestSecond = 253402300799
 // registry and limiter as the streams, and decides nothing they decide.
 type describer struct {
 	roster    Roster
+	currency  Current
 	limiter   *ratelimit.Limiter
 	described *platformv1.Descriptor
 	tag       string
@@ -54,13 +55,17 @@ func newDescriber(served []*Handler) (*describer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &describer{roster: served[0].roster, limiter: served[0].limiter, described: described, tag: tag, now: time.Now}, nil
+	return &describer{roster: served[0].roster, currency: served[0].currency, limiter: served[0].limiter, described: described, tag: tag, now: time.Now}, nil
 }
 
 func (d *describer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	identity, err := agentidentity.FromConnection(r.TLS)
 	if err != nil {
 		refuse(w, http.StatusForbidden, "unauthenticated_agent", err.Error(), "", -1)
+		return
+	}
+	if d.currency.Stale() {
+		refuseStale(w)
 		return
 	}
 	if _, admitted := d.roster.Tenant(identity.AgentID); !admitted {

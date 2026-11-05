@@ -83,6 +83,10 @@ func (b *backbone) PublishAssessments(_ context.Context, assessments []*assessme
 	return nil
 }
 
+type current struct{}
+
+func (current) Stale() bool { return false }
+
 type gateway struct {
 	address    string
 	opsAddress string
@@ -200,6 +204,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{
 		Admitter:       admitter,
 		Roster:         options.roster,
+		Currency:       current{},
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        instruments,
@@ -223,6 +228,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	inventory, err := ingest.NewInventoryHandler(ingest.InventoryHandlerOptions{
 		Admitter:       collector,
 		Roster:         options.roster,
+		Currency:       current{},
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        assets,
@@ -246,6 +252,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	status, err := ingest.NewStatusHandler(ingest.StatusHandlerOptions{
 		Admitter:       reporter,
 		Roster:         options.roster,
+		Currency:       current{},
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        reported,
@@ -269,6 +276,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	assessments, err := ingest.NewAssessmentHandler(ingest.AssessmentHandlerOptions{
 		Admitter:       assessor,
 		Roster:         options.roster,
+		Currency:       current{},
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        assessed,

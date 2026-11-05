@@ -46,9 +46,14 @@ type Roster interface {
 	Knows(agentID string) bool
 }
 
+type Current interface {
+	Stale() bool
+}
+
 type HandlerOptions struct {
 	Admitter       *Admitter
 	Roster         Roster
+	Currency       Current
 	Limiter        *ratelimit.Limiter
 	Capacity       *Capacity
 	Metrics        *Metrics
@@ -59,6 +64,7 @@ type HandlerOptions struct {
 type InventoryHandlerOptions struct {
 	Admitter       *InventoryAdmitter
 	Roster         Roster
+	Currency       Current
 	Limiter        *ratelimit.Limiter
 	Capacity       *Capacity
 	Metrics        *InventoryMetrics
@@ -69,6 +75,7 @@ type InventoryHandlerOptions struct {
 type StatusHandlerOptions struct {
 	Admitter       *StatusAdmitter
 	Roster         Roster
+	Currency       Current
 	Limiter        *ratelimit.Limiter
 	Capacity       *Capacity
 	Metrics        *StatusMetrics
@@ -79,6 +86,7 @@ type StatusHandlerOptions struct {
 type AssessmentHandlerOptions struct {
 	Admitter       *AssessmentAdmitter
 	Roster         Roster
+	Currency       Current
 	Limiter        *ratelimit.Limiter
 	Capacity       *Capacity
 	Metrics        *AssessmentMetrics
@@ -88,6 +96,7 @@ type AssessmentHandlerOptions struct {
 
 type gate struct {
 	roster         Roster
+	currency       Current
 	limiter        *ratelimit.Limiter
 	capacity       *Capacity
 	maxBodyBytes   int64
@@ -109,6 +118,7 @@ func NewHandler(options HandlerOptions) (*Handler, error) {
 	}
 	return newHandler(eventStream{admitter: options.Admitter, metrics: options.Metrics}, gate{
 		roster:         options.Roster,
+		currency:       options.Currency,
 		limiter:        options.Limiter,
 		capacity:       options.Capacity,
 		maxBodyBytes:   options.MaxBodyBytes,
@@ -125,6 +135,7 @@ func NewInventoryHandler(options InventoryHandlerOptions) (*Handler, error) {
 	}
 	return newHandler(inventoryStream{admitter: options.Admitter, metrics: options.Metrics}, gate{
 		roster:         options.Roster,
+		currency:       options.Currency,
 		limiter:        options.Limiter,
 		capacity:       options.Capacity,
 		maxBodyBytes:   options.MaxBodyBytes,
@@ -141,6 +152,7 @@ func NewStatusHandler(options StatusHandlerOptions) (*Handler, error) {
 	}
 	return newHandler(statusStream{admitter: options.Admitter, metrics: options.Metrics}, gate{
 		roster:         options.Roster,
+		currency:       options.Currency,
 		limiter:        options.Limiter,
 		capacity:       options.Capacity,
 		maxBodyBytes:   options.MaxBodyBytes,
@@ -157,6 +169,7 @@ func NewAssessmentHandler(options AssessmentHandlerOptions) (*Handler, error) {
 	}
 	return newHandler(assessmentStream{admitter: options.Admitter, metrics: options.Metrics}, gate{
 		roster:         options.Roster,
+		currency:       options.Currency,
 		limiter:        options.Limiter,
 		capacity:       options.Capacity,
 		maxBodyBytes:   options.MaxBodyBytes,
@@ -167,6 +180,9 @@ func NewAssessmentHandler(options AssessmentHandlerOptions) (*Handler, error) {
 func newHandler(admitting stream, standing gate) (*Handler, error) {
 	if standing.roster == nil {
 		return nil, errors.New("the ingest handler needs to know which agents the platform still honours")
+	}
+	if standing.currency == nil {
+		return nil, errors.New("the ingest handler needs to know whether what it knows of the agents is current")
 	}
 	if standing.maxBodyBytes <= 0 {
 		return nil, errors.New("the ingest handler needs a positive body ceiling")
@@ -196,6 +212,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := log.With(r.Context(), slog.String("agent_id", identity.AgentID))
+
+	if h.currency.Stale() {
+		h.stream.rejected(CodeRosterStale)
+		refuseStale(w)
+		return
+	}
 
 	// A certificate says who an agent is, and the registry says whose estate its
 	// telemetry belongs to and whether the platform still listens to it. The
@@ -291,6 +313,12 @@ func (h *Handler) refuseUnadmitted(w http.ResponseWriter, agentID string) {
 	code, detail := unadmitted(h.roster, agentID)
 	h.stream.rejected(code)
 	refuse(w, http.StatusForbidden, code, detail, "", -1)
+}
+
+func refuseStale(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "5")
+	refuse(w, http.StatusServiceUnavailable, CodeRosterStale,
+		"this gateway cannot confirm it holds every decision the platform published about agents", "", -1)
 }
 
 func unadmitted(roster Roster, agentID string) (string, string) {

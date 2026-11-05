@@ -88,8 +88,8 @@ test-load:
 	  $(GO) test -tags load -count=1 -timeout 20m -v ./tests/load/...
 
 test-alerts:
-	$(COMPOSE_TEST) run --rm --no-deps promtool check rules detection-state.yml
-	$(COMPOSE_TEST) run --rm --no-deps promtool test rules detection-state.test.yml
+	$(COMPOSE_TEST) run --rm --no-deps promtool check rules detection-state.yml agent-roster.yml
+	$(COMPOSE_TEST) run --rm --no-deps promtool test rules detection-state.test.yml agent-roster.test.yml
 
 bench:
 	$(GO) test -run '^$$' -bench . -benchmem ./internal/...

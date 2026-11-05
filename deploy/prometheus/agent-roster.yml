@@ -1,0 +1,28 @@
+groups:
+  - name: seagull-agent-roster
+    rules:
+      - alert: SeagullAgentRosterStale
+        expr: max by (instance) (seagull_ingest_roster_confirmed_age_seconds - seagull_ingest_roster_stale_after_seconds) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: '{{ $labels.instance }} cannot confirm its agent roster and admits nothing'
+          description: >-
+            The gateway has not found its roster holding every decision the
+            agent log held for longer than its bound, so it answers every batch
+            503 roster_stale and agents keep their spools. The agent_roster_stale
+            log line says how far behind it was, or why the log could not be read.
+
+      - alert: SeagullAgentDecisionUnpublished
+        expr: max by (instance) (seagull_control_agent_admissions_oldest_outstanding_seconds) > 60
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: '{{ $labels.instance }} holds a decision about an agent that no gateway has been told'
+          description: >-
+            A decision recorded in the registry, a revocation among them, has
+            not reached security.agents for more than a minute, so a gateway
+            still admits by what it decided before. The
+            agent_admission_not_published log line names the agent and the error.

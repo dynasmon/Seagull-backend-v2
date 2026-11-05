@@ -1,0 +1,54 @@
+rule_files:
+  - agent-roster.yml
+
+evaluation_interval: 15s
+
+tests:
+  # Confirmed every five seconds, then not at all from the fourth minute: the
+  # bound of thirty seconds passes at 4m30s, and the alert fires a minute later.
+  - interval: 15s
+    input_series:
+      - series: 'seagull_ingest_roster_confirmed_age_seconds{instance="gateway-1:9100"}'
+        values: '5x15 15+15x20'
+      - series: 'seagull_ingest_roster_stale_after_seconds{instance="gateway-1:9100"}'
+        values: '30x36'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: SeagullAgentRosterStale
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: SeagullAgentRosterStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: gateway-1:9100
+            exp_annotations:
+              summary: 'gateway-1:9100 cannot confirm its agent roster and admits nothing'
+              description: >-
+                The gateway has not found its roster holding every decision the
+                agent log held for longer than its bound, so it answers every batch
+                503 roster_stale and agents keep their spools. The agent_roster_stale
+                log line says how far behind it was, or why the log could not be read.
+
+  # A revocation the backbone would not take, its age growing by the sweep.
+  - interval: 15s
+    input_series:
+      - series: 'seagull_control_agent_admissions_oldest_outstanding_seconds{instance="control-1:9100"}'
+        values: '0x4 15+15x12'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: SeagullAgentDecisionUnpublished
+        exp_alerts: []
+      - eval_time: 3m30s
+        alertname: SeagullAgentDecisionUnpublished
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: control-1:9100
+            exp_annotations:
+              summary: 'control-1:9100 holds a decision about an agent that no gateway has been told'
+              description: >-
+                A decision recorded in the registry, a revocation among them, has
+                not reached security.agents for more than a minute, so a gateway
+                still admits by what it decided before. The
+                agent_admission_not_published log line names the agent and the error.

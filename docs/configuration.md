@@ -58,6 +58,8 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_GATEWAY_ID` | `ingest-gateway` | recorded on every admitted event, so at most the 64 bytes the event contract lets it be; a longer one refuses to start |
 | `SEAGULL_GATEWAY_START_TIMEOUT` | `30s` | how long it will spend reading the agent roster before it gives up |
 | `SEAGULL_GATEWAY_ROSTER_RECORDS` | `500` | admission records read per fetch |
+| `SEAGULL_GATEWAY_ROSTER_CHECK_INTERVAL` | `5s` | how often the gateway confirms it holds every decision the agent log holds |
+| `SEAGULL_GATEWAY_ROSTER_STALE_AFTER` | `30s` | how long it may go unconfirmed before it answers every batch `503 roster_stale`; at least two check intervals |
 | `SEAGULL_EVENT_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock an event may be |
 | `SEAGULL_EVENT_MAX_AGE` | `168h` | how old an event may be and still be admitted |
 | `SEAGULL_INVENTORY_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock a scan may be |
@@ -627,7 +629,7 @@ detection away from somebody's triage.
 | `SEAGULL_CONTROL_API_RATE_BURST` | `40` | burst above that budget |
 | `SEAGULL_CONTROL_API_START_TIMEOUT` | `30s` | how long it will spend reading the ruleset log before it gives up |
 | `SEAGULL_CONTROL_API_RULESET_RECORDS` | `256` | ruleset records read per fetch |
-| `SEAGULL_CONTROL_API_ANNOUNCE_INTERVAL` | `30s` | how often it republishes agent decisions the backbone has not taken |
+| `SEAGULL_CONTROL_API_ANNOUNCE_INTERVAL` | `5s` | how often it republishes agent decisions the backbone has not taken |
 | `SEAGULL_CONTROL_API_ANNOUNCE_BATCH` | `100` | outstanding decisions carried per sweep |
 | `SEAGULL_CONTROL_API_LIVENESS_HORIZON` | `720h` | how far back it looks for when an agent was last heard from |
 | `SEAGULL_CONTROL_TELEMETRY_STORE_ADDRESS` | required | ClickHouse address, read only, for those questions |
@@ -718,7 +720,7 @@ other answer means the agent keeps the batch and retries:
 | `422` | a record failed admission, or weighs more than its topic carries; the answer names the index and the field, and the record is refused for good |
 | `426` | the protocol version is not supported by this gateway |
 | `429` | the agent is above its budget; back off |
-| `503` | the batch was not made durable (`backbone_unavailable`), or the gateway has no room for it now (`gateway_at_capacity`); retry after `Retry-After` |
+| `503` | the batch was not made durable (`backbone_unavailable`), the gateway has no room for it now (`gateway_at_capacity`), or it cannot confirm it holds every decision about agents (`roster_stale`); retry after `Retry-After` |
 
 A `durable` answer means every in-sync replica holds the batch: a production
 backbone keeps three replicas and acknowledges nothing fewer than two of them

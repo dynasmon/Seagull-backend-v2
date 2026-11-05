@@ -141,6 +141,15 @@ and no round trip. A decision the backbone did not take stays outstanding in the
 registry and is published again until it lands. See
 [ADR 24](docs/decisions/0024-an-agent-is-registered-by-the-control-plane-and-refused-by-the-gateway.md).
 
+A gateway admits only by a roster it confirmed current within its bound, every
+five seconds against the ends of the log and thirty seconds at most, and past it
+answers every batch `503 roster_stale`, so the agent keeps it: a revocation that
+reached the log is enforced within thirty seconds or nothing is admitted, and in
+practice within milliseconds under load and seconds after the backbone comes
+back. A decision the log was never told is republished every five seconds and
+raises an alert past a minute. See
+[ADR 46](docs/decisions/0046-a-revocation-is-enforced-within-the-bound-a-gateway-confirms-its-roster-by.md).
+
 The tenant an agent's telemetry belongs to travels on the same record. It is the
 one the agent was registered in by an operator holding that tenant, and the
 gateway stamps it on every event in place of whatever the agent wrote; no

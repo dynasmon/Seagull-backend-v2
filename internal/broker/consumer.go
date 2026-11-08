@@ -93,7 +93,8 @@ type ConsumerConfig struct {
 	Security     Security
 	Logger       *slog.Logger
 
-	Recovery Recovery
+	Recovery  Recovery
+	Ownership Ownership
 }
 
 type Consumer struct {
@@ -104,6 +105,7 @@ type Consumer struct {
 	metrics         *ConsumerMetrics
 	endOffsets      endOffsetReader
 	recovery        Recovery
+	ownership       Ownership
 	lastRecordTimes func(ctx context.Context, positions map[int32]int64) (map[int32]time.Time, error)
 	logger          *slog.Logger
 
@@ -151,6 +153,7 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 		maxRecords: config.MaxRecords,
 		metrics:    config.Metrics,
 		recovery:   config.Recovery,
+		ownership:  config.Ownership,
 		logger:     logger,
 		assigned:   make(map[string]map[int32]struct{}, len(topics)),
 	}

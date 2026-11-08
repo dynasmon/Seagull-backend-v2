@@ -420,6 +420,29 @@ process allowed to reach it:
                         every version            by release and package      how fresh each feed is
 ```
 
+What is vulnerable is decided by one process that reads both of those stores and
+writes neither, and kept by another:
+
+```text
+ Redpanda  security.inventory.raw · security.advisories
+                    │  one group, one loop, read alone
+                    ▼
+          vulnerability-matcher ◀── ClickHouse  asset_inventory · asset_package_holders
+                    │                           vulnerability_* · vulnerability_findings
+                    │  waits for the owners to have stored what a batch is about,
+                    │  decides every asset an inventory record names, and the holders
+                    │  of what an advisory names, against their previous decisions
+                    ▼
+           Redpanda  security.findings      keyed by the agent
+                    │
+                    ▼
+             finding-writer ──▶ security.findings.quarantine
+                    │
+                    ▼
+     ClickHouse vulnerability_findings · vulnerability_assessments
+                 one row per episode       one row per evaluation
+```
+
 Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 
 | Process | Role |
@@ -434,6 +457,7 @@ Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 | `assessment-projector` | Keeps every assessment agents made of their hosts, one row per assessment, under a group and a quarantine of its own, so an assessment store outage costs how fresh a posture is and never telemetry. |
 | `advisory-importer` | Follows the vulnerability feeds a deployment names, translates each changed record into an advisory carrying its provenance, and publishes it with the freshness of the feed. The one process that reaches the internet; it holds no store and names no asset. |
 | `advisory-writer` | Keeps every version of every advisory and every attempt to follow a feed, under a group and a quarantine of its own. |
+| `vulnerability-matcher` | Decides which packages of each asset are vulnerable from the inventory and advisory stores, read-only, and publishes the decisions to `security.findings`. It reads both streams alone in one loop, waits for each store's owner before reading it, and holds no internet access and no credential that writes. |
 | `finding-writer` | Keeps what the vulnerability matcher decided, one row per episode of a finding and one per evaluation of an asset, under a group and a quarantine of its own, so a findings store outage costs how current findings are and never a decision. |
 | `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry with how recently each agent reported and its posture, the authority that signs an agent's certificate, the signed policies agents are handed, and the signed catalog of releases agents may install with their packages. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates and asking for their policy and their updates on a second one. |
 | `query-api` | The read plane, and the only reader of the analytical store. |

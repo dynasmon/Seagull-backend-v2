@@ -59,6 +59,7 @@ var layers = map[string]layer{
 	"internal/ingest":          capability,
 	"internal/inventory":       domain,
 	"internal/inventorystore":  capability,
+	"internal/matching":        capability,
 	"internal/osv":             adapter,
 	"internal/pki":             domain,
 	"internal/platform":        platform,
@@ -157,6 +158,15 @@ var within = map[string]restriction{
 			modulePath + "/internal/platform/tlsx",
 		},
 		because: "what a stored advisory is has no transport of its own: this half is reached from the backbone",
+	},
+	"internal/matching": {
+		prefixes: []string{
+			"net/http",
+			modulePath + "/internal/platform/httpx",
+			modulePath + "/internal/platform/tlsx",
+			modulePath + "/internal/alert",
+		},
+		because: "deciding what is vulnerable has no transport of its own and never raises an alert: this half is reached from the backbone and its stores",
 	},
 	"internal/osv": {
 		prefixes: []string{

@@ -142,6 +142,20 @@ var within = map[string]restriction{
 		},
 		because: "the one process that reads the internet holds no store and names no asset: what a feed says reaches the platform as a validated advisory on the backbone and by no other way",
 	},
+	"cmd/vulnerability-matcher": {
+		prefixes: []string{
+			"net/http",
+			modulePath + "/internal/platform/httpx",
+			modulePath + "/internal/advisoryfeed",
+			modulePath + "/internal/osv",
+			modulePath + "/internal/inventorystore",
+			modulePath + "/internal/advisorystore",
+			modulePath + "/internal/findingstore",
+			modulePath + "/internal/postgres",
+			modulePath + "/internal/alert",
+		},
+		because: "the matcher reads the backbone and the analytical store and nothing else: no feed and no transport of its own, no capability that writes a store, and no alert",
+	},
 	"internal/advisoryfeed": {
 		prefixes: []string{
 			"net/http",

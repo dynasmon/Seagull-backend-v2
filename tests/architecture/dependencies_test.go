@@ -52,6 +52,8 @@ var layers = map[string]layer{
 	"internal/devpki":          development,
 	"internal/event":           domain,
 	"internal/eventstore":      capability,
+	"internal/finding":         domain,
+	"internal/findingstore":    capability,
 	"internal/hunt":            capability,
 	"internal/incident":        domain,
 	"internal/ingest":          capability,
@@ -217,6 +219,19 @@ var within = map[string]restriction{
 			modulePath + "/internal/platform/tlsx",
 		},
 		because: "what a stored event is has no transport of its own: this half is reached from the backbone",
+	},
+	"internal/finding": {
+		prefixes: []string{modulePath + "/internal/alert"},
+		because:  "a finding is what the platform decided about a package an asset holds and an alert is a detection somebody owns: a person answers a finding with a disposition, and a finding never becomes an alert",
+	},
+	"internal/findingstore": {
+		prefixes: []string{
+			"net/http",
+			modulePath + "/internal/platform/httpx",
+			modulePath + "/internal/platform/tlsx",
+			modulePath + "/internal/alert",
+		},
+		because: "what a stored finding is has no transport of its own and is never an alert: this half is reached from the backbone",
 	},
 	"internal/inventorystore": {
 		prefixes: []string{

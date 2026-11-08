@@ -74,11 +74,12 @@ func (p *Projector) Run(ctx context.Context) error { return p.source.Consume(ctx
 // quietly stopped moving.
 func (p *Projector) handle(ctx context.Context, records []Record) error {
 	rows, scans, refused := p.classify(records)
+	holders := Holders(rows)
 	p.metrics.observeBatch(len(records))
 
 	delay := p.retryDelay
 	for attempt := 1; ; attempt++ {
-		err := p.persist(ctx, len(records)-len(refused), rows, scans, refused)
+		err := p.persist(ctx, len(records)-len(refused), rows, holders, scans, refused)
 		if err == nil {
 			p.metrics.batchStored()
 			return nil
@@ -148,13 +149,13 @@ func (p *Projector) classify(records []Record) ([]Row, []Scan, []Refused) {
 	return rows, scans, refused
 }
 
-func (p *Projector) persist(ctx context.Context, folded int, rows []Row, scans []Scan, refused []Refused) error {
+func (p *Projector) persist(ctx context.Context, folded int, rows []Row, holders []Holder, scans []Scan, refused []Refused) error {
 	writeCtx, cancel := context.WithTimeout(ctx, p.writeTimeout)
 	defer cancel()
 
 	if len(rows) > 0 || len(scans) > 0 {
 		started := time.Now()
-		if err := p.sink.Store(writeCtx, rows, scans); err != nil {
+		if err := p.sink.Store(writeCtx, rows, holders, scans); err != nil {
 			return fmt.Errorf("store %d items and %d scans: %w", len(rows), len(scans), err)
 		}
 		p.metrics.stored(folded, rows, scans, time.Since(started))

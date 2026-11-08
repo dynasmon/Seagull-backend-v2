@@ -27,11 +27,12 @@ type Source interface {
 	Consume(ctx context.Context, deliver Deliver) error
 }
 
-// The items land before the scans, because a scan moves the line absence is
-// measured against and a reader that saw the line move without the items would
-// read a whole asset as having nothing installed.
+// The items, and their holders under the names advisories use, land before the
+// scans, because a scan moves the line absence is measured against and a reader
+// that saw the line move without the items would read a whole asset as having
+// nothing installed.
 type Sink interface {
-	Store(ctx context.Context, rows []Row, scans []Scan) error
+	Store(ctx context.Context, rows []Row, holders []Holder, scans []Scan) error
 }
 
 type Refused struct {

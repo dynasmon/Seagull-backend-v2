@@ -13,6 +13,7 @@ import (
 
 const (
 	inventoryTable = "asset_inventory"
+	holderTable    = "asset_package_holders"
 	scanTable      = "asset_inventory_scans"
 )
 
@@ -98,6 +99,14 @@ var inventoryColumns = []string{
 	"process_command_line",
 	"process_user",
 	"process_started_at",
+}
+
+var holderColumns = []string{
+	"package",
+	"tenant_id",
+	"agent_id",
+	"item_id",
+	"last_seen",
 }
 
 var scanColumns = []string{
@@ -196,6 +205,16 @@ func inventoryValues(row inventorystore.Row) []any {
 	}
 }
 
+func holderValues(holder inventorystore.Holder) []any {
+	return []any{
+		holder.Package,
+		holder.TenantID,
+		holder.AgentID,
+		holder.ItemID,
+		holder.LastSeen,
+	}
+}
+
 func scanValues(scan inventorystore.Scan) []any {
 	return []any{
 		scan.TenantID,
@@ -215,10 +234,11 @@ func listed(values []string) []string {
 }
 
 type InventoryStore struct {
-	connection driver.Conn
-	database   string
-	insertRows string
-	insertScan string
+	connection    driver.Conn
+	database      string
+	insertRows    string
+	insertHolders string
+	insertScan    string
 }
 
 func NewInventoryStore(configuration Config) (*InventoryStore, error) {
@@ -232,21 +252,33 @@ func NewInventoryStore(configuration Config) (*InventoryStore, error) {
 	}
 
 	return &InventoryStore{
-		connection: connection,
-		database:   configuration.Database,
-		insertRows: fmt.Sprintf("INSERT INTO %s (%s)", inventoryTable, strings.Join(inventoryColumns, ", ")),
-		insertScan: fmt.Sprintf("INSERT INTO %s (%s)", scanTable, strings.Join(scanColumns, ", ")),
+		connection:    connection,
+		database:      configuration.Database,
+		insertRows:    fmt.Sprintf("INSERT INTO %s (%s)", inventoryTable, strings.Join(inventoryColumns, ", ")),
+		insertHolders: fmt.Sprintf("INSERT INTO %s (%s)", holderTable, strings.Join(holderColumns, ", ")),
+		insertScan:    fmt.Sprintf("INSERT INTO %s (%s)", scanTable, strings.Join(scanColumns, ", ")),
 	}, nil
 }
 
-// The items land before the line absence is measured against moves, never the
-// other way: a reader that saw the new line and none of its items would read a
-// whole asset as having nothing installed.
-func (s *InventoryStore) Store(ctx context.Context, rows []inventorystore.Row, scans []inventorystore.Scan) error {
+// The items and their holders land before the line absence is measured against
+// moves, never the other way: a reader that saw the new line and none of its
+// items would read a whole asset as having nothing installed.
+func (s *InventoryStore) Store(ctx context.Context, rows []inventorystore.Row, holders []inventorystore.Holder, scans []inventorystore.Scan) error {
 	if err := s.write(ctx, s.insertRows, inventoryTable, len(rows), func(batch driver.Batch) error {
 		for _, row := range rows {
 			if err := batch.Append(inventoryValues(row)...); err != nil {
 				return fmt.Errorf("add item %s to the batch: %w", row.ItemID, err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if err := s.write(ctx, s.insertHolders, holderTable, len(holders), func(batch driver.Batch) error {
+		for _, holder := range holders {
+			if err := batch.Append(holderValues(holder)...); err != nil {
+				return fmt.Errorf("add the holder of %s on agent %s to the batch: %w", holder.Package, holder.AgentID, err)
 			}
 		}
 		return nil
@@ -306,6 +338,9 @@ func (s *InventoryStore) VerifySchema(ctx context.Context) error {
 	if err := columnsPresent(ctx, s.connection, s.database, inventoryTable, inventoryColumns); err != nil {
 		return err
 	}
+	if err := columnsPresent(ctx, s.connection, s.database, holderTable, holderColumns); err != nil {
+		return err
+	}
 	return columnsPresent(ctx, s.connection, s.database, scanTable, scanColumns)
 }
 
@@ -318,6 +353,7 @@ func inventoryAgreesWithSchema() error {
 		values  int
 	}{
 		{inventoryTable, inventoryColumns, len(inventoryValues(inventorystore.Row{}))},
+		{holderTable, holderColumns, len(holderValues(inventorystore.Holder{}))},
 		{scanTable, scanColumns, len(scanValues(inventorystore.Scan{}))},
 	} {
 		declared, err := declaredColumns(agreement.table)

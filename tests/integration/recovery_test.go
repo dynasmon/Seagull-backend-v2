@@ -30,6 +30,7 @@ import (
 // builds its own keeper, because state held in a process is what a crash and a
 // revocation both take away.
 type replica struct {
+	topic    string
 	consumer *broker.Consumer
 	engine   *analysis.Engine
 	stop     context.CancelFunc
@@ -122,7 +123,7 @@ func start(t *testing.T, options replicaOptions) *replica {
 	}
 
 	running, stop := context.WithCancel(context.Background())
-	held := &replica{consumer: consumer, engine: engine, stop: stop, stopped: make(chan error, 1)}
+	held := &replica{topic: options.topic, consumer: consumer, engine: engine, stop: stop, stopped: make(chan error, 1)}
 	go func() {
 		held.stopped <- engine.Run(running)
 		consumer.Close()
@@ -488,7 +489,7 @@ func settled(t *testing.T, held *replica) {
 
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(held.consumer.Assigned()) == partitionsPerTopic {
+		if len(held.consumer.Assigned(held.topic)) == partitionsPerTopic {
 			return
 		}
 		select {
@@ -502,7 +503,7 @@ func settled(t *testing.T, held *replica) {
 		}
 	}
 	t.Fatalf("a reader is still holding %v of %d partitions and still running",
-		held.consumer.Assigned(), partitionsPerTopic)
+		held.consumer.Assigned(held.topic), partitionsPerTopic)
 }
 
 func errorMentions(err error, part string) bool {
@@ -514,10 +515,10 @@ func awaitAssignment(t *testing.T, held *replica, total int) {
 
 	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
-		if assigned := len(held.consumer.Assigned()); assigned > 0 && assigned < total {
+		if assigned := len(held.consumer.Assigned(held.topic)); assigned > 0 && assigned < total {
 			return
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	t.Fatalf("the first replica still holds %v after a second one joined", held.consumer.Assigned())
+	t.Fatalf("the first replica still holds %v after a second one joined", held.consumer.Assigned(held.topic))
 }

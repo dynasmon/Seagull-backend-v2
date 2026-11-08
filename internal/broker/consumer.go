@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,6 +71,7 @@ func (l offsetLister) ListOffsetsAfter(ctx context.Context, topic string, millis
 }
 
 type Record struct {
+	Topic     string
 	Partition int32
 	Offset    int64
 	Key       []byte
@@ -81,6 +84,7 @@ type Deliver func(ctx context.Context, records []Record) error
 type ConsumerConfig struct {
 	Brokers      []string
 	Topic        string
+	Topics       []string
 	Group        string
 	ClientID     string
 	MaxRecords   int
@@ -89,23 +93,26 @@ type ConsumerConfig struct {
 	Security     Security
 	Logger       *slog.Logger
 
-	Recovery Recovery
+	Recovery  Recovery
+	Ownership Ownership
 }
 
 type Consumer struct {
 	client          *kgo.Client
-	topic           string
+	topics          []string
 	group           string
 	maxRecords      int
 	metrics         *ConsumerMetrics
 	endOffsets      endOffsetReader
 	recovery        Recovery
+	ownership       Ownership
 	lastRecordTimes func(ctx context.Context, positions map[int32]int64) (map[int32]time.Time, error)
 	logger          *slog.Logger
 
-	mu       sync.Mutex
-	assigned map[int32]struct{}
-	refusal  error
+	mu        sync.Mutex
+	assigned  map[string]map[int32]struct{}
+	refusal   error
+	interrupt context.CancelFunc
 }
 
 // New groups start at the earliest durable telemetry.
@@ -113,8 +120,18 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 	if len(config.Brokers) == 0 {
 		return nil, errors.New("the backbone needs at least one broker address")
 	}
-	if config.Topic == "" {
+	topics := config.Topics
+	if config.Topic != "" {
+		topics = append([]string{config.Topic}, config.Topics...)
+	}
+	if len(topics) == 0 || slices.Contains(topics, "") {
 		return nil, errors.New("the backbone needs a topic")
+	}
+	if len(slices.Compact(slices.Sorted(slices.Values(topics)))) != len(topics) {
+		return nil, errors.New("a backbone consumer reads each topic once")
+	}
+	if config.Recovery != nil && (config.Topic == "" || len(config.Topics) > 0) {
+		return nil, errors.New("a backbone consumer rebuilds what it remembers from the one topic it names")
 	}
 	if config.Group == "" {
 		return nil, errors.New("a backbone consumer needs a group")
@@ -131,13 +148,14 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 		logger = slog.New(slog.DiscardHandler)
 	}
 	consumer := &Consumer{
-		topic:      config.Topic,
+		topics:     topics,
 		group:      config.Group,
 		maxRecords: config.MaxRecords,
 		metrics:    config.Metrics,
 		recovery:   config.Recovery,
+		ownership:  config.Ownership,
 		logger:     logger,
-		assigned:   make(map[int32]struct{}),
+		assigned:   make(map[string]map[int32]struct{}, len(topics)),
 	}
 
 	secured, err := config.Security.options()
@@ -150,7 +168,7 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 		kgo.SeedBrokers(config.Brokers...),
 		kgo.ClientID(config.ClientID),
 		kgo.ConsumerGroup(config.Group),
-		kgo.ConsumeTopics(config.Topic),
+		kgo.ConsumeTopics(topics...),
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
 		kgo.DisableAutoCommit(),
 		kgo.BlockRebalanceOnPoll(),
@@ -186,6 +204,12 @@ func (c *Consumer) Consume(ctx context.Context, deliver Deliver) error {
 		<-monitorDone
 	}()
 
+	polling, interrupt := context.WithCancel(ctx)
+	defer interrupt()
+	c.mu.Lock()
+	c.interrupt = interrupt
+	c.mu.Unlock()
+
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -194,9 +218,13 @@ func (c *Consumer) Consume(ctx context.Context, deliver Deliver) error {
 			return err
 		}
 
-		fetches := c.client.PollRecords(ctx, c.maxRecords)
+		fetches := c.client.PollRecords(polling, c.maxRecords)
 		if fetches.IsClientClosed() {
 			return errors.New("the backbone consumer was closed")
+		}
+		if err := c.refused(); err != nil {
+			c.client.AllowRebalance()
+			return err
 		}
 		if err := ctx.Err(); err != nil {
 			c.client.AllowRebalance()
@@ -214,7 +242,7 @@ func (c *Consumer) Consume(ctx context.Context, deliver Deliver) error {
 			if err := c.commit(ctx); err != nil {
 				c.metrics.commitFailed()
 				c.client.AllowRebalance()
-				return fmt.Errorf("commit the group position on %s: %w", c.topic, err)
+				return fmt.Errorf("commit the group position on %s: %w", strings.Join(c.topics, ", "), err)
 			}
 			c.metrics.committed(fetches)
 		}
@@ -243,6 +271,7 @@ func collect(fetches kgo.Fetches) []Record {
 	records := make([]Record, 0, total)
 	fetches.EachRecord(func(record *kgo.Record) {
 		records = append(records, Record{
+			Topic:     record.Topic,
 			Partition: record.Partition,
 			Offset:    record.Offset,
 			Key:       record.Key,
@@ -287,23 +316,34 @@ func (c *Consumer) monitorLag(ctx context.Context) {
 }
 
 func (c *Consumer) refreshLag(ctx context.Context) {
-	if !c.metrics.tracks(c.topic) {
+	var tracked []string
+	for _, topic := range c.topics {
+		if c.metrics.tracks(topic) {
+			tracked = append(tracked, topic)
+		}
+	}
+	if len(tracked) == 0 {
 		return
 	}
 	refreshCtx, cancel := context.WithTimeout(ctx, lagRefreshTimeout)
 	defer cancel()
 
-	offsets, err := c.endOffsets.ListEndOffsets(refreshCtx, c.topic)
-	failed := err != nil
+	offsets, err := c.endOffsets.ListEndOffsets(refreshCtx, tracked...)
+	failed := map[string]bool{}
 	offsets.Each(func(offset kadm.ListedOffset) {
 		if offset.Err != nil || offset.Offset < 0 {
-			failed = true
+			failed[offset.Topic] = true
 			return
 		}
 		c.metrics.refresh(offset.Topic, offset.Partition, offset.Offset)
 	})
-	if failed && ctx.Err() == nil {
-		c.metrics.lagRefreshFailed(c.topic)
+	if ctx.Err() != nil {
+		return
+	}
+	for _, topic := range tracked {
+		if err != nil || failed[topic] {
+			c.metrics.lagRefreshFailed(topic)
+		}
 	}
 }
 

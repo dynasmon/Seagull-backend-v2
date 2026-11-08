@@ -866,7 +866,7 @@ record can carry an attacker's input, and the position is enough to fetch it.
 
 ## The inventory projection
 
-Two tables hold what an asset currently has, projected from the contract by
+Three tables hold what an asset currently has, projected from the contract by
 `internal/inventorystore` and written by `inventory-projector`. The same rule
 holds as for telemetry: a field exists there because the contract carries it, and
 a test walks the protobuf descriptor so the contract cannot grow a field the
@@ -879,6 +879,14 @@ because the projection is one row per item.
   never read off the wire, so a replay lands on the row it wrote the first time.
 - **`asset_inventory_scans`** — one row per `(tenant_id, agent_id, kind)`, holding
   the `scanned_at` of the newest full enumeration.
+- **`asset_package_holders`** — one row per `(package, tenant_id, agent_id,
+  item_id)`, where `package` is a name a distribution's advisories may give the
+  package (`vulnerability.PackageNames`): the source it was built from for Debian,
+  Ubuntu, Alpine and Rocky Linux, the binary for AlmaLinux. It is ordered for
+  "which assets hold package X", which `asset_inventory` is not, and is written in
+  the same batch as the package rows it names. It says where to look and never
+  what is there: whether the asset still has the package, and at which version, is
+  read from `asset_inventory` against the newest scan.
 
 **What is current.** The items of a kind on an asset are those whose `last_seen`
 is at or after that asset's `scanned_at` for that kind:
@@ -903,7 +911,7 @@ and nothing is tombstoned**: an item that went away leaves the row saying when i
 was last seen, and it is out of the answer because the line moved past it. Read
 the other way round, the same line is the staleness of the answer.
 
-**Out of order.** Both tables are `ReplacingMergeTree` versioned by the
+**Out of order.** All three tables are `ReplacingMergeTree` versioned by the
 collector's clock — `last_seen` and `scanned_at` — so a record that reaches the
 store late loses to the newer one it arrived behind rather than overwriting it.
 As with telemetry, that collapse happens on merge, so a query that must not see a

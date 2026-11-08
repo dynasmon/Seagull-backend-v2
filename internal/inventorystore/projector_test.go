@@ -35,10 +35,11 @@ type folded struct {
 	order    []string
 	failures int
 	rows     [][]Row
+	holders  [][]Holder
 	scans    [][]Scan
 }
 
-func (f *folded) Store(_ context.Context, rows []Row, scans []Scan) error {
+func (f *folded) Store(_ context.Context, rows []Row, holders []Holder, scans []Scan) error {
 	f.order = append(f.order, "store")
 	if f.failures != 0 {
 		if f.failures > 0 {
@@ -47,6 +48,7 @@ func (f *folded) Store(_ context.Context, rows []Row, scans []Scan) error {
 		return errors.New("the store is unavailable")
 	}
 	f.rows = append(f.rows, slices.Clone(rows))
+	f.holders = append(f.holders, slices.Clone(holders))
 	f.scans = append(f.scans, slices.Clone(scans))
 	return nil
 }

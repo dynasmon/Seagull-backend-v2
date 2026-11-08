@@ -363,8 +363,10 @@ Seagull Agent
                    inventory-projector
                            │                    └──▶ security.inventory.quarantine
                            ▼
-     ClickHouse asset_inventory · asset_inventory_scans
-                 one row per item      when that kind was last enumerated in full
+     ClickHouse asset_inventory · asset_inventory_scans · asset_package_holders
+                 one row per item      when that kind was    which assets hold a package,
+                                       last enumerated       by the names advisories use
+                                       in full
 ```
 
 What an agent says of itself travels on a third stream, beside the other two, so

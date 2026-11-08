@@ -17,6 +17,7 @@ func TestTheInventoryAdapterInsertsIntoTheColumnsTheSchemaCreates(t *testing.T) 
 		columns []string
 	}{
 		{inventoryTable, inventoryColumns},
+		{holderTable, holderColumns},
 		{scanTable, scanColumns},
 	} {
 		declared, err := declaredColumns(agreement.table)
@@ -56,6 +57,10 @@ func TestTheInventoryProjectionAndTheTableHaveTheSameWidth(t *testing.T) {
 		t.Errorf("an inventory row carries %d fields and %s takes %d columns",
 			fields, inventoryTable, len(inventoryColumns))
 	}
+	if fields := reflect.TypeFor[inventorystore.Holder]().NumField(); fields != len(holderColumns) {
+		t.Errorf("a holder carries %d fields and %s takes %d columns",
+			fields, holderTable, len(holderColumns))
+	}
 	if fields := reflect.TypeFor[inventorystore.Scan]().NumField(); fields != len(scanColumns) {
 		t.Errorf("a scan carries %d fields and %s takes %d columns",
 			fields, scanTable, len(scanColumns))
@@ -69,7 +74,7 @@ func TestTheInventoryTablesAreReplacedAndNeverDeletedFrom(t *testing.T) {
 	for _, applied := range migrations {
 		for _, statement := range applied.statements {
 			lowered := strings.ToLower(statement)
-			if !strings.Contains(lowered, inventoryTable) {
+			if !strings.Contains(lowered, inventoryTable) && !strings.Contains(lowered, holderTable) {
 				continue
 			}
 			if strings.Contains(lowered, "delete from") || strings.Contains(lowered, "collapsingmergetree") {

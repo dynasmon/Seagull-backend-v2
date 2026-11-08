@@ -80,7 +80,7 @@ func foldRecord(t *testing.T, store *clickhouse.InventoryStore, owner string, re
 	if enumerated, full := inventorystore.Scanned(record); full {
 		scans = append(scans, enumerated)
 	}
-	if err := store.Store(ctx, rows, scans); err != nil {
+	if err := store.Store(ctx, rows, inventorystore.Holders(rows), scans); err != nil {
 		t.Fatalf("fold the record: %v", err)
 	}
 }

@@ -88,10 +88,11 @@ func TestAnAssignmentTheReaderMayNotHoldIsLatchedForTheLoopToStopOn(t *testing.T
 
 func TestAConsumerRefusesTopicsItCannotReadAsOne(t *testing.T) {
 	for name, config := range map[string]ConsumerConfig{
-		"no topic":          {Brokers: []string{"localhost:9092"}, Group: "g", MaxRecords: 1, Metrics: NewConsumerMetrics(metrics.New("test"))},
-		"a topic twice":     {Brokers: []string{"localhost:9092"}, Topic: inventoryStream, Topics: []string{inventoryStream}, Group: "g", MaxRecords: 1, Metrics: NewConsumerMetrics(metrics.New("test"))},
-		"an unnamed topic":  {Brokers: []string{"localhost:9092"}, Topics: []string{inventoryStream, ""}, Group: "g", MaxRecords: 1, Metrics: NewConsumerMetrics(metrics.New("test"))},
-		"recovery from two": {Brokers: []string{"localhost:9092"}, Topics: []string{inventoryStream, advisoriesStream}, Group: "g", MaxRecords: 1, Metrics: NewConsumerMetrics(metrics.New("test")), Recovery: func(int32) (time.Duration, error) { return 0, nil }},
+		"no topic":             {Brokers: []string{"localhost:9092"}, Group: "g", MaxRecords: 1, Metrics: NewConsumerMetrics(metrics.New("test"))},
+		"a topic twice":        {Brokers: []string{"localhost:9092"}, Topic: inventoryStream, Topics: []string{inventoryStream}, Group: "g", MaxRecords: 1, Metrics: NewConsumerMetrics(metrics.New("test"))},
+		"an unnamed topic":     {Brokers: []string{"localhost:9092"}, Topics: []string{inventoryStream, ""}, Group: "g", MaxRecords: 1, Metrics: NewConsumerMetrics(metrics.New("test"))},
+		"recovery from a list": {Brokers: []string{"localhost:9092"}, Topics: []string{inventoryStream}, Group: "g", MaxRecords: 1, Metrics: NewConsumerMetrics(metrics.New("test")), Recovery: func(int32) (time.Duration, error) { return 0, nil }},
+		"recovery from two":    {Brokers: []string{"localhost:9092"}, Topics: []string{inventoryStream, advisoriesStream}, Group: "g", MaxRecords: 1, Metrics: NewConsumerMetrics(metrics.New("test")), Recovery: func(int32) (time.Duration, error) { return 0, nil }},
 	} {
 		if _, err := NewConsumer(config); err == nil {
 			t.Errorf("%s: the consumer was built", name)

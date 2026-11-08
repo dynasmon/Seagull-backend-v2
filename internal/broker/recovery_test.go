@@ -29,7 +29,7 @@ func reader(t *testing.T, recovery Recovery, ends, after kadm.ListedOffsets) *Co
 	t.Helper()
 
 	return &Consumer{
-		topic:   stream,
+		topics:  []string{stream},
 		metrics: NewConsumerMetrics(metrics.New("test")),
 		endOffsets: staticEndOffsets{
 			starts:  listed(map[int32]int64{0: 0, 1: 0}),
@@ -45,7 +45,7 @@ func reader(t *testing.T, recovery Recovery, ends, after kadm.ListedOffsets) *Co
 			return times, nil
 		},
 		logger:   slog.New(slog.DiscardHandler),
-		assigned: map[int32]struct{}{0: {}, 1: {}},
+		assigned: map[string]map[int32]struct{}{stream: {0: {}, 1: {}}},
 	}
 }
 
@@ -113,13 +113,13 @@ func behind(t *testing.T, topic timeline, recovery time.Duration) (*Consumer, *m
 		assigned[partition] = struct{}{}
 	}
 	return &Consumer{
-		topic:           stream,
+		topics:          []string{stream},
 		metrics:         NewConsumerMetrics(registry),
 		endOffsets:      topic,
 		recovery:        func(int32) (time.Duration, error) { return recovery, nil },
 		lastRecordTimes: topic.lastRecordTimes,
 		logger:          slog.New(slog.NewJSONHandler(written, nil)),
-		assigned:        assigned,
+		assigned:        map[string]map[int32]struct{}{stream: assigned},
 	}, registry, written
 }
 
@@ -393,11 +393,11 @@ func TestAnAssignmentTheReaderRefusesStopsItRatherThanRejoining(t *testing.T) {
 func TestABackboneThatWillNotSayWhereTheWindowStartsStopsTheReader(t *testing.T) {
 	unavailable := errors.New("broker unavailable")
 	consumer := &Consumer{
-		topic:      stream,
+		topics:     []string{stream},
 		metrics:    NewConsumerMetrics(metrics.New("test")),
 		endOffsets: staticEndOffsets{err: unavailable},
 		recovery:   func(int32) (time.Duration, error) { return time.Hour, nil },
-		assigned:   map[int32]struct{}{0: {}},
+		assigned:   map[string]map[int32]struct{}{stream: {0: {}}},
 	}
 
 	if _, err := consumer.rebuild(context.Background(), committed(map[int32]int64{0: 800})); !errors.Is(err, unavailable) {
@@ -410,23 +410,23 @@ func TestABackboneThatWillNotSayWhereTheWindowStartsStopsTheReader(t *testing.T)
 
 func TestWhatTheReaderHoldsFollowsTheGroupMovingPartitionsAround(t *testing.T) {
 	consumer := &Consumer{
-		topic:    stream,
+		topics:   []string{stream},
 		metrics:  NewConsumerMetrics(metrics.New("test")),
-		assigned: map[int32]struct{}{},
+		assigned: map[string]map[int32]struct{}{},
 	}
 
 	consumer.took(map[string][]int32{stream: {0, 1, 2}})
-	if held := consumer.holding(); held != 3 {
+	if held := consumer.held(stream); held != 3 {
 		t.Errorf("the reader holds %d partitions after being given three", held)
 	}
 
 	consumer.gave(map[string][]int32{stream: {1, 2}})
-	if held := consumer.holding(); held != 1 {
+	if held := consumer.held(stream); held != 1 {
 		t.Errorf("the reader holds %d partitions after giving two back", held)
 	}
 
 	consumer.took(map[string][]int32{stream: {0, 5}})
-	if got := consumer.Assigned(); len(got) != 2 || got[0] != 0 || got[1] != 5 {
+	if got := consumer.Assigned(stream); len(got) != 2 || got[0] != 0 || got[1] != 5 {
 		t.Errorf("the reader reports holding %v", got)
 	}
 }
@@ -436,9 +436,9 @@ func TestWhatTheReaderHoldsFollowsTheGroupMovingPartitionsAround(t *testing.T) {
 func TestAReaderLeftWithAnAssignmentItCannotAnswerStopsToo(t *testing.T) {
 	refusal := errors.New("a rule needs the whole stream")
 	consumer := &Consumer{
-		topic:    stream,
+		topics:   []string{stream},
 		metrics:  NewConsumerMetrics(metrics.New("test")),
-		assigned: map[int32]struct{}{0: {}, 1: {}, 2: {}},
+		assigned: map[string]map[int32]struct{}{stream: {0: {}, 1: {}, 2: {}}},
 		recovery: func(held int32) (time.Duration, error) {
 			if held < 3 {
 				return 0, refusal
@@ -458,9 +458,9 @@ func TestAReaderLeftWithAnAssignmentItCannotAnswerStopsToo(t *testing.T) {
 func TestWhatIsLeftAfterARevocationIsWhatTheReaderIsAskedAbout(t *testing.T) {
 	var asked []int32
 	consumer := &Consumer{
-		topic:    stream,
+		topics:   []string{stream},
 		metrics:  NewConsumerMetrics(metrics.New("test")),
-		assigned: map[int32]struct{}{0: {}, 1: {}},
+		assigned: map[string]map[int32]struct{}{stream: {0: {}, 1: {}}},
 		recovery: func(held int32) (time.Duration, error) {
 			asked = append(asked, held)
 			return 0, nil

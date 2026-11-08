@@ -132,7 +132,7 @@ func engine(ctx context.Context) error {
 	platform.Health().Register("backbone", consumer.Ping)
 	platform.Health().Register("detections", detections.Ping)
 	assigned := func() (int32, int32) {
-		return int32(len(consumer.Assigned())), settings.topology.Events.Partitions
+		return int32(len(consumer.Assigned(settings.topology.Events.Name))), settings.topology.Events.Partitions
 	}
 	platform.Add(published.follower(platform.Logger(), registry, engineRuntime, assigned))
 	platform.Add(component)

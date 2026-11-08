@@ -32,19 +32,20 @@ func (c *Consumer) rebuild(ctx context.Context, offsets map[string]map[int32]kgo
 		return offsets, nil
 	}
 
-	window, err := c.recovery(c.holding())
+	topic := c.topics[0]
+	window, err := c.recovery(c.held(topic))
 	if err != nil {
 		return nil, c.refuse(err)
 	}
-	if window <= 0 || len(offsets[c.topic]) == 0 {
+	if window <= 0 || len(offsets[topic]) == 0 {
 		return offsets, nil
 	}
-	return c.rewind(ctx, offsets, window)
+	return c.rewind(ctx, topic, offsets, window)
 }
 
-func (c *Consumer) rewind(ctx context.Context, offsets map[string]map[int32]kgo.Offset, window time.Duration) (map[string]map[int32]kgo.Offset, error) {
-	committed := make(map[int32]int64, len(offsets[c.topic]))
-	for partition, position := range offsets[c.topic] {
+func (c *Consumer) rewind(ctx context.Context, topic string, offsets map[string]map[int32]kgo.Offset, window time.Duration) (map[string]map[int32]kgo.Offset, error) {
+	committed := make(map[int32]int64, len(offsets[topic]))
+	for partition, position := range offsets[topic] {
 		if offset := position.EpochOffset().Offset; offset > 0 {
 			committed[partition] = offset
 		}
@@ -53,24 +54,24 @@ func (c *Consumer) rewind(ctx context.Context, offsets map[string]map[int32]kgo.
 		return offsets, nil
 	}
 
-	starts, err := c.endOffsets.ListStartOffsets(ctx, c.topic)
+	starts, err := c.endOffsets.ListStartOffsets(ctx, topic)
 	if err != nil {
-		return nil, c.refuse(fmt.Errorf("read where %s starts to rebuild detection state: %w", c.topic, err))
+		return nil, c.refuse(fmt.Errorf("read where %s starts to rebuild detection state: %w", topic, err))
 	}
 	held := make(map[int32]int64, len(committed))
 	for partition, position := range committed {
-		start, found := starts.Lookup(c.topic, partition)
+		start, found := starts.Lookup(topic, partition)
 		switch {
 		case found && start.Err != nil:
-			return nil, c.refuse(fmt.Errorf("read where partition %d of %s starts: %w", partition, c.topic, start.Err))
+			return nil, c.refuse(fmt.Errorf("read where partition %d of %s starts: %w", partition, topic, start.Err))
 		case !found || start.Offset < 0:
-			return nil, c.refuse(fmt.Errorf("the backbone did not say where partition %d of %s starts", partition, c.topic))
+			return nil, c.refuse(fmt.Errorf("the backbone did not say where partition %d of %s starts", partition, topic))
 		}
 		switch {
 		case position < start.Offset:
-			c.cut(partition, position, "undecided_records_gone")
+			c.cut(topic, partition, position, "undecided_records_gone")
 		case position-1 < start.Offset:
-			c.cut(partition, position, "last_committed_record_gone")
+			c.cut(topic, partition, position, "last_committed_record_gone")
 		default:
 			held[partition] = position
 		}
@@ -81,13 +82,13 @@ func (c *Consumer) rewind(ctx context.Context, offsets map[string]map[int32]kgo.
 
 	stopped, err := c.lastRecordTimes(ctx, held)
 	if err != nil {
-		return nil, c.refuse(fmt.Errorf("read the last records %s committed to rebuild detection state: %w", c.topic, err))
+		return nil, c.refuse(fmt.Errorf("read the last records %s committed to rebuild detection state: %w", topic, err))
 	}
 	from := make(map[int32]int64, len(held))
 	for partition, position := range held {
 		last, found := stopped[partition]
 		if !found {
-			c.cut(partition, position, "last_committed_record_gone")
+			c.cut(topic, partition, position, "last_committed_record_gone")
 			continue
 		}
 		from[partition] = last.Add(-window).UnixMilli()
@@ -96,28 +97,28 @@ func (c *Consumer) rewind(ctx context.Context, offsets map[string]map[int32]kgo.
 		return offsets, nil
 	}
 
-	listed, err := c.endOffsets.ListOffsetsAfter(ctx, c.topic, from)
+	listed, err := c.endOffsets.ListOffsetsAfter(ctx, topic, from)
 	if err != nil {
-		return nil, c.refuse(fmt.Errorf("read back %s of %s to rebuild detection state: %w", window, c.topic, err))
+		return nil, c.refuse(fmt.Errorf("read back %s of %s to rebuild detection state: %w", window, topic, err))
 	}
 	rebuilt := maps.Clone(offsets)
-	rebuilt[c.topic] = maps.Clone(offsets[c.topic])
+	rebuilt[topic] = maps.Clone(offsets[topic])
 	for partition := range from {
 		position := held[partition]
-		earliest, found := listed.Lookup(c.topic, partition)
+		earliest, found := listed.Lookup(topic, partition)
 		if !found || earliest.Err != nil || earliest.Offset < 0 || earliest.Offset >= position {
 			continue
 		}
-		rebuilt[c.topic][partition] = kgo.NewOffset().At(earliest.Offset).WithEpoch(-1)
-		c.metrics.rebuilt(c.topic, position-earliest.Offset)
+		rebuilt[topic][partition] = kgo.NewOffset().At(earliest.Offset).WithEpoch(-1)
+		c.metrics.rebuilt(topic, position-earliest.Offset)
 	}
 	return rebuilt, nil
 }
 
-func (c *Consumer) cut(partition int32, position int64, reason string) {
-	c.metrics.cut(c.topic, partition)
+func (c *Consumer) cut(topic string, partition int32, position int64, reason string) {
+	c.metrics.cut(topic, partition)
 	c.logger.Warn("state_rebuild_incomplete",
-		slog.String("topic", c.topic),
+		slog.String("topic", topic),
 		slog.Int("partition", int(partition)),
 		slog.Int64("position", position),
 		slog.String("reason", reason),
@@ -126,27 +127,38 @@ func (c *Consumer) cut(partition int32, position int64, reason string) {
 
 func (c *Consumer) took(assigned map[string][]int32) {
 	c.mu.Lock()
-	for _, partition := range assigned[c.topic] {
-		c.assigned[partition] = struct{}{}
+	for _, topic := range c.topics {
+		if c.assigned[topic] == nil {
+			c.assigned[topic] = make(map[int32]struct{})
+		}
+		for _, partition := range assigned[topic] {
+			c.assigned[topic][partition] = struct{}{}
+		}
 	}
-	held := len(c.assigned)
+	held := c.heldLocked()
 	c.mu.Unlock()
 
-	c.metrics.moved(c.topic, "assigned", len(assigned[c.topic]))
-	c.metrics.holding(c.topic, held)
+	for _, topic := range c.topics {
+		c.metrics.moved(topic, "assigned", len(assigned[topic]))
+		c.metrics.holding(topic, int(held[topic]))
+	}
 }
 
 func (c *Consumer) gave(revoked map[string][]int32) {
 	c.mu.Lock()
-	for _, partition := range revoked[c.topic] {
-		delete(c.assigned, partition)
+	for _, topic := range c.topics {
+		for _, partition := range revoked[topic] {
+			delete(c.assigned[topic], partition)
+		}
 	}
-	held := len(c.assigned)
+	held := c.heldLocked()
 	c.mu.Unlock()
 
-	c.metrics.moved(c.topic, "revoked", len(revoked[c.topic]))
-	c.metrics.holding(c.topic, held)
-	c.answerable(int32(held))
+	for _, topic := range c.topics {
+		c.metrics.moved(topic, "revoked", len(revoked[topic]))
+		c.metrics.holding(topic, int(held[topic]))
+	}
+	c.answerable(held[c.topics[0]])
 }
 
 // Losing a partition changes what a reader can answer as much as gaining one
@@ -160,10 +172,18 @@ func (c *Consumer) answerable(held int32) {
 	}
 }
 
-func (c *Consumer) holding() int32 {
+func (c *Consumer) held(topic string) int32 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return int32(len(c.assigned))
+	return int32(len(c.assigned[topic]))
+}
+
+func (c *Consumer) heldLocked() map[string]int32 {
+	held := make(map[string]int32, len(c.topics))
+	for _, topic := range c.topics {
+		held[topic] = int32(len(c.assigned[topic]))
+	}
+	return held
 }
 
 // Held rather than only returned: the group session that asked is not the
@@ -186,8 +206,8 @@ func (c *Consumer) refused() error {
 	return c.refusal
 }
 
-func (c *Consumer) Assigned() []int32 {
+func (c *Consumer) Assigned(topic string) []int32 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return slices.Sorted(maps.Keys(c.assigned))
+	return slices.Sorted(maps.Keys(c.assigned[topic]))
 }

@@ -44,7 +44,7 @@ func TestLagKeepsGrowingWithoutAnotherPoll(t *testing.T) {
 	instruments.observe(partition, -1)
 
 	consumer := Consumer{
-		topic:   partition.Topic,
+		topics:  []string{partition.Topic},
 		metrics: instruments,
 		endOffsets: staticEndOffsets{offsets: kadm.ListedOffsets{
 			partition.Topic: {
@@ -72,7 +72,7 @@ func TestLagRefreshFailureIsObservable(t *testing.T) {
 	instruments := NewConsumerMetrics(registry)
 	instruments.observe(fetchedPartition(2, 0, 4999, 5000), -1)
 	consumer := Consumer{
-		topic:      "security.events.raw",
+		topics:     []string{"security.events.raw"},
 		metrics:    instruments,
 		endOffsets: staticEndOffsets{err: errors.New("broker unavailable")},
 	}

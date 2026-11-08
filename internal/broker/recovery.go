@@ -173,6 +173,9 @@ func (c *Consumer) refuse(err error) error {
 	defer c.mu.Unlock()
 	if c.refusal == nil {
 		c.refusal = err
+		if c.interrupt != nil {
+			c.interrupt()
+		}
 	}
 	return err
 }

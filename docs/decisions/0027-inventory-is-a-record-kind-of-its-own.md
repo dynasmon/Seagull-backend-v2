@@ -10,6 +10,10 @@
 > kernels are two items and two accounts of uid 0 are two accounts. An item is named
 > through its record, and "two rows would leave an asset holding both" below is true
 > of a delta only: a snapshot retires what it stops naming.
+> Amended by [ADR 49](0049-a-finding-is-decided-by-one-reader-from-the-stores-their-owners-filled.md):
+> the reverse lookup left below to BE-036 is `asset_package_holders`, written with
+> the package rows, one row per name a distribution's advisories may give a
+> package; it says where to look, and `asset_inventory` says what is there.
 
 > Corrected: `Seagull-agent-v2` sends inventory, so "No agent" below no longer
 > holds. Its `inventory` module takes complete snapshots of the operating system,

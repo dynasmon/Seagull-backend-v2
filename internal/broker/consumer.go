@@ -103,9 +103,10 @@ type Consumer struct {
 	lastRecordTimes func(ctx context.Context, positions map[int32]int64) (map[int32]time.Time, error)
 	logger          *slog.Logger
 
-	mu       sync.Mutex
-	assigned map[int32]struct{}
-	refusal  error
+	mu        sync.Mutex
+	assigned  map[int32]struct{}
+	refusal   error
+	interrupt context.CancelFunc
 }
 
 // New groups start at the earliest durable telemetry.
@@ -186,6 +187,12 @@ func (c *Consumer) Consume(ctx context.Context, deliver Deliver) error {
 		<-monitorDone
 	}()
 
+	polling, interrupt := context.WithCancel(ctx)
+	defer interrupt()
+	c.mu.Lock()
+	c.interrupt = interrupt
+	c.mu.Unlock()
+
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -194,9 +201,13 @@ func (c *Consumer) Consume(ctx context.Context, deliver Deliver) error {
 			return err
 		}
 
-		fetches := c.client.PollRecords(ctx, c.maxRecords)
+		fetches := c.client.PollRecords(polling, c.maxRecords)
 		if fetches.IsClientClosed() {
 			return errors.New("the backbone consumer was closed")
+		}
+		if err := c.refused(); err != nil {
+			c.client.AllowRebalance()
+			return err
 		}
 		if err := ctx.Err(); err != nil {
 			c.client.AllowRebalance()

@@ -1,4 +1,4 @@
-"*’¯×Å­¿­2^
+"*¦ÍÂ×ÌÖÊê2^
 POST /v1/eventsseagull.ingest.v1.EventBatchseagull.event.v1.Event"(0ãý;:€õ$B¬2r
 POST /v1/inventory seagull.inventory.v1.RecordBatchseagull.inventory.v1.Record"(0ãýÿ:€õ$B¬HNP œ2_
 POST /v1/statusseagull.agent.v1.StatusBatchseagull.agent.v1.Status"(0ãý;:€õ$B¬2w

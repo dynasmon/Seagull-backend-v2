@@ -130,8 +130,8 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 	if len(slices.Compact(slices.Sorted(slices.Values(topics)))) != len(topics) {
 		return nil, errors.New("a backbone consumer reads each topic once")
 	}
-	if config.Recovery != nil && len(topics) != 1 {
-		return nil, errors.New("a backbone consumer rebuilds what it remembers from one topic")
+	if config.Recovery != nil && (config.Topic == "" || len(config.Topics) > 0) {
+		return nil, errors.New("a backbone consumer rebuilds what it remembers from the one topic it names")
 	}
 	if config.Group == "" {
 		return nil, errors.New("a backbone consumer needs a group")

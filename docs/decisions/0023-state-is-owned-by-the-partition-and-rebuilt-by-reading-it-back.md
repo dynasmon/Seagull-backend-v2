@@ -15,6 +15,11 @@
 > a revoked partition's keys are still reclaimed like any other, but a watermark no
 > longer belongs to the store, so one that stops delivering is carried on by the
 > rest of the stream from where it stopped.
+> Amended by [ADR 49](0049-a-finding-is-decided-by-one-reader-from-the-stores-their-owners-filled.md):
+> a reader may read several topics in one group and is asked what it may hold
+> whenever its partitions move; a refusal cancels the poll in progress, so a
+> refused reader stops even when nothing arrives, and records returned with the
+> refusal are never delivered.
 
 ## Context
 

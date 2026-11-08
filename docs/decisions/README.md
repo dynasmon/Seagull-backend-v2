@@ -52,3 +52,4 @@ rediscovered by reading the code.
 - [46. A revocation is enforced within the bound a gateway confirms its roster by, and a decision the log was never told is an alarm](0046-a-revocation-is-enforced-within-the-bound-a-gateway-confirms-its-roster-by.md)
 - [47. The query plane decides by the policy the control plane decides by, and a certificate's organisation authorises nothing](0047-the-query-plane-decides-by-the-policy-and-a-certificate-organisation-authorises-nothing.md)
 - [48. Every answer an agent reads is recorded here, and changes only by a version decision](0048-every-answer-an-agent-reads-is-recorded-here-and-changes-only-by-a-version-decision.md)
+- [49. A finding is decided by one reader from the stores their owners filled, and kept as one row for each episode of exposure](0049-a-finding-is-decided-by-one-reader-from-the-stores-their-owners-filled.md)

@@ -58,7 +58,8 @@ it read.
 `cmd/vulnerability-matcher` consumes `security.inventory.raw` and
 `security.advisories` in one group and one loop (`ConsumerConfig.Topics`). It
 reads ClickHouse through `clickhouse.MatchingReader`, which holds no insert
-statement and runs under a credential that reads, and it produces to
+statement, over a credential of its own that a deployment grants reads alone
+(development Compose reuses the stores' user), and it produces to
 `security.findings` alone. `finding-writer` keeps what it publishes. Nothing the
 matcher decides reaches a store any other way, and no package of it can name a
 feed, an HTTP client, a capability that writes a store or `internal/alert`

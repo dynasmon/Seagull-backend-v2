@@ -1,6 +1,6 @@
 
 batch-assessment
-asm-0000000001linux-baseline *Ó‘¯×”ö±¤2/
+asm-0000000001linux-baseline *êÌÂ×³ŒÙá2/
 defaultdev-agent-01
 web-01linux"amd64:
 

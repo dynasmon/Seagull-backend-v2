@@ -17,6 +17,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/assessment"
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
+	"github.com/dynasmon/Seagull-backend-v2/internal/finding"
 	"github.com/dynasmon/Seagull-backend-v2/internal/inventory"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/vulnerability"
@@ -64,6 +65,8 @@ type Topology struct {
 	StatusQuarantine      Topic
 	Assessments           Topic
 	AssessmentsQuarantine Topic
+	Findings              Topic
+	FindingsQuarantine    Topic
 }
 
 // Refused records and detections are both kept far longer than admitted events:
@@ -234,6 +237,28 @@ func LoadTopology(parser *config.Parser) Topology {
 			Durability:      durability,
 			MaxMessageBytes: quarantining(carrying(assessment.MaxAssessmentBytes)),
 		},
+		Findings: Topic{
+			Name:            parser.String("SEAGULL_BACKBONE_FINDINGS_TOPIC", "security.findings"),
+			Partitions:      int32(parser.Int("SEAGULL_BACKBONE_FINDINGS_PARTITIONS", 6, 1, 1_000)),
+			Replicas:        replicas,
+			Retention:       parser.Duration("SEAGULL_BACKBONE_FINDINGS_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:         cleanupDelete,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			Durability:      durability,
+			MaxMessageBytes: carrying(finding.MaxRecordBytes),
+		},
+		FindingsQuarantine: Topic{
+			Name:            parser.String("SEAGULL_BACKBONE_FINDINGS_QUARANTINE_TOPIC", "security.findings.quarantine"),
+			Partitions:      int32(parser.Int("SEAGULL_BACKBONE_FINDINGS_QUARANTINE_PARTITIONS", 1, 1, 1_000)),
+			Replicas:        replicas,
+			Retention:       parser.Duration("SEAGULL_BACKBONE_FINDINGS_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:         cleanupDelete,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			Durability:      durability,
+			MaxMessageBytes: quarantining(carrying(finding.MaxRecordBytes)),
+		},
 	}
 }
 
@@ -246,6 +271,7 @@ func (t Topology) Topics() []Topic {
 		t.Rulesets, t.Agents,
 		t.Status, t.StatusQuarantine,
 		t.Assessments, t.AssessmentsQuarantine,
+		t.Findings, t.FindingsQuarantine,
 	}
 }
 

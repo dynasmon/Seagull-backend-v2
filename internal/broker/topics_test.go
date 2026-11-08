@@ -11,6 +11,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/assessment"
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
+	"github.com/dynasmon/Seagull-backend-v2/internal/finding"
 	"github.com/dynasmon/Seagull-backend-v2/internal/inventory"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/vulnerability"
@@ -417,6 +418,7 @@ func TestEveryQuarantineCarriesMoreThanTheStreamItQuarantines(t *testing.T) {
 		{topology.Advisories, topology.AdvisoriesQuarantine},
 		{topology.Status, topology.StatusQuarantine},
 		{topology.Assessments, topology.AssessmentsQuarantine},
+		{topology.Findings, topology.FindingsQuarantine},
 	} {
 		if stream.quarantine.MaxMessageBytes <= stream.source.MaxMessageBytes {
 			t.Errorf("%s carries %d bytes and quarantines into %s, which carries %d: a refused record is copied whole and the reason travels beside it",
@@ -438,6 +440,7 @@ func TestEveryTopicCarriesTheLargestRecordItsProducersMayWrite(t *testing.T) {
 		{topology.Events, event.MaxEventBytes},
 		{topology.Status, agentstatus.MaxReportBytes},
 		{topology.Assessments, assessment.MaxAssessmentBytes},
+		{topology.Findings, finding.MaxRecordBytes},
 	} {
 		if int(kind.topic.MaxMessageBytes) < kind.largest+1<<10 {
 			t.Errorf("%s carries %d bytes and its producers may write a record of %d, with a key, headers and framing beside it",
@@ -557,6 +560,42 @@ func TestAssessmentsAreAStreamOfTheirOwnThatKeepsEveryOne(t *testing.T) {
 		t.Errorf("the assessments quarantine is %+v", quarantine)
 	}
 	for _, topic := range []Topic{topology.Assessments, topology.AssessmentsQuarantine} {
+		if err := topic.Validate(); err != nil {
+			t.Errorf("the shipped %s is refused: %v", topic.Name, err)
+		}
+		if !slices.ContainsFunc(topology.Topics(), func(applied Topic) bool { return applied.Name == topic.Name }) {
+			t.Errorf("%s is not in the topology the migrator applies, so the processes that need it would refuse to serve", topic.Name)
+		}
+	}
+}
+
+func TestFindingsAreAStreamOfTheirOwnThatKeepsEveryDecision(t *testing.T) {
+	topology := declared(t, map[string]string{
+		"SEAGULL_BACKBONE_FINDINGS_PARTITIONS":            "12",
+		"SEAGULL_BACKBONE_FINDINGS_RETENTION":             "240h",
+		"SEAGULL_BACKBONE_FINDINGS_QUARANTINE_TOPIC":      "tenant.findings.refused",
+		"SEAGULL_BACKBONE_FINDINGS_QUARANTINE_RETENTION":  "72h",
+		"SEAGULL_BACKBONE_FINDINGS_QUARANTINE_PARTITIONS": "2",
+	})
+
+	findings := topology.Findings
+	if findings.Name != "security.findings" || findings.Partitions != 12 {
+		t.Errorf("the findings topic is %s over %d partitions", findings.Name, findings.Partitions)
+	}
+	for _, other := range []Topic{topology.Inventory, topology.Advisories, topology.Assessments, topology.Detections} {
+		if findings.Name == other.Name {
+			t.Errorf("findings share %s", other.Name)
+		}
+	}
+	if findings.Cleanup != cleanupDelete || findings.Retention != 240*time.Hour {
+		t.Errorf("the findings topic is cleaned up by %q with a retention of %s, and a decision is a fact in a history rather than the newest value of a key",
+			findings.Cleanup, findings.Retention)
+	}
+	if quarantine := topology.FindingsQuarantine; quarantine.Name != "tenant.findings.refused" ||
+		quarantine.Cleanup != cleanupDelete || quarantine.Partitions != 2 || quarantine.Retention != 72*time.Hour {
+		t.Errorf("the findings quarantine is %+v", quarantine)
+	}
+	for _, topic := range []Topic{topology.Findings, topology.FindingsQuarantine} {
 		if err := topic.Validate(); err != nil {
 			t.Errorf("the shipped %s is refused: %v", topic.Name, err)
 		}

@@ -290,6 +290,33 @@ services:
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
     <<: *hardening
 
+  # Keeps what the vulnerability matcher decides, under a group and a
+  # quarantine of its own: the matcher holds no credential that writes, and a
+  # findings store outage costs how current findings are, never a decision.
+  finding-writer:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        COMPONENT: finding-writer
+        VERSION: ${SEAGULL_VERSION:-dev}
+    depends_on:
+      backbone-migrator:
+        condition: service_completed_successfully
+      store-migrator:
+        condition: service_completed_successfully
+    networks: [backbone]
+    environment:
+      <<: *backbone
+      SEAGULL_FINDING_STORE_ADDRESS: clickhouse:9000
+      SEAGULL_FINDING_STORE_DATABASE: ${SEAGULL_FINDING_STORE_DATABASE:-seagull}
+      SEAGULL_FINDING_STORE_USER: ${SEAGULL_FINDING_STORE_USER:-seagull}
+      SEAGULL_FINDING_STORE_PASSWORD: ${SEAGULL_FINDING_STORE_PASSWORD:-}
+      SEAGULL_FINDING_STORE_TLS: ${SEAGULL_FINDING_STORE_TLS:-false}
+      SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
+      SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    <<: *hardening
+
   # Keeps the newest thing each agent said of itself, under a group and a
   # quarantine of its own: a status store outage costs how fresh liveness is,
   # and never the admission or the storage of telemetry.

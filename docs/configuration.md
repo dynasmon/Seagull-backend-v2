@@ -145,6 +145,12 @@ capacity does not count, so a host is sized for it beside this setting. See
 | `SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_TOPIC` | `security.assessments.quarantine` | assessments the assessment projector refused |
 | `SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_PARTITIONS` | `1` | |
 | `SEAGULL_BACKBONE_ASSESSMENTS_QUARANTINE_RETENTION` | `720h` | |
+| `SEAGULL_BACKBONE_FINDINGS_TOPIC` | `security.findings` | every decision the vulnerability matcher made, and the assessments it made them in |
+| `SEAGULL_BACKBONE_FINDINGS_PARTITIONS` | `6` | how far per-agent ordering spreads |
+| `SEAGULL_BACKBONE_FINDINGS_RETENTION` | `720h` | how far back the decisions can be read again |
+| `SEAGULL_BACKBONE_FINDINGS_QUARANTINE_TOPIC` | `security.findings.quarantine` | finding records the finding writer refused |
+| `SEAGULL_BACKBONE_FINDINGS_QUARANTINE_PARTITIONS` | `1` | |
+| `SEAGULL_BACKBONE_FINDINGS_QUARANTINE_RETENTION` | `720h` | |
 | `SEAGULL_BACKBONE_QUARANTINE_PARTITIONS` | `3` | |
 | `SEAGULL_BACKBONE_QUARANTINE_RETENTION` | `720h` | |
 | `SEAGULL_BACKBONE_DURABILITY` | `production` | `production` refuses a topic that keeps fewer than 3 replicas or acknowledges a write fewer than 2 hold; `development`, which the development Compose file sets beside one replica, admits one broker and is reported as a warning |
@@ -466,6 +472,29 @@ than a status batch is. A store outage costs how fresh a posture is and is
 retried until the batch is durable; an assessment is never skipped to make
 progress.
 
+### finding-writer
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEAGULL_FINDING_WRITER_CONSUMER_GROUP` | `finding-writer` | the consumer group that owns the offsets |
+| `SEAGULL_FINDING_WRITER_BATCH_RECORDS` | `1000` | finding records per poll, and per store batch |
+| `SEAGULL_FINDING_WRITER_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
+| `SEAGULL_FINDING_WRITER_RETRY_DELAY` | `1s` | first delay before a batch is retried |
+| `SEAGULL_FINDING_WRITER_RETRY_DELAY_MAX` | `30s` | ceiling the delay backs off to |
+| `SEAGULL_FINDING_STORE_ADDRESS` | required | the store's native protocol address, `clickhouse:9000` |
+| `SEAGULL_FINDING_STORE_DATABASE` | `seagull` | the database holding `vulnerability_findings` and `vulnerability_assessments` |
+| `SEAGULL_FINDING_STORE_USER` | `seagull` | |
+| `SEAGULL_FINDING_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
+| `SEAGULL_FINDING_STORE_TIMEOUT` | `30s` | budget for one write attempt, and to dial |
+| `SEAGULL_FINDING_STORE_TLS` | `true` | verify and encrypt the native connection; development Compose explicitly sets `false` |
+| `SEAGULL_FINDING_STORE_TLS_CA` | unset | authority the store must chain to; the system pool when unset |
+| `SEAGULL_FINDING_STORE_TLS_SERVER_NAME` | unset | name the store certificate must carry; the dialled host when unset |
+
+A decision is under a few kilobytes, and a whole assessment decides every open
+finding of its asset again, so a batch is counted in many records. A store outage
+costs how current findings are and is retried until the batch is durable; a
+decision is never skipped to make progress.
+
 ### advisory-importer
 
 | Variable | Default | Meaning |
@@ -748,7 +777,7 @@ before its body is read.
 
 ## The backbone topology
 
-Fourteen topics, declared once in `internal/broker` and applied by
+Sixteen topics, declared once in `internal/broker` and applied by
 `backbone-migrator`:
 
 | Topic | Partitions | Retention | Largest batch | Why |
@@ -767,6 +796,8 @@ Fourteen topics, declared once in `internal/broker` and applied by
 | `security.agents.status.quarantine` | 1 | 30 days | 1 MiB + 64 KiB | reports the status projector could not store |
 | `security.assessments` | 3 | 30 days | 1 MiB | every assessment agents made of their hosts, keyed by the agent so its assessments are read in the order they arrived; not compacted, because the ones before the newest are what a posture was |
 | `security.assessments.quarantine` | 1 | 30 days | 1 MiB + 64 KiB | assessments the assessment projector could not store |
+| `security.findings` | 6 | 30 days | 1 MiB | every decision the vulnerability matcher made and the assessment it made it in, keyed by the agent so one asset's decisions are read in the order they were made, an assessment after the findings it covered |
+| `security.findings.quarantine` | 1 | 30 days | 1 MiB + 64 KiB | finding records the finding writer could not store |
 
 **Partitions and replication are refused, never converged.** Records are keyed
 by `agent_id`, so growing the partition count moves an agent to a different
@@ -978,6 +1009,36 @@ caller the posture and never the agent.
 
 **Quarantine.** `security.assessments.quarantine`, on the same terms as the
 other quarantines.
+
+## The findings store
+
+Two tables hold what the platform decided about vulnerabilities in the packages
+assets hold, written by `finding-writer` from `security.findings`. Each keeps the
+record exactly as the matcher published it in `record`, which is what a reader is
+handed; the columns beside it are what an estate is asked about without decoding
+every record.
+
+- **`vulnerability_findings`** — one row per episode of a finding rather than per
+  decision, keyed by `(tenant_id, agent_id, item_id, vulnerability_id, opened_at,
+  state)` and versioned by `decided_at`. A whole assessment decides every open
+  finding of its asset again, so deciding an open finding again replaces its row,
+  which then says it is still open as of the newest assessment; a fix, a removal
+  and a reintroduction are rows of their own, the history a reader asks for. No
+  partition, for `asset_inventory`'s reason; a TTL of a year on `decided_at`,
+  which an open finding never reaches while its asset reports.
+- **`vulnerability_assessments`** — one row per evaluation of an asset, keyed by
+  `(tenant_id, agent_id, scope, inventory_as_of, intelligence_as_of)`: a whole one,
+  which an asset's open findings are held to, or one of the packages an advisory
+  named. It counts what it found open and closed and how many packages it could
+  not assess, and says whether the intelligence it read was stale.
+
+**Order.** A finding stands where its newest decision says, decisions being
+ordered by `inventory_as_of`, then `intelligence_as_of`, then `decided_at`. The
+findings of a batch land before its assessments, so a reader that sees an
+assessment has already been able to see what it covered.
+
+**Quarantine.** `security.findings.quarantine`, on the same terms as the other
+quarantines.
 
 ## Agent rollouts
 

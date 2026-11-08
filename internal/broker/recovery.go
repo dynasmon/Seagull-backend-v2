@@ -142,6 +142,7 @@ func (c *Consumer) took(assigned map[string][]int32) {
 		c.metrics.moved(topic, "assigned", len(assigned[topic]))
 		c.metrics.holding(topic, int(held[topic]))
 	}
+	c.owned(held)
 }
 
 func (c *Consumer) gave(revoked map[string][]int32) {
@@ -159,6 +160,7 @@ func (c *Consumer) gave(revoked map[string][]int32) {
 		c.metrics.holding(topic, int(held[topic]))
 	}
 	c.answerable(held[c.topics[0]])
+	c.owned(held)
 }
 
 // Losing a partition changes what a reader can answer as much as gaining one

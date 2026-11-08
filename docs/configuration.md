@@ -472,6 +472,38 @@ than a status batch is. A store outage costs how fresh a posture is and is
 retried until the batch is durable; an assessment is never skipped to make
 progress.
 
+### vulnerability-matcher
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEAGULL_VULNERABILITY_MATCHER_CONSUMER_GROUP` | `vulnerability-matcher` | the group it reads `security.inventory.raw` and `security.advisories` in, alone: a member that holds part of either topic stops |
+| `SEAGULL_VULNERABILITY_MATCHER_INVENTORY_OWNER` | `inventory-projector` | the group whose committed offset says the inventory store holds a record |
+| `SEAGULL_VULNERABILITY_MATCHER_ADVISORY_OWNER` | `advisory-writer` | the group whose committed offset says the advisory store holds a record |
+| `SEAGULL_VULNERABILITY_MATCHER_FINDING_OWNER` | `finding-writer` | the group whose committed offset says the findings store holds what was decided before |
+| `SEAGULL_VULNERABILITY_MATCHER_BATCH_RECORDS` | `64` | records per poll; an inventory record is a whole scan |
+| `SEAGULL_VULNERABILITY_MATCHER_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
+| `SEAGULL_VULNERABILITY_MATCHER_SETTLE_DELAY` | `250ms` | how often an owner's position is asked again while the matcher waits for it |
+| `SEAGULL_VULNERABILITY_MATCHER_RETRY_DELAY` | `1s` | first delay before a batch is decided again |
+| `SEAGULL_VULNERABILITY_MATCHER_RETRY_DELAY_MAX` | `30s` | ceiling the delay backs off to |
+| `SEAGULL_VULNERABILITY_MATCHER_FRESHNESS` | `48h` | how old a feed's last complete reading may be, measured from the inventory read; older intelligence raises what it finds and closes nothing |
+| `SEAGULL_VULNERABILITY_MATCHER_STORE_ADDRESS` | required | the analytical store's native protocol address, `clickhouse:9000` |
+| `SEAGULL_VULNERABILITY_MATCHER_STORE_DATABASE` | `seagull` | the database holding the inventory, advisory and findings tables |
+| `SEAGULL_VULNERABILITY_MATCHER_STORE_USER` | `seagull` | a user that reads those tables and writes nothing, in a deployment |
+| `SEAGULL_VULNERABILITY_MATCHER_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
+| `SEAGULL_VULNERABILITY_MATCHER_STORE_TIMEOUT` | `30s` | budget for one read, and to dial |
+| `SEAGULL_VULNERABILITY_MATCHER_STORE_TLS` | `true` | verify and encrypt the native connection; development Compose explicitly sets `false` |
+| `SEAGULL_VULNERABILITY_MATCHER_STORE_TLS_CA` | unset | authority the store must chain to; the system pool when unset |
+| `SEAGULL_VULNERABILITY_MATCHER_STORE_TLS_SERVER_NAME` | unset | name the store certificate must carry; the dialled host when unset |
+
+Before a batch is decided, the matcher waits until the inventory and advisory
+owners have committed past every record in it and the finding writer has
+committed up to where `security.findings` ends, so it reads what those records
+are about and labels against every decision made before. An owner that stops is
+lag the matcher waits out, logged once a wait passes 30 seconds; nothing is
+decided from a store its owner has not finished. A store or backbone that fails
+makes the batch be decided again with a widening delay, and the group position
+moves only once the batch is published.
+
 ### finding-writer
 
 | Variable | Default | Meaning |

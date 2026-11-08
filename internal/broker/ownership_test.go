@@ -87,14 +87,34 @@ func TestAnAssignmentTheReaderMayNotHoldIsLatchedForTheLoopToStopOn(t *testing.T
 }
 
 func TestAConsumerRefusesTopicsItCannotReadAsOne(t *testing.T) {
-	for name, config := range map[string]ConsumerConfig{
-		"no topic":             {Brokers: []string{"localhost:9092"}, Group: "g", MaxRecords: 1, Metrics: NewConsumerMetrics(metrics.New("test"))},
-		"a topic twice":        {Brokers: []string{"localhost:9092"}, Topic: inventoryStream, Topics: []string{inventoryStream}, Group: "g", MaxRecords: 1, Metrics: NewConsumerMetrics(metrics.New("test"))},
-		"an unnamed topic":     {Brokers: []string{"localhost:9092"}, Topics: []string{inventoryStream, ""}, Group: "g", MaxRecords: 1, Metrics: NewConsumerMetrics(metrics.New("test"))},
-		"recovery from a list": {Brokers: []string{"localhost:9092"}, Topics: []string{inventoryStream}, Group: "g", MaxRecords: 1, Metrics: NewConsumerMetrics(metrics.New("test")), Recovery: func(int32) (time.Duration, error) { return 0, nil }},
-		"recovery from two":    {Brokers: []string{"localhost:9092"}, Topics: []string{inventoryStream, advisoriesStream}, Group: "g", MaxRecords: 1, Metrics: NewConsumerMetrics(metrics.New("test")), Recovery: func(int32) (time.Duration, error) { return 0, nil }},
+	complete := func() ConsumerConfig {
+		return ConsumerConfig{
+			Brokers:      []string{"localhost:9092"},
+			Topics:       []string{inventoryStream, advisoriesStream},
+			Group:        "vulnerability-matcher",
+			MaxRecords:   1,
+			FetchMaxWait: 100 * time.Millisecond,
+			Metrics:      NewConsumerMetrics(metrics.New("test")),
+		}
+	}
+	built, err := NewConsumer(complete())
+	if err != nil {
+		t.Fatalf("a consumer of two topics was refused: %v", err)
+	}
+	built.Close()
+
+	rebuilding := func(int32) (time.Duration, error) { return 0, nil }
+	for name, breaking := range map[string]func(*ConsumerConfig){
+		"no topic":             func(c *ConsumerConfig) { c.Topics = nil },
+		"a topic twice":        func(c *ConsumerConfig) { c.Topic = inventoryStream },
+		"an unnamed topic":     func(c *ConsumerConfig) { c.Topics = append(c.Topics, "") },
+		"recovery from two":    func(c *ConsumerConfig) { c.Recovery = rebuilding },
+		"recovery from a list": func(c *ConsumerConfig) { c.Topics, c.Recovery = []string{inventoryStream}, rebuilding },
 	} {
-		if _, err := NewConsumer(config); err == nil {
+		config := complete()
+		breaking(&config)
+		if consumer, err := NewConsumer(config); err == nil {
+			consumer.Close()
 			t.Errorf("%s: the consumer was built", name)
 		}
 	}

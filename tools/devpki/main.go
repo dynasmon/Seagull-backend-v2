@@ -14,24 +14,25 @@ func main() {
 	directory := flag.String("directory", ".local/pki", "where the development material is written")
 	agentID := flag.String("agent-id", "dev-agent-01", "common name of the development agent certificate")
 	caller := flag.String("caller", "dev-analyst", "common name of the development query caller certificate")
-	admin := flag.String("admin", "dev-admin", "common name of the development control plane administrator certificate")
+	tenantAdmin := flag.String("tenant-admin", "dev-tenant-admin", "common name of the development certificate of an administrator of one tenant")
+	admin := flag.String("admin", "dev-admin", "common name of the development certificate of an administrator of the platform")
 	tenants := flag.String("tenants", "default", "tenants the query caller certificate is authorised to read")
 	hosts := flag.String("hosts", "localhost,127.0.0.1", "names and addresses every server certificate covers, on top of its own service name")
 	validity := flag.Duration("validity", 90*24*time.Hour, "how long the issued certificates stay valid")
 	flag.Parse()
 
-	if err := generate(*directory, *agentID, *caller, *admin, strings.Split(*tenants, ","), strings.Split(*hosts, ","), *validity); err != nil {
+	if err := generate(*directory, *agentID, *caller, *tenantAdmin, *admin, strings.Split(*tenants, ","), strings.Split(*hosts, ","), *validity); err != nil {
 		fmt.Fprintf(os.Stderr, "devpki: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func generate(directory, agentID, caller, admin string, tenants, hosts []string, validity time.Duration) error {
+func generate(directory, agentID, caller, tenantAdmin, admin string, tenants, hosts []string, validity time.Duration) error {
 	agents, err := agentDomain(agentID, hosts, validity)
 	if err != nil {
 		return err
 	}
-	operators, err := operatorDomain(caller, admin, tenants, hosts, validity)
+	operators, err := operatorDomain(caller, tenantAdmin, admin, tenants, hosts, validity)
 	if err != nil {
 		return err
 	}
@@ -51,6 +52,7 @@ func generate(directory, agentID, caller, admin string, tenants, hosts []string,
 	fmt.Printf("control-api         %s\n", bundle.ControlCertificate)
 	fmt.Printf("query-api           %s\n", bundle.QueryCertificate)
 	fmt.Printf("caller              %s\n", bundle.CallerCertificate)
+	fmt.Printf("tenant admin        %s\n", bundle.TenantAdminCertificate)
 	fmt.Printf("administrator       %s\n", bundle.AdminCertificate)
 	return nil
 }
@@ -85,7 +87,7 @@ func agentDomain(agentID string, hosts []string, validity time.Duration) (devpki
 
 // What a person or an automation may authenticate to. Each plane gets a key of
 // its own, so the gateway's key is not also the control plane's.
-func operatorDomain(caller, admin string, tenants, hosts []string, validity time.Duration) (devpki.Domain, error) {
+func operatorDomain(caller, tenantAdmin, admin string, tenants, hosts []string, validity time.Duration) (devpki.Domain, error) {
 	authority, err := devpki.NewAuthority("Seagull Development Operator CA", validity+24*time.Hour)
 	if err != nil {
 		return devpki.Domain{}, err
@@ -100,17 +102,13 @@ func operatorDomain(caller, admin string, tenants, hosts []string, validity time
 		servers[name] = issued
 	}
 
-	reader, err := authority.IssueCaller(caller, tenants, validity)
-	if err != nil {
-		return devpki.Domain{}, err
+	clients := map[string]devpki.Material{}
+	for name, subject := range map[string]string{"caller": caller, "tenant-admin": tenantAdmin, "admin": admin} {
+		issued, err := authority.IssueCaller(subject, tenants, validity)
+		if err != nil {
+			return devpki.Domain{}, err
+		}
+		clients[name] = issued
 	}
-	administrator, err := authority.IssueCaller(admin, tenants, validity)
-	if err != nil {
-		return devpki.Domain{}, err
-	}
-	return devpki.Domain{
-		Authority: authority.Material(),
-		Servers:   servers,
-		Clients:   map[string]devpki.Material{"caller": reader, "admin": administrator},
-	}, nil
+	return devpki.Domain{Authority: authority.Material(), Servers: servers, Clients: clients}, nil
 }

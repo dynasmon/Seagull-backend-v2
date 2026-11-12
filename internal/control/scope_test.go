@@ -9,6 +9,7 @@ import (
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 	controlv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/control/v1"
 	rulesetv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ruleset/v1"
+	updatev1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/update/v1"
 )
 
 func refusals(t *testing.T, h *harness, written string) float64 {
@@ -73,6 +74,46 @@ func TestAnAdministratorOfOneTenantChangesNothingOfWhatDetectsForEveryTenant(t *
 	if listed := call(t, handler, http.MethodGet, control.RulesetsPath, "globex-admin", globex, nil); listed.Code != http.StatusOK {
 		t.Errorf("reading what detects answered a tenant grant %d: %s", listed.Code, listed.Body)
 	}
+}
+
+func TestAnAdministratorOfOneTenantPublishesNothingEveryAgentMayInstall(t *testing.T) {
+	h := newHarness(t, nil)
+	published := publishUpdates(t, h)
+	handler := updateListener(t, h, published.held, published.store, published.anchor)
+	globex := open(t, h, "globex-admin")
+	roots, packages, catalogs := len(published.store.roots), len(published.store.packages), len(published.store.catalogs)
+
+	refusedWith(t, call(t, handler, http.MethodPost, control.UpdateRootsPath, "globex-admin", globex,
+		&updatev1.RootPublication{Root: updateRoot(t, 3, published.owner, published.publisher, published.owner)}),
+		http.StatusForbidden, control.CodeForbidden)
+	refusedWith(t, upload(t, handler, "globex-admin", globex, []byte("any bytes at all")), http.StatusForbidden, control.CodeForbidden)
+	refusedWith(t, call(t, handler, http.MethodPost, control.UpdateCatalogsPath, "globex-admin", globex,
+		&updatev1.CatalogPublication{Catalog: updateCatalog(t, 2, published.publisher)}), http.StatusForbidden, control.CodeForbidden)
+
+	if len(published.store.roots) != roots || len(published.store.packages) != packages || len(published.store.catalogs) != catalogs {
+		t.Errorf("the update store was reached: %d roots, %d packages, %d catalogs",
+			len(published.store.roots), len(published.store.packages), len(published.store.catalogs))
+	}
+	if counted := refusals(t, h, "releases:write"); counted != 3 {
+		t.Errorf("the three refusals were counted %v times", counted)
+	}
+}
+
+// Writing agents stays a tenant's: who registers a machine into a tenant and
+// says which release it runs is not thereby who decides what a release is.
+func TestAssigningAReleaseNeedsToWriteAgentsOfTheTenantAndNothingOfThePlatform(t *testing.T) {
+	h := newHarness(t, nil)
+	published := publishUpdates(t, h)
+	published.held.held["db-01"] = &agentv1.Agent{AgentId: "db-01", TenantId: "globex"}
+	handler := updateListener(t, h, published.held, published.store, published.anchor)
+
+	assigned := call(t, handler, http.MethodPost, control.UpdateAssignmentsPath, "globex-admin", open(t, h, "globex-admin"),
+		&updatev1.Assignment{TenantId: "globex", AgentIds: []string{"db-01"}, Version: "v0.2.0"})
+	if assigned.Code != http.StatusOK {
+		t.Fatalf("an administrator of globex assigning a release to its agent answered %d: %s", assigned.Code, assigned.Body)
+	}
+	refusedWith(t, call(t, handler, http.MethodPost, control.UpdateAssignmentsPath, "globex-admin", open(t, h, "globex-admin"),
+		&updatev1.Assignment{TenantId: "default", AgentIds: []string{"web-01"}, Version: "v0.2.0"}), http.StatusForbidden, control.CodeForbidden)
 }
 
 func TestAnAdministratorOfThePlatformReachesNoTenantItDoesNotName(t *testing.T) {

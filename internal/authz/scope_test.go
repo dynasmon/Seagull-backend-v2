@@ -27,6 +27,7 @@ func TestWhatEveryTenantSharesIsThePlatforms(t *testing.T) {
 		"rulesets:write", "rulesets:delete",
 		"sessions:read", "sessions:write", "sessions:delete",
 		"policies:read", "policies:write", "policies:delete",
+		"releases:read", "releases:write", "releases:delete",
 	)
 	for _, permission := range platform {
 		if permission.Scope() != authz.Platform {

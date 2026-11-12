@@ -27,6 +27,7 @@ var reach = map[Resource]map[Action]Scope{
 	Agents:     {Read: Tenant, Write: Tenant, Delete: Tenant},
 	Policies:   {Read: Platform, Write: Platform, Delete: Platform},
 	Sessions:   {Read: Platform, Write: Platform, Delete: Platform},
+	Releases:   {Read: Platform, Write: Platform, Delete: Platform},
 }
 
 func (p Permission) Scope() Scope { return reach[p.Resource][p.Action] }

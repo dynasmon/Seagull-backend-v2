@@ -681,7 +681,7 @@ detection away from somebody's triage.
 | `SEAGULL_CONTROL_API_TLS_CERT` | required | server certificate |
 | `SEAGULL_CONTROL_API_TLS_KEY` | required | server private key |
 | `SEAGULL_CONTROL_API_CALLER_CA` | required | authority that issues caller certificates |
-| `SEAGULL_CONTROL_API_POLICY` | required | the policy document to pin to |
+| `SEAGULL_CONTROL_API_POLICY` | required | the policy document to pin to; see [the access policy](#the-access-policy) |
 | `SEAGULL_CONTROL_API_SESSION_KEY` | empty | key sessions are signed with; drawn at random when unset |
 | `SEAGULL_CONTROL_API_SESSION_LIFETIME` | `15m` | how long a session lasts |
 | `SEAGULL_CONTROL_API_SESSIONS_PER_CALLER` | `8` | sessions one subject may hold at once |
@@ -1071,6 +1071,63 @@ assessment has already been able to see what it covered.
 
 **Quarantine.** `security.findings.quarantine`, on the same terms as the other
 quarantines.
+
+## The access policy
+
+`control-api` and `query-api` read one document when they start,
+`SEAGULL_CONTROL_API_POLICY` and `SEAGULL_QUERY_API_POLICY`, and neither starts
+on one it refuses. A role names permissions, written `resource:action`. A
+binding gives a subject, the common name of its certificate, its roles, what it
+reaches and its tenants.
+
+A permission is the platform's or a tenant's:
+
+| Permission | Whose | What it decides |
+|---|---|---|
+| `events:read`, `detections:read` | tenant | hunting, within the tenants of the binding |
+| `alerts:read`, `alerts:write`, `incidents:read`, `incidents:write` | tenant | reading and working the alerts and incidents of a tenant |
+| `alerts:delete`, `incidents:delete` | tenant | acting on one somebody else holds |
+| `agents:read`, `agents:write` | tenant | the registry of a tenant: registering an agent, binding its identity, its policy, the release assigned to it and its rollout |
+| `rulesets:read` | tenant | reading, validating and checking rulesets |
+| `rulesets:write` | platform | publishing and activating the ruleset every tenant is detected by |
+| `sessions:read`, `sessions:delete` | platform | listing and ending the sessions of another subject; a caller lists and ends its own without either |
+| `releases:write` | platform | publishing an update root, a catalog and a package |
+
+Every other pairing of a resource and an action is declared, and whose it is
+is said in `internal/authz/scope.go`, though no route asks for it yet;
+`policies` is the platform's.
+
+A binding says what it reaches, and nothing is inferred from what it leaves out:
+
+- `scope: platform` holds the platform permissions of its roles, and their
+  tenant permissions inside the tenants it lists. It may list none,
+  `tenants: []`, and then reaches the records of no tenant.
+- `scope: tenant` holds only what belongs to the tenants it lists, and lists at
+  least one. A role carrying a platform permission is refused under it when the
+  file is read, naming the subject, the role and the permission.
+
+An administrator of the platform and an administrator of one tenant, as
+`deploy/policy.yml` writes them:
+
+```yaml
+bindings:
+  - subject: dev-admin
+    roles: [administrator]
+    scope: platform
+    tenants: [default]
+
+  - subject: dev-tenant-admin
+    roles: [tenant-administrator]
+    scope: tenant
+    tenants: [default]
+```
+
+Reaching the platform is never reaching every tenant: `dev-admin` reads the
+agents, alerts and incidents of `default`, and of no other tenant until its
+binding lists it. `make dev-pki` issues a certificate for each of the three
+subjects the file binds: `caller.pem`, `tenant-admin.pem` and `admin.pem`. See
+[ADR 14](decisions/0014-a-token-says-who-and-the-policy-says-what.md) and
+[ADR 50](decisions/0050-a-grant-reaches-the-platform-or-the-tenants-it-names.md).
 
 ## Agent rollouts
 

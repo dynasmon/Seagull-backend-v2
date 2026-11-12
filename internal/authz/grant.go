@@ -9,6 +9,7 @@ const (
 	NoGrant      Reason = "no_grant"
 	NoPermission Reason = "no_permission"
 	OutOfTenant  Reason = "out_of_tenant"
+	OutOfScope   Reason = "out_of_scope"
 	Undeclared   Reason = "undeclared"
 )
 
@@ -42,9 +43,10 @@ func (g Grant) Permissions() []Permission { return slices.Clone(g.permissions) }
 
 func (g Grant) Empty() bool { return g.subject == "" }
 
-// For operations that are not about a tenant's records. Anything touching stored
-// data goes through DecideWithin, so an absent tenant can never read as every
-// tenant.
+// Whether the grant holds the permission, and for one of the platform's whether
+// the grant reaches the platform. A tenant's permission held is not yet a
+// decision about any tenant's records: those go through DecideWithin, so an
+// absent tenant can never read as every tenant.
 func (g Grant) Decide(permission Permission) Decision {
 	decision := Decision{Permission: permission}
 	switch {
@@ -54,6 +56,8 @@ func (g Grant) Decide(permission Permission) Decision {
 		decision.Reason = NoGrant
 	case !slices.Contains(g.permissions, permission):
 		decision.Reason = NoPermission
+	case permission.Scope() == Platform && g.scope != Platform:
+		decision.Reason = OutOfScope
 	default:
 		decision.Reason = Allowed
 	}

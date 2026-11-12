@@ -399,9 +399,9 @@ func (s *Server) refuseUpdate(w http.ResponseWriter, err error) {
 
 func updateRoutes(s *Server) []route {
 	return []route{
-		{http.MethodPost, UpdateRootsPath, "agent_update_root_publish", Permits(authz.Agents, authz.Write), s.publishUpdateRoot()},
-		{http.MethodPost, UpdatePackagesPath, "agent_package_publish", Permits(authz.Agents, authz.Write), s.publishPackage()},
-		{http.MethodPost, UpdateCatalogsPath, "agent_update_catalog_publish", Permits(authz.Agents, authz.Write), s.publishUpdateCatalog()},
+		{http.MethodPost, UpdateRootsPath, "agent_update_root_publish", Permits(authz.Releases, authz.Write), s.publishUpdateRoot()},
+		{http.MethodPost, UpdatePackagesPath, "agent_package_publish", Permits(authz.Releases, authz.Write), s.publishPackage()},
+		{http.MethodPost, UpdateCatalogsPath, "agent_update_catalog_publish", Permits(authz.Releases, authz.Write), s.publishUpdateCatalog()},
 		{http.MethodPost, UpdateAssignmentsPath, "agent_release_assign", Permits(authz.Agents, authz.Write), s.assignRelease()},
 	}
 }

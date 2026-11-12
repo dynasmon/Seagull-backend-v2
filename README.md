@@ -122,6 +122,15 @@ against a policy of typed permissions resolved per request. A token carries
 identity and no authority. Every route declares what it requires and a route
 that declares nothing cannot be registered, so deny-by-default is structural.
 
+A grant reaches the platform or the tenants it names, and its binding says
+which. What every tenant shares — the ruleset that detects, the releases agents
+may install, the sessions of other people — is held only by a grant of the
+platform, and a policy that gives it to a binding of one tenant is refused when
+it is read. Reaching the platform is never reaching every tenant: a tenant's
+records still need the tenant named. `deploy/policy.yml` shows an administrator
+of each kind; see
+[ADR 50](docs/decisions/0050-a-grant-reaches-the-platform-or-the-tenants-it-names.md).
+
 ### Agent registry and admission
 
 The platform records what it decided about every machine it takes telemetry
@@ -554,7 +563,7 @@ so an unsupported rule imported cleanly, compiled and quietly found nothing.
 Requires Docker with the Compose plugin and Go 1.26.
 
 ```bash
-make dev-pki    # mint a development CA, server, agent and caller certificates
+make dev-pki    # mint the development authorities and the server, agent and operator certificates
 make up         # build the images and start the backbone, the store and every process
 make verify     # the full gate: lint, module graph, tests, race detector
 ```

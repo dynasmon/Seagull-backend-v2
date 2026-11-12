@@ -1,5 +1,9 @@
 # 31. An agent release is authorized off the platform by the roles of a root, and the platform decides only which agent runs which release
 
+> Amended by [ADR 50](0050-a-grant-reaches-the-platform-or-the-tenants-it-names.md):
+> publishing a root, a catalog or a package needs `releases:write`, a permission
+> of the platform; assigning a release stays `agents:write` in the tenant.
+
 ## Context
 
 An agent installed on a host is the release somebody installed there. Moving an

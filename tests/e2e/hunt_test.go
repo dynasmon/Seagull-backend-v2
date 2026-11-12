@@ -52,12 +52,15 @@ roles:
 bindings:
   - subject: analyst-01
     roles: [analyst]
+    scope: tenant
     tenants: [acme]
   - subject: analyst-03
     roles: [analyst]
+    scope: tenant
     tenants: [globex]
   - subject: responder-01
     roles: [responder]
+    scope: tenant
     tenants: [acme]
 `
 

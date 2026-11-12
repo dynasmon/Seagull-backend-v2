@@ -27,7 +27,7 @@ roles:
       - agents:read
 
   - name: engineer
-    description: writes and publishes the rules the analysis engine runs
+    description: writes and publishes the rules the analysis engine runs for every tenant
     permissions:
       - events:read
       - detections:read
@@ -54,13 +54,18 @@ roles:
       - sessions:read
       - sessions:delete
 
-# A subject is the common name of a verified client certificate. An empty list is
-# never a wildcard.
+# A subject is the common name of a verified client certificate. A binding says
+# what it reaches: `platform` holds what every tenant shares, `tenant` only what
+# belongs to the tenants it lists, and a role carrying a platform permission is
+# refused under `tenant` when the file is read. An empty list is never a
+# wildcard, and the platform is never every tenant.
 bindings:
   - subject: dev-analyst
     roles: [analyst]
+    scope: tenant
     tenants: [default]
 
   - subject: dev-admin
     roles: [administrator]
+    scope: platform
     tenants: [default]

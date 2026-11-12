@@ -76,29 +76,54 @@ roles:
       - agents:read
       - agents:write
 
+  - name: tenant-administrator
+    description: administers the tenants it is bound to
+    permissions:
+      - events:read
+      - rulesets:read
+      - alerts:read
+      - alerts:write
+      - alerts:delete
+      - incidents:read
+      - incidents:write
+      - incidents:delete
+      - agents:read
+      - agents:write
+
 bindings:
   - subject: e2e-analyst
     roles: [analyst]
+    scope: tenant
     tenants: [default]
 
   - subject: e2e-engineer
     roles: [engineer]
+    scope: platform
     tenants: [default]
 
   - subject: e2e-responder
     roles: [responder]
+    scope: tenant
     tenants: [default]
 
   - subject: e2e-colleague
     roles: [responder]
+    scope: tenant
     tenants: [default]
 
   - subject: e2e-admin
     roles: [administrator]
+    scope: platform
     tenants: [default]
 
   - subject: e2e-outsider
     roles: [responder]
+    scope: tenant
+    tenants: [another-tenant]
+
+  - subject: e2e-tenant-admin
+    roles: [tenant-administrator]
+    scope: tenant
     tenants: [another-tenant]
 `
 

@@ -24,12 +24,15 @@ func (d Decision) Allowed() bool { return d.Reason == Allowed }
 // over refuses instead of permitting.
 type Grant struct {
 	subject     string
+	scope       Scope
 	roles       []string
 	tenants     []string
 	permissions []Permission
 }
 
 func (g Grant) Subject() string { return g.subject }
+
+func (g Grant) Scope() Scope { return g.scope }
 
 func (g Grant) Roles() []string { return slices.Clone(g.roles) }
 

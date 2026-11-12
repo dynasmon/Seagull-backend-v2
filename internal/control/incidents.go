@@ -142,7 +142,7 @@ func (s *Server) moveIncident(w http.ResponseWriter, r *http.Request, asked inci
 	}
 
 	if holder := held.GetAssignee(); holder != "" && holder != caller.Subject {
-		decision := caller.Grant.Decide(authz.Permission{Resource: authz.Incidents, Action: authz.Delete})
+		decision := caller.Grant.DecideWithin(authz.Permission{Resource: authz.Incidents, Action: authz.Delete}, held.GetTenantId())
 		s.metrics.decided(decision)
 		if !decision.Allowed() {
 			Refuse(w, http.StatusForbidden, CodeStoryHeldByAnother,

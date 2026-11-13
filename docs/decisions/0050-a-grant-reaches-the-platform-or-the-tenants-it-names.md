@@ -89,6 +89,14 @@ a subject bound only inside its tenants: a session stands in for a subject, not
 for a subject in a tenant, and whether a subject is bound nowhere else is a fact
 of the policy at one moment, which BE-078 makes change under a running process.
 
+**A caller is shown what its grant reaches.** A session describes its grant in
+`seagull.control.v1.Grant`, which carries the scope beside the tenants,
+`SCOPE_PLATFORM` or `SCOPE_TENANT`, and names `releases` among the resources of
+a permission. A client that draws its controls from the grant draws the line
+the server decides by. It is told and decides nothing: every route still asks
+`Decide` or `DecideWithin`. `control.Unnamed`, what is decided and cannot be
+shown, holds nothing.
+
 **The document keeps `schema_version: 1`.** No installation holds a file of the
 earlier layout, and one that did is refused at the binding that states no
 scope, which says more than a version would.
@@ -103,12 +111,6 @@ apply in every tenant it lists.
 
 **No live policy.** The file is read when a process starts. BE-078 carries the
 same model onto its log, and compiles through the same `authz.Compile`.
-
-**Nothing a caller is shown yet.** `seagull.control.v1.Grant` has no field for
-a scope and `Resource` no name for `releases`, so a session describes a grant
-without either, and `control-api` says at startup that `releases` is decided
-and cannot be shown (`control.Unnamed`). Both arrive with the contract release
-that declares them.
 
 ## Consequences
 
@@ -132,3 +134,5 @@ that declares them.
   Seen once, it means a grant reached a route by something other than a
   compiled policy.
 - An installation writes the scope from its first version (BE-086).
+- Contracts `v0.23.0` declare the scope of a grant and the `releases` resource;
+  the backend moves to it. What an agent is served does not change.

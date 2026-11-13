@@ -186,6 +186,7 @@ func grantOf(grant authz.Grant) *controlv1.Grant {
 		Tenants:     grant.Tenants(),
 		Roles:       grant.Roles(),
 		Permissions: permissions,
+		Scope:       scopes[grant.Scope()],
 	}
 }
 
@@ -201,6 +202,7 @@ var resources = map[authz.Resource]controlv1.Resource{
 	authz.Incidents:  controlv1.Resource_RESOURCE_INCIDENTS,
 	authz.Policies:   controlv1.Resource_RESOURCE_POLICIES,
 	authz.Sessions:   controlv1.Resource_RESOURCE_SESSIONS,
+	authz.Releases:   controlv1.Resource_RESOURCE_RELEASES,
 }
 
 // What the platform authorises and the contract has no name for yet. A grant
@@ -210,9 +212,14 @@ var resources = map[authz.Resource]controlv1.Resource{
 // a grant says out loud that it cannot show it. It empties as the contract
 // catches up, and a resource in neither the map nor the list fails the test that
 // reads both.
-var unnamed = []authz.Resource{authz.Releases}
+var unnamed []authz.Resource
 
 func Unnamed() []authz.Resource { return slices.Clone(unnamed) }
+
+var scopes = map[authz.Scope]controlv1.Scope{
+	authz.Platform: controlv1.Scope_SCOPE_PLATFORM,
+	authz.Tenant:   controlv1.Scope_SCOPE_TENANT,
+}
 
 var actions = map[authz.Action]controlv1.Action{
 	authz.Read:   controlv1.Action_ACTION_READ,

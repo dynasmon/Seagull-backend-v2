@@ -144,3 +144,39 @@ func TestAnAdministratorOfThePlatformReachesNoTenantItDoesNotName(t *testing.T) 
 		t.Errorf("%d agents were listed, and default holds one", len(page.GetAgents()))
 	}
 }
+
+// What a caller is shown says what its grant reaches and names every permission
+// it holds, the publication of a release among them: a client that draws its
+// controls from the grant draws the same line the server decides by.
+func TestASessionTellsACallerWhatItsGrantReaches(t *testing.T) {
+	h := newHarness(t, nil)
+	handler := routes(t, h)
+
+	for subject, want := range map[string]struct {
+		scope    controlv1.Scope
+		releases bool
+	}{
+		"dev-admin":    {controlv1.Scope_SCOPE_PLATFORM, true},
+		"globex-admin": {controlv1.Scope_SCOPE_TENANT, false},
+	} {
+		recorder := call(t, handler, http.MethodPost, control.SessionPath, subject, "", &controlv1.SessionRequest{})
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("opening a session for %s answered %d: %s", subject, recorder.Code, recorder.Body)
+		}
+		var answer controlv1.SessionResponse
+		decode(t, recorder, &answer)
+
+		grant := answer.GetSession().GetGrant()
+		if grant.GetScope() != want.scope {
+			t.Errorf("%s is told its grant reaches %s, want %s", subject, grant.GetScope(), want.scope)
+		}
+		told := false
+		for _, permission := range grant.GetPermissions() {
+			told = told || (permission.GetResource() == controlv1.Resource_RESOURCE_RELEASES &&
+				permission.GetAction() == controlv1.Action_ACTION_WRITE)
+		}
+		if told != want.releases {
+			t.Errorf("%s is told it publishes releases: %v, want %v", subject, told, want.releases)
+		}
+	}
+}

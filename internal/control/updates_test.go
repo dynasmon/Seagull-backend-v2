@@ -416,7 +416,7 @@ func TestAControlPlaneGivenNoRootTakesAndOffersNoUpdate(t *testing.T) {
 	refusedWith(t, askPackage(t, facing, "web-01", digestOf([]byte("package"))), http.StatusNotFound, control.CodeUnknownPackage)
 }
 
-func TestTakingUpdatesNeedsToWriteAgentsAndAnAssignmentTheTenantToo(t *testing.T) {
+func TestPublishingACatalogNeedsItsPermissionAndAnAssignmentTheTenant(t *testing.T) {
 	h := newHarness(t, nil)
 	published := publishUpdates(t, h)
 	handler := updateListener(t, h, published.held, published.store, published.anchor)

@@ -35,7 +35,7 @@ roles:
       - rulesets:write
 
   - name: administrator
-    description: administers the platform itself, including who may use it
+    description: administers the platform itself, from what detects for every tenant to what an agent may install and who is signed in
     permissions:
       - agents:read
       - agents:write
@@ -49,6 +49,7 @@ roles:
       - incidents:read
       - incidents:write
       - policies:read
+      - releases:write
       - rulesets:read
       - rulesets:write
       - sessions:read

@@ -75,6 +75,7 @@ roles:
       - sessions:delete
       - agents:read
       - agents:write
+      - releases:write
 
   - name: tenant-administrator
     description: administers the tenants it is bound to

@@ -26,7 +26,7 @@ func TestTheShippedPolicyLoads(t *testing.T) {
 	if policy.Bindings() == 0 || policy.Roles() == 0 {
 		t.Fatalf("the shipped policy holds %d roles and %d bindings", policy.Roles(), policy.Bindings())
 	}
-	if !slices.Equal(policy.Subjects(), []string{"dev-admin", "dev-analyst"}) {
+	if !slices.Equal(policy.Subjects(), []string{"dev-admin", "dev-analyst", "dev-tenant-admin"}) {
 		t.Errorf("the shipped policy binds %v", policy.Subjects())
 	}
 }
@@ -37,8 +37,9 @@ func TestTheShippedPolicyBindsTheIdentitiesTheDevelopmentPKIIssues(t *testing.T)
 	policy := shipped(t)
 
 	for subject, expected := range map[string][]string{
-		"dev-analyst": {"analyst"},
-		"dev-admin":   {"administrator"},
+		"dev-analyst":      {"analyst"},
+		"dev-tenant-admin": {"tenant-administrator"},
+		"dev-admin":        {"administrator"},
 	} {
 		grant, err := policy.Grant(subject)
 		if err != nil {
@@ -94,6 +95,54 @@ func TestTheShippedAdministratorCanWorkAnAlertToItsEnd(t *testing.T) {
 		if !grant.Allows(permission) {
 			t.Errorf("the shipped administrator does not hold %s", permission)
 		}
+	}
+}
+
+// The shipped policy shows both administrators: the one of the platform holds
+// what every tenant shares, and the one of a tenant holds every permission of a
+// tenant and none of those.
+func TestTheShippedPolicyTellsAnAdministratorOfThePlatformFromOneOfATenant(t *testing.T) {
+	policy := shipped(t)
+	platform, err := policy.Grant("dev-admin")
+	if err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	tenant, err := policy.Grant("dev-tenant-admin")
+	if err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	if platform.Scope() != authz.Platform || tenant.Scope() != authz.Tenant {
+		t.Fatalf("the administrators reach %q and %q", platform.Scope(), tenant.Scope())
+	}
+
+	for _, resource := range authz.Resources() {
+		for _, action := range authz.Actions() {
+			permission := authz.Permission{Resource: resource, Action: action}
+			if permission.Scope() == authz.Platform && tenant.Allows(permission) {
+				t.Errorf("the administrator of a tenant holds %s", permission)
+			}
+		}
+	}
+	for _, written := range []string{"rulesets:write", "sessions:read", "sessions:delete", "releases:write"} {
+		permission, err := authz.ParsePermission(written)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if decision := platform.Decide(permission); !decision.Allowed() {
+			t.Errorf("the administrator of the platform is refused %s: %q", permission, decision.Reason)
+		}
+	}
+	for _, written := range []string{"agents:write", "alerts:write", "incidents:write", "rulesets:read"} {
+		permission, err := authz.ParsePermission(written)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !tenant.Allows(permission) {
+			t.Errorf("the administrator of a tenant does not hold %s", permission)
+		}
+	}
+	if decision := tenant.DecideWithin(authz.Permission{Resource: authz.Agents, Action: authz.Write}, "default"); !decision.Allowed() {
+		t.Errorf("the administrator of default cannot register an agent there: %q", decision.Reason)
 	}
 }
 

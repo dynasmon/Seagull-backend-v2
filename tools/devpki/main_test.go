@@ -13,7 +13,7 @@ func minted(t *testing.T) string {
 	t.Helper()
 
 	directory := t.TempDir()
-	if err := generate(directory, "dev-agent-01", "dev-analyst", "dev-admin",
+	if err := generate(directory, "dev-agent-01", "dev-analyst", "dev-tenant-admin", "dev-admin",
 		[]string{"default"}, []string{"localhost", "127.0.0.1"}, time.Hour); err != nil {
 		t.Fatalf("mint the development material: %v", err)
 	}
@@ -70,6 +70,39 @@ func TestAnIdentityFromOneTrustDomainIsRefusedByTheOther(t *testing.T) {
 	}
 	if _, err := read(t, filepath.Join(directory, "agent.pem")).Verify(client); err == nil {
 		t.Error("an agent certificate authenticates to the control plane")
+	}
+}
+
+// The shipped policy binds three operators, and each needs a certificate of its
+// own to be anybody: the one who reads, the administrator of a tenant and the
+// administrator of the platform.
+func TestEveryOperatorTheDevelopmentPolicyBindsIsIssuedAnIdentity(t *testing.T) {
+	directory := minted(t)
+	client := x509.VerifyOptions{
+		Roots:     pool(t, filepath.Join(directory, "operator-ca.pem")),
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+
+	for file, subject := range map[string]string{
+		"caller":       "dev-analyst",
+		"tenant-admin": "dev-tenant-admin",
+		"admin":        "dev-admin",
+	} {
+		certificate := read(t, filepath.Join(directory, file+".pem"))
+		if certificate.Subject.CommonName != subject {
+			t.Errorf("%s.pem names %q, and the policy binds %q", file, certificate.Subject.CommonName, subject)
+		}
+		if _, err := certificate.Verify(client); err != nil {
+			t.Errorf("%s was refused by the operator authority: %v", subject, err)
+		}
+		key, err := os.Stat(filepath.Join(directory, file+"-key.pem"))
+		if err != nil {
+			t.Errorf("%s has no key: %v", subject, err)
+			continue
+		}
+		if key.Mode().Perm() != 0o600 {
+			t.Errorf("the key of %s is readable as %v", subject, key.Mode().Perm())
+		}
 	}
 }
 

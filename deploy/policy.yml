@@ -34,6 +34,22 @@ roles:
       - rulesets:read
       - rulesets:write
 
+  - name: tenant-administrator
+    description: administers the agents and the work of the tenants it is bound to, and nothing every tenant shares
+    permissions:
+      - agents:read
+      - agents:write
+      - agents:delete
+      - alerts:delete
+      - alerts:read
+      - alerts:write
+      - detections:read
+      - events:read
+      - incidents:delete
+      - incidents:read
+      - incidents:write
+      - rulesets:read
+
   - name: administrator
     description: administers the platform itself, from what detects for every tenant to what an agent may install and who is signed in
     permissions:
@@ -63,6 +79,11 @@ roles:
 bindings:
   - subject: dev-analyst
     roles: [analyst]
+    scope: tenant
+    tenants: [default]
+
+  - subject: dev-tenant-admin
+    roles: [tenant-administrator]
     scope: tenant
     tenants: [default]
 

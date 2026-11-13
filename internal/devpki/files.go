@@ -31,6 +31,9 @@ type Bundle struct {
 	CallerKey          string
 	AdminCertificate   string
 	AdminKey           string
+
+	TenantAdminCertificate string
+	TenantAdminKey         string
 }
 
 type Domain struct {
@@ -68,6 +71,9 @@ func Write(directory string, agents, operators Domain) (Bundle, error) {
 		CallerKey:          at("caller-key.pem"),
 		AdminCertificate:   at("admin.pem"),
 		AdminKey:           at("admin-key.pem"),
+
+		TenantAdminCertificate: at("tenant-admin.pem"),
+		TenantAdminKey:         at("tenant-admin-key.pem"),
 	}
 
 	files := []struct {
@@ -94,6 +100,8 @@ func Write(directory string, agents, operators Domain) (Bundle, error) {
 		{bundle.CallerKey, operators.Clients["caller"].PrivateKeyPEM, 0o600},
 		{bundle.AdminCertificate, operators.Clients["admin"].CertificatePEM, 0o644},
 		{bundle.AdminKey, operators.Clients["admin"].PrivateKeyPEM, 0o600},
+		{bundle.TenantAdminCertificate, operators.Clients["tenant-admin"].CertificatePEM, 0o644},
+		{bundle.TenantAdminKey, operators.Clients["tenant-admin"].PrivateKeyPEM, 0o600},
 	}
 	for _, file := range files {
 		if len(file.content) == 0 {

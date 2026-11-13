@@ -30,10 +30,12 @@ roles:
 bindings:
   - subject: dev-analyst
     roles: [analyst]
+    scope: tenant
     tenants: [default]
 
   - subject: dev-engineer
     roles: [analyst, engineer]
+    scope: platform
     tenants: [default, acme]
 `
 
@@ -45,7 +47,7 @@ func compose(roles, bindings string) string {
 
 const (
 	goodRole    = "  - name: analyst\n    description: reads what the platform stored\n    permissions:\n      - events:read\n"
-	goodBinding = "  - subject: dev-analyst\n    roles: [analyst]\n    tenants: [default]\n"
+	goodBinding = "  - subject: dev-analyst\n    roles: [analyst]\n    scope: tenant\n    tenants: [default]\n"
 )
 
 func read(t *testing.T, written string) *authz.Policy {
@@ -84,6 +86,9 @@ func TestAPolicyDocumentBecomesWhatItSays(t *testing.T) {
 	}
 	if analyst.Allows(authz.Permission{Resource: authz.Rulesets, Action: authz.Write}) {
 		t.Error("the analyst may write rulesets")
+	}
+	if grant.Scope() != authz.Platform || analyst.Scope() != authz.Tenant {
+		t.Errorf("the engineer reaches %q and the analyst %q", grant.Scope(), analyst.Scope())
 	}
 }
 
@@ -124,10 +129,13 @@ func TestAHalfWrittenPolicyIsRefused(t *testing.T) {
 			"    permissions:\n      - events:read\n      - detections:read\n", "", 1),
 		"a binding with no subject": strings.Replace(document, "  - subject: dev-analyst\n", "  - x: dev-analyst\n", 1),
 		"a binding with no roles":   strings.Replace(document, "    roles: [analyst]\n", "", 1),
+		"a binding with no scope":   strings.Replace(document, "    scope: tenant\n", "", 1),
 		"a binding with no tenants": strings.Replace(document, "    tenants: [default]\n\n", "\n", 1),
-		"nothing at all":            "",
-		"not a mapping":             "- a\n- b\n",
-		"not YAML":                  "schema_version: 1\n  roles: [\n",
+		"a binding of the platform with no tenants": strings.Replace(document,
+			"    tenants: [default, acme]\n", "", 1),
+		"nothing at all": "",
+		"not a mapping":  "- a\n- b\n",
+		"not YAML":       "schema_version: 1\n  roles: [\n",
 	} {
 		if _, err := policyfile.Read("policy.yml", []byte(written)); err == nil {
 			t.Errorf("%s was accepted", name)
@@ -137,8 +145,8 @@ func TestAHalfWrittenPolicyIsRefused(t *testing.T) {
 
 func TestAListWrittenAsAValueIsRefused(t *testing.T) {
 	for name, written := range map[string]string{
-		"roles":   compose(goodRole, "  - subject: dev-analyst\n    roles: analyst\n    tenants: [default]\n"),
-		"tenants": compose(goodRole, "  - subject: dev-analyst\n    roles: [analyst]\n    tenants: default\n"),
+		"roles":   compose(goodRole, "  - subject: dev-analyst\n    roles: analyst\n    scope: tenant\n    tenants: [default]\n"),
+		"tenants": compose(goodRole, "  - subject: dev-analyst\n    roles: [analyst]\n    scope: tenant\n    tenants: default\n"),
 		"permissions": compose(
 			"  - name: analyst\n    description: reads\n    permissions: events:read\n", goodBinding),
 	} {
@@ -199,6 +207,46 @@ func TestTheDomainsRefusalSurvivesBeingPositioned(t *testing.T) {
 	}
 }
 
+// A binding that does not say what it reaches is not read as one of a tenant:
+// which of the two it is was never anybody's to infer.
+func TestABindingThatDoesNotSayWhatItReachesIsRefused(t *testing.T) {
+	for name, written := range map[string]struct{ scope, want string }{
+		"nothing":         {"", "is missing"},
+		"an unknown word": {"    scope: global\n", "global"},
+		"a list":          {"    scope: [platform]\n", "is not a value"},
+		"every tenant":    {"    scope: \"*\"\n", "*"},
+	} {
+		_, err := policyfile.Read("policy.yml", []byte(strings.Replace(document, "    scope: tenant\n", written.scope, 1)))
+		if err == nil {
+			t.Errorf("a binding whose scope is %s was accepted", name)
+			continue
+		}
+		var fault *policyfile.Fault
+		if !errors.As(err, &fault) || fault.Line == 0 {
+			t.Errorf("a scope that is %s was refused without a place: %v", name, err)
+		}
+		if !strings.Contains(err.Error(), "scope") || !strings.Contains(err.Error(), written.want) {
+			t.Errorf("a scope that is %s was refused with %q", name, err)
+		}
+	}
+}
+
+func TestOnlyABindingOfThePlatformListsNoTenant(t *testing.T) {
+	emptied := strings.Replace(document, "    tenants: [default, acme]\n", "    tenants: []\n", 1)
+
+	grant, err := read(t, emptied).Grant("dev-engineer")
+	if err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	if grant.Scope() != authz.Platform || len(grant.Tenants()) != 0 {
+		t.Errorf("the engineer reaches %q and %v", grant.Scope(), grant.Tenants())
+	}
+
+	if _, err := policyfile.Read("policy.yml", []byte(strings.Replace(document, "    tenants: [default]\n", "    tenants: []\n", 1))); err == nil {
+		t.Error("a binding reaching only its tenants listed none and was accepted")
+	}
+}
+
 func TestADocumentTooLargeToBeAPolicyIsRefused(t *testing.T) {
 	oversized := make([]byte, policyfile.MaxBytes+1)
 	for index := range oversized {
@@ -227,7 +275,7 @@ func TestThePolicyIsReadOutOfAFilesystemTheCallerChose(t *testing.T) {
 func TestWhatWasLoadedCanBeWrittenOut(t *testing.T) {
 	written := policyfile.Written(read(t, document))
 
-	for _, want := range []string{"dev-analyst", "dev-engineer", "analyst, engineer", "acme, default"} {
+	for _, want := range []string{"dev-analyst (tenant)", "dev-engineer (platform)", "analyst, engineer", "acme, default"} {
 		if !strings.Contains(written, want) {
 			t.Errorf("the rendering does not mention %q:\n%s", want, written)
 		}

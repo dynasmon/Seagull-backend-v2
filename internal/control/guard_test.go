@@ -70,22 +70,43 @@ func policy(t *testing.T) *authz.Policy {
 	if err != nil {
 		t.Fatalf("build a role: %v", err)
 	}
+	tenantAdministrator, err := authz.NewRole("tenant-administrator", "administers the tenants it is bound to", []authz.Permission{
+		{Resource: authz.Events, Action: authz.Read},
+		{Resource: authz.Rulesets, Action: authz.Read},
+		{Resource: authz.Alerts, Action: authz.Read},
+		{Resource: authz.Alerts, Action: authz.Write},
+		{Resource: authz.Alerts, Action: authz.Delete},
+		{Resource: authz.Incidents, Action: authz.Read},
+		{Resource: authz.Incidents, Action: authz.Write},
+		{Resource: authz.Incidents, Action: authz.Delete},
+		{Resource: authz.Agents, Action: authz.Read},
+		{Resource: authz.Agents, Action: authz.Write},
+	})
+	if err != nil {
+		t.Fatalf("build a role: %v", err)
+	}
 
-	bindings := make([]authz.Binding, 0, 4)
-	for subject, roles := range map[string][]string{
-		"dev-analyst":   {"analyst"},
-		"dev-engineer":  {"engineer"},
-		"dev-responder": {"responder"},
-		"dev-admin":     {"administrator"},
+	bindings := make([]authz.Binding, 0, 5)
+	for _, bound := range []struct {
+		subject string
+		scope   authz.Scope
+		role    string
+		tenant  string
+	}{
+		{"dev-analyst", authz.Tenant, "analyst", "default"},
+		{"dev-engineer", authz.Platform, "engineer", "default"},
+		{"dev-responder", authz.Tenant, "responder", "default"},
+		{"dev-admin", authz.Platform, "administrator", "default"},
+		{"globex-admin", authz.Tenant, "tenant-administrator", "globex"},
 	} {
-		binding, err := authz.NewBinding(subject, roles, []string{"default"})
+		binding, err := authz.NewBinding(bound.subject, bound.scope, []string{bound.role}, []string{bound.tenant})
 		if err != nil {
-			t.Fatalf("bind %q: %v", subject, err)
+			t.Fatalf("bind %q: %v", bound.subject, err)
 		}
 		bindings = append(bindings, binding)
 	}
 
-	compiled, err := authz.Compile([]authz.Role{analyst, engineer, responder, administrator}, bindings)
+	compiled, err := authz.Compile([]authz.Role{analyst, engineer, responder, administrator, tenantAdministrator}, bindings)
 	if err != nil {
 		t.Fatalf("compile the policy: %v", err)
 	}
@@ -97,12 +118,14 @@ type harness struct {
 	sessions *control.Sessions
 	registry *control.Registry
 	metrics  *control.Metrics
+	scraped  *metrics.Registry
 }
 
 func newHarness(t *testing.T, limiter *ratelimit.Limiter) *harness {
 	t.Helper()
 
-	instruments := control.NewMetrics(metrics.New("control-api-test"))
+	scraped := metrics.New("control-api-test")
+	instruments := control.NewMetrics(scraped)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	registry, err := control.NewRegistry(control.RegistryOptions{
@@ -138,7 +161,7 @@ func newHarness(t *testing.T, limiter *ratelimit.Limiter) *harness {
 	if err != nil {
 		t.Fatalf("build a guard: %v", err)
 	}
-	return &harness{guard: guard, sessions: sessions, registry: registry, metrics: instruments}
+	return &harness{guard: guard, sessions: sessions, registry: registry, metrics: instruments, scraped: scraped}
 }
 
 func certificate(commonName string) *x509.Certificate {
@@ -316,7 +339,7 @@ func TestTakingARoleAwayLandsWithoutWaitingForTheToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build a role: %v", err)
 	}
-	binding, err := authz.NewBinding("dev-analyst", []string{"analyst"}, []string{"default"})
+	binding, err := authz.NewBinding("dev-analyst", authz.Tenant, []string{"analyst"}, []string{"default"})
 	if err != nil {
 		t.Fatalf("bind: %v", err)
 	}

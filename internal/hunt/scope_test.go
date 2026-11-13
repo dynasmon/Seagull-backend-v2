@@ -21,7 +21,8 @@ func verified(certificate *x509.Certificate) *tls.ConnectionState {
 }
 
 // analyst-01 reads both datasets in acme, auditor-01 reads detections in acme and
-// globex, and nobody else is named.
+// globex, root-01 reaches the platform and lists no tenant, and nobody else is
+// named.
 func policy(t *testing.T) *authz.Policy {
 	t.Helper()
 	read := func(resource authz.Resource) authz.Permission {
@@ -38,13 +39,15 @@ func policy(t *testing.T) *authz.Policy {
 	var bindings []authz.Binding
 	for _, bound := range []struct {
 		subject string
+		scope   authz.Scope
 		role    string
 		tenants []string
 	}{
-		{subject: "analyst-01", role: "analyst", tenants: []string{"acme"}},
-		{subject: "auditor-01", role: "auditor", tenants: []string{"globex", "acme"}},
+		{subject: "analyst-01", scope: authz.Tenant, role: "analyst", tenants: []string{"acme"}},
+		{subject: "auditor-01", scope: authz.Tenant, role: "auditor", tenants: []string{"globex", "acme"}},
+		{subject: "root-01", scope: authz.Platform, role: "analyst"},
 	} {
-		binding, err := authz.NewBinding(bound.subject, []string{bound.role}, bound.tenants)
+		binding, err := authz.NewBinding(bound.subject, bound.scope, []string{bound.role}, bound.tenants)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -88,6 +91,7 @@ func TestACallerThePolicyDoesNotLetReadADatasetIsRefused(t *testing.T) {
 		"an empty chain":                 {state: &tls.ConnectionState{VerifiedChains: [][]*x509.Certificate{{}}}, dataset: hunt.Events, want: hunt.ErrNoClientCertificate},
 		"a subject the policy names not": {state: verified(certificate("intruder-01", []string{"acme"})), dataset: hunt.Events, want: hunt.ErrNotGranted},
 		"events without events:read":     {state: verified(certificate("auditor-01", nil)), dataset: hunt.Events, want: hunt.ErrNotPermitted},
+		"the platform and no tenant":     {state: verified(certificate("root-01", []string{"acme"})), dataset: hunt.Events, want: hunt.ErrNoScope},
 	} {
 		if _, err := hunt.Authorize(refused.state, granted, refused.dataset); !errors.Is(err, refused.want) {
 			t.Errorf("%s was answered %v, want %v", name, err, refused.want)

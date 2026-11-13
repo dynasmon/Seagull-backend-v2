@@ -178,6 +178,10 @@ func (r *reader) bindings(held *mapping) ([]authz.Binding, error) {
 		if err != nil {
 			return nil, err
 		}
+		scope, err := r.scalar(&fields, part, "scope")
+		if err != nil {
+			return nil, err
+		}
 		tenants, err := r.list(&fields, part, "tenants")
 		if err != nil {
 			return nil, err
@@ -187,7 +191,7 @@ func (r *reader) bindings(held *mapping) ([]authz.Binding, error) {
 			return nil, r.fault(fields.at(left[0]), part+"."+left[0], "is not part of a binding")
 		}
 
-		binding, err := authz.NewBinding(subject, roles, tenants)
+		binding, err := authz.NewBinding(subject, authz.Scope(scope), roles, tenants)
 		if err != nil {
 			return nil, r.refused(item, part, err)
 		}
@@ -212,8 +216,8 @@ func Written(policy *authz.Policy) string {
 		if err != nil {
 			continue
 		}
-		fmt.Fprintf(&written, "  %s: %s within %s\n",
-			subject, strings.Join(grant.Roles(), ", "), strings.Join(grant.Tenants(), ", "))
+		fmt.Fprintf(&written, "  %s (%s): %s within %s\n",
+			subject, grant.Scope(), strings.Join(grant.Roles(), ", "), strings.Join(grant.Tenants(), ", "))
 	}
 	return written.String()
 }

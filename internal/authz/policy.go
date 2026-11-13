@@ -17,17 +17,22 @@ var subjectPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$`)
 
 func ValidSubject(name string) bool { return subjectPattern.MatchString(name) }
 
-// Both halves are required and an empty list is never a wildcard: a role with no
-// tenant may act nowhere, and a tenant with no role may do nothing there.
+// Nothing is inferred and an empty list is never a wildcard: a binding says what
+// it reaches, one reaching its tenants lists at least one, and one reaching the
+// platform reaches the records of no tenant it does not list.
 type Binding struct {
 	subject string
+	scope   Scope
 	roles   []string
 	tenants []string
 }
 
-func NewBinding(subject string, roles, tenants []string) (Binding, error) {
+func NewBinding(subject string, scope Scope, roles, tenants []string) (Binding, error) {
 	if !ValidSubject(subject) {
 		return Binding{}, fmt.Errorf("%q is not a subject", subject)
+	}
+	if !scope.Valid() {
+		return Binding{}, fmt.Errorf("subject %q has the scope %q, and a scope is %q or %q", subject, scope, Platform, Tenant)
 	}
 
 	keptRoles := make([]string, 0, len(roles))
@@ -52,16 +57,18 @@ func NewBinding(subject string, roles, tenants []string) (Binding, error) {
 			keptTenants = append(keptTenants, tenant)
 		}
 	}
-	if len(keptTenants) == 0 {
-		return Binding{}, fmt.Errorf("subject %q is bound to no tenant", subject)
+	if scope == Tenant && len(keptTenants) == 0 {
+		return Binding{}, fmt.Errorf("subject %q reaches the tenants it lists and lists none", subject)
 	}
 
 	slices.Sort(keptRoles)
 	slices.Sort(keptTenants)
-	return Binding{subject: subject, roles: keptRoles, tenants: keptTenants}, nil
+	return Binding{subject: subject, scope: scope, roles: keptRoles, tenants: keptTenants}, nil
 }
 
 func (b Binding) Subject() string { return b.subject }
+
+func (b Binding) Scope() Scope { return b.scope }
 
 func (b Binding) Roles() []string { return slices.Clone(b.roles) }
 
@@ -155,6 +162,7 @@ func (p *Policy) Grant(subject string) (Grant, error) {
 
 	return Grant{
 		subject:     binding.subject,
+		scope:       binding.scope,
 		roles:       slices.Clone(binding.roles),
 		tenants:     slices.Clone(binding.tenants),
 		permissions: permissions,
@@ -176,6 +184,7 @@ func identify(roles map[string]Role, bindings map[string]Binding) ID {
 	for _, subject := range slices.Sorted(maps.Keys(bindings)) {
 		binding := bindings[subject]
 		write(digest, "binding", binding.subject)
+		write(digest, "reaches", string(binding.scope))
 		for _, role := range binding.roles {
 			write(digest, "holds", role)
 		}

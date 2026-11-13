@@ -4,6 +4,11 @@
 > the query plane pins the same policy and decides every hunt by it, so tenancy
 > is read from one place by one path; `hunt.Scope` no longer reads the certificate.
 
+> Amended by [ADR 50](0050-a-grant-reaches-the-platform-or-the-tenants-it-names.md):
+> a binding also says what it reaches, the platform or the tenants it lists, and
+> a permission over what every tenant shares is held only by one that says the
+> platform; a binding of the platform may list no tenant.
+
 ## Context
 
 [ADR 2](0002-identity-comes-from-the-certificate.md) settled how the platform

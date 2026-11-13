@@ -53,3 +53,4 @@ rediscovered by reading the code.
 - [47. The query plane decides by the policy the control plane decides by, and a certificate's organisation authorises nothing](0047-the-query-plane-decides-by-the-policy-and-a-certificate-organisation-authorises-nothing.md)
 - [48. Every answer an agent reads is recorded here, and changes only by a version decision](0048-every-answer-an-agent-reads-is-recorded-here-and-changes-only-by-a-version-decision.md)
 - [49. A finding is decided by one reader from the stores their owners filled, and kept as one row for each episode of exposure](0049-a-finding-is-decided-by-one-reader-from-the-stores-their-owners-filled.md)
+- [50. A grant reaches the platform or the tenants it names, and what every tenant shares is held only by a grant of the platform](0050-a-grant-reaches-the-platform-or-the-tenants-it-names.md)

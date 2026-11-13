@@ -1,5 +1,9 @@
 # 47. The query plane decides by the policy the control plane decides by, and a certificate's organisation authorises nothing
 
+> Amended by [ADR 50](0050-a-grant-reaches-the-platform-or-the-tenants-it-names.md):
+> the query plane refuses the policy the control plane refuses, and a grant of
+> the platform that lists no tenant hunts nowhere.
+
 ## Context
 
 [ADR 13](0013-a-query-is-a-scope-a-window-and-a-question.md) took the tenants a

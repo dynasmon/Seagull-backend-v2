@@ -5,6 +5,10 @@
 > publication as the invalid ruleset it is, `422`, rather than answered as a log
 > that could not be reached.
 
+> Amended by [ADR 50](0050-a-grant-reaches-the-platform-or-the-tenants-it-names.md):
+> publishing and activating a ruleset is `rulesets:write`, a permission of the
+> platform, so a grant bound to its tenants reads the rulesets and changes none.
+
 ## Context
 
 [ADR 8](0008-a-ruleset-is-named-by-what-is-in-it.md) made a ruleset's identity

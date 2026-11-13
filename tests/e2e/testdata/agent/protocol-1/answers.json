@@ -1,6 +1,6 @@
 {
   "protocol": 1,
-  "contracts": "v0.22.0",
+  "contracts": "v0.23.0",
   "answers": [
     {
       "name": "events-accepted",

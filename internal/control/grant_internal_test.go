@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/authz"
+	controlv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/control/v1"
 )
 
 // A grant is what a caller is shown of what they hold, and a resource in neither
@@ -29,5 +30,16 @@ func TestEveryActionIsNamedByTheContract(t *testing.T) {
 		if _, named := actions[action]; !named {
 			t.Errorf("%s is not named by the contract", action)
 		}
+	}
+}
+
+func TestEveryScopeIsNamedByTheContract(t *testing.T) {
+	for _, scope := range []authz.Scope{authz.Platform, authz.Tenant} {
+		if named, known := scopes[scope]; !known || named == controlv1.Scope_SCOPE_UNSPECIFIED {
+			t.Errorf("%s is not named by the contract", scope)
+		}
+	}
+	if told := grantOf(authz.Grant{}).GetScope(); told != controlv1.Scope_SCOPE_UNSPECIFIED {
+		t.Errorf("a grant that reaches nothing is shown as %s", told)
 	}
 }

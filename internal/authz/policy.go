@@ -90,6 +90,8 @@ var (
 	ErrUnknownSubject = errors.New("the policy binds no roles to this subject")
 
 	ErrEmptyPolicy = errors.New("a policy with no bindings can allow nothing and is refused rather than loaded")
+
+	ErrPlatformPermission = errors.New("is held only by a binding whose scope is the platform")
 )
 
 func Compile(roles []Role, bindings []Binding) (*Policy, error) {
@@ -113,8 +115,18 @@ func Compile(roles []Role, bindings []Binding) (*Policy, error) {
 			return nil, fmt.Errorf("subject %q is bound twice; one subject has one binding", binding.subject)
 		}
 		for _, name := range binding.roles {
-			if _, declared := byName[name]; !declared {
+			role, declared := byName[name]
+			if !declared {
 				return nil, fmt.Errorf("subject %q holds role %q, which %w", binding.subject, name, errNoRole)
+			}
+			if binding.scope == Platform {
+				continue
+			}
+			for _, permission := range role.permissions {
+				if permission.Scope() != Tenant {
+					return nil, fmt.Errorf("subject %q reaches only its tenants and holds %s through role %q, which %w",
+						binding.subject, permission, name, ErrPlatformPermission)
+				}
 			}
 		}
 		bySubject[binding.subject] = binding

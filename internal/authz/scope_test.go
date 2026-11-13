@@ -1,6 +1,8 @@
 package authz_test
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/authz"
@@ -65,6 +67,54 @@ func TestABindingSaysWhatItReaches(t *testing.T) {
 		}
 		if built.Scope() != scope {
 			t.Errorf("a binding written %q reports %q", scope, built.Scope())
+		}
+	}
+}
+
+func TestATenantBindingCarryingAPlatformPermissionIsRefused(t *testing.T) {
+	roles := []authz.Role{
+		role(t, "analyst", "events:read", "rulesets:read"),
+		role(t, "administrator", "agents:write", "sessions:delete"),
+		role(t, "engineer", "agents:read", "alerts:read", "rulesets:write"),
+	}
+
+	for holder, held := range map[string]string{"administrator": "sessions:delete", "engineer": "rulesets:write"} {
+		_, err := authz.Compile(roles, []authz.Binding{
+			binding(t, "alice", authz.Tenant, []string{"analyst"}, []string{"acme"}),
+			binding(t, "mallory", authz.Tenant, []string{"analyst", holder}, []string{"globex", "initech"}),
+		})
+		if err == nil {
+			t.Fatalf("a binding of its tenants holding %s compiled", held)
+		}
+		if !errors.Is(err, authz.ErrPlatformPermission) {
+			t.Errorf("the refusal %q is not the one a platform permission gets", err)
+		}
+		for _, want := range []string{"mallory", holder, held} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("the refusal %q does not name %q", err, want)
+			}
+		}
+	}
+
+	if _, err := authz.Compile(roles, []authz.Binding{
+		binding(t, "alice", authz.Tenant, []string{"analyst"}, []string{"acme"}),
+		binding(t, "root", authz.Platform, []string{"analyst", "administrator", "engineer"}, []string{"globex"}),
+	}); err != nil {
+		t.Errorf("the same roles bound to the platform were refused: %v", err)
+	}
+}
+
+func TestEveryPlatformPermissionIsRefusedToATenantBinding(t *testing.T) {
+	for _, resource := range authz.Resources() {
+		for _, action := range authz.Actions() {
+			permission := authz.Permission{Resource: resource, Action: action}
+			_, err := authz.Compile(
+				[]authz.Role{role(t, "holder", permission.String())},
+				[]authz.Binding{binding(t, "alice", authz.Tenant, []string{"holder"}, []string{"acme"})},
+			)
+			if refused := err != nil; refused != (permission.Scope() == authz.Platform) {
+				t.Errorf("%s, which is %q, bound to one tenant: %v", permission, permission.Scope(), err)
+			}
 		}
 	}
 }

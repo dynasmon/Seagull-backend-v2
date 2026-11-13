@@ -159,7 +159,7 @@ func (s *Server) move(w http.ResponseWriter, r *http.Request, asked alert.Move) 
 	}
 
 	if holder := held.GetAssignee(); holder != "" && holder != caller.Subject {
-		decision := caller.Grant.Decide(authz.Permission{Resource: authz.Alerts, Action: authz.Delete})
+		decision := caller.Grant.DecideWithin(authz.Permission{Resource: authz.Alerts, Action: authz.Delete}, held.GetTenantId())
 		s.metrics.decided(decision)
 		if !decision.Allowed() {
 			Refuse(w, http.StatusForbidden, CodeHeldByAnother,

@@ -231,6 +231,23 @@ func TestABindingThatDoesNotSayWhatItReachesIsRefused(t *testing.T) {
 	}
 }
 
+func TestABindingOfOneTenantHoldingAPlatformPermissionIsNotLoaded(t *testing.T) {
+	written := strings.Replace(document, "    scope: platform\n", "    scope: tenant\n", 1)
+
+	_, err := policyfile.Read("policy.yml", []byte(written))
+	if err == nil {
+		t.Fatal("a binding of its tenants holding rulesets:write was loaded")
+	}
+	if !errors.Is(err, authz.ErrPlatformPermission) {
+		t.Errorf("the refusal %q is not the one a platform permission gets", err)
+	}
+	for _, want := range []string{"policy.yml", "dev-engineer", "engineer", "rulesets:write"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal %q does not name %q", err, want)
+		}
+	}
+}
+
 func TestOnlyABindingOfThePlatformListsNoTenant(t *testing.T) {
 	emptied := strings.Replace(document, "    tenants: [default, acme]\n", "    tenants: []\n", 1)
 

@@ -50,7 +50,9 @@ type Permission struct {
 	Action   Action
 }
 
-func (p Permission) Valid() bool { return p.Resource.Valid() && p.Action.Valid() }
+func (p Permission) Valid() bool {
+	return p.Resource.Valid() && p.Action.Valid() && p.Scope().Valid()
+}
 
 func (p Permission) String() string { return string(p.Resource) + ":" + string(p.Action) }
 

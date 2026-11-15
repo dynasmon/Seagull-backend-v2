@@ -9,6 +9,12 @@
 > publishing and activating a ruleset is `rulesets:write`, a permission of the
 > platform, so a grant bound to its tenants reads the rulesets and changes none.
 
+> Amended by [ADR 51](0051-the-rules-an-installation-starts-from-are-its-first-publication.md):
+> the tree the engine starts on is published by `control-api` as the
+> installation's first ruleset, so the bootstrap and the log name one ruleset
+> and a rule an engine already ran cannot be published again at its revision
+> asking something else.
+
 ## Context
 
 [ADR 8](0008-a-ruleset-is-named-by-what-is-in-it.md) made a ruleset's identity

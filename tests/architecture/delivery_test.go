@@ -190,3 +190,43 @@ func TestEveryJobIsRequiredOnMain(t *testing.T) {
 		t.Errorf("the jobs are %q and main requires %q", jobs, required)
 	}
 }
+
+// The engine detects from its rule tree until it has read the log, and the
+// control plane records that tree as the installation's first publication
+// (ADR 51). Given two trees, an installation would record one and detect from
+// the other.
+func TestTheEngineAndTheControlPlaneAreGivenOneRuleTree(t *testing.T) {
+	var compose struct {
+		Services map[string]struct {
+			Environment map[string]string `yaml:"environment"`
+			Volumes     []string          `yaml:"volumes"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(read(t, "deploy", "compose.yaml"), &compose); err != nil {
+		t.Fatalf("compose.yaml: %v", err)
+	}
+
+	mounted := map[string]string{}
+	for _, name := range []string{"analysis-engine", "control-api"} {
+		service, declared := compose.Services[name]
+		if !declared {
+			t.Fatalf("compose.yaml declares no %s", name)
+		}
+		tree := service.Environment["SEAGULL_DETECTION_RULES"]
+		if tree == "" {
+			t.Errorf("%s is not told where the rule tree is", name)
+			continue
+		}
+		for _, volume := range service.Volumes {
+			if source, target, _ := strings.Cut(volume, ":"); strings.TrimSuffix(target, ":ro") == tree {
+				mounted[name] = source
+			}
+		}
+		if mounted[name] == "" {
+			t.Errorf("%s reads its rules from %s and nothing is mounted there", name, tree)
+		}
+	}
+	if mounted["analysis-engine"] != mounted["control-api"] {
+		t.Errorf("the engine starts on %q and the control plane records %q", mounted["analysis-engine"], mounted["control-api"])
+	}
+}

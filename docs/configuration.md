@@ -288,7 +288,10 @@ the agent, they split by whichever agent's event reached the threshold. See
 The rule tree is the bootstrap, not the source of truth. The engine runs it
 until `security.rulesets` names a published ruleset to run, and from then on the
 log wins — which is what lets an engine keep detecting when no control plane is
-reachable. ADR 15.
+reachable. ADR 15. The control plane is given the same tree and publishes it as
+the installation's first ruleset, so what the engine starts on is what the log
+holds; see [control-api](#control-api) and
+[ADR 51](decisions/0051-the-rules-an-installation-starts-from-are-its-first-publication.md).
 
 A rule may count what it matches, which turns the same match into a threshold:
 
@@ -688,8 +691,9 @@ detection away from somebody's triage.
 | `SEAGULL_CONTROL_API_SESSIONS_MAX` | `4096` | sessions the process will hold |
 | `SEAGULL_CONTROL_API_RATE_PER_SECOND` | `20` | per-caller request budget, at least 1; `unlimited` turns the limiter off and is logged as a warning |
 | `SEAGULL_CONTROL_API_RATE_BURST` | `40` | burst above that budget |
-| `SEAGULL_CONTROL_API_START_TIMEOUT` | `30s` | how long it will spend reading the ruleset log before it gives up |
+| `SEAGULL_CONTROL_API_START_TIMEOUT` | `30s` | how long it will spend reading the ruleset log, and then publishing the rules it starts from, before it gives up |
 | `SEAGULL_CONTROL_API_RULESET_RECORDS` | `256` | ruleset records read per fetch |
+| `SEAGULL_DETECTION_RULES` | `/etc/seagull/rules` | the rule tree the engine starts on, published as the installation's first ruleset; it does not start without one |
 | `SEAGULL_CONTROL_API_ANNOUNCE_INTERVAL` | `5s` | how often it republishes agent decisions the backbone has not taken |
 | `SEAGULL_CONTROL_API_ANNOUNCE_BATCH` | `100` | outstanding decisions carried per sweep |
 | `SEAGULL_CONTROL_API_LIVENESS_HORIZON` | `720h` | how far back it looks for when an agent was last heard from |
@@ -719,6 +723,26 @@ It also reads `SEAGULL_BACKBONE_BROKERS` and the ruleset topic, and reads that
 topic whole before it serves: a control plane that had seen half the log would
 report an estate nobody has. It holds the only mutating connection to the
 relational store and takes the `SEAGULL_ALERT_STORE_*` settings above.
+
+Between reading the log and serving, it publishes the rule tree it is given as
+the installation's first ruleset, under the name `the installation`, which no
+caller can carry. A deployment mounts the tree the engine starts on, so the two
+name one ruleset and a rule the engine already ran cannot be published again at
+its revision asking something else. It activates that ruleset while nothing is
+active or what is active is the installation's own — an upgrade whose tree
+changed — and never moves a pointer a person wrote. What it did is logged:
+
+| Event | Level | Meaning |
+|---|---|---|
+| `starting_ruleset_published` | info | the tree was not in the log and is now a version |
+| `starting_ruleset_activated` | info | the pointer was moved to the tree, with what it replaced |
+| `starting_ruleset_empty` | warning | the tree holds no rules; nothing was published and the pointer was left |
+| `starting_ruleset_refused` | error | the log already holds one of the tree's rules at its revision asking something else; nothing was written, with the rule and the revision |
+
+A start that found the tree published and the pointer settled logs none of
+them. A tree that cannot be read, does not compile, contradicts its own cases
+or is heavier than the topic carries keeps the control plane from starting. See
+[ADR 51](decisions/0051-the-rules-an-installation-starts-from-are-its-first-publication.md).
 
 It writes the agent topic rather than reading it: what it decided about an agent
 is published there for the gateway, and a decision the backbone did not take is

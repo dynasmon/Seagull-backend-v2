@@ -52,6 +52,7 @@ type configuration struct {
 	security     broker.Security
 	startTimeout time.Duration
 	logRecords   int
+	rules        string
 
 	policyFile     string
 	sessionKey     config.Secret
@@ -111,6 +112,7 @@ func load(parser *config.Parser) (configuration, error) {
 		security:     broker.LoadSecurity(parser),
 		startTimeout: parser.Duration("SEAGULL_CONTROL_API_START_TIMEOUT", 30*time.Second, time.Second, 5*time.Minute),
 		logRecords:   parser.Int("SEAGULL_CONTROL_API_RULESET_RECORDS", 256, 1, 10_000),
+		rules:        parser.FilePath("SEAGULL_DETECTION_RULES", "/etc/seagull/rules"),
 
 		policyFile:     parser.RequiredFilePath("SEAGULL_CONTROL_API_POLICY"),
 		sessionKey:     parser.Secret("SEAGULL_CONTROL_API_SESSION_KEY"),

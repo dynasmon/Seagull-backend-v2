@@ -30,6 +30,7 @@ func environment(t *testing.T, set map[string]string) *config.Parser {
 		}
 		values[key] = path
 	}
+	values["SEAGULL_DETECTION_RULES"] = t.TempDir()
 	for key, value := range set {
 		values[key] = value
 	}
@@ -54,5 +55,29 @@ func TestAnOperatorRateLimitIsAtLeastOneOrTurnedOffInWords(t *testing.T) {
 	off, err := load(environment(t, map[string]string{"SEAGULL_CONTROL_API_RATE_PER_SECOND": "unlimited"}))
 	if err != nil || off.rateLimited {
 		t.Errorf("a control plane told unlimited is limited=%v (%v)", off.rateLimited, err)
+	}
+}
+
+// The rules an installation starts from are what its control plane records
+// first, so a control plane that was given no tree does not start, and one told
+// nothing looks for it where the engine does.
+func TestAControlPlaneIsGivenTheRuleTreeItsEngineStartsOn(t *testing.T) {
+	given := t.TempDir()
+	loaded, err := load(environment(t, map[string]string{"SEAGULL_DETECTION_RULES": given}))
+	if err != nil || loaded.rules != given {
+		t.Fatalf("a control plane given %s reads its starting rules from %q (%v)", given, loaded.rules, err)
+	}
+
+	if _, err := load(environment(t, map[string]string{"SEAGULL_DETECTION_RULES": filepath.Join(given, "absent")})); err == nil ||
+		!strings.Contains(err.Error(), "SEAGULL_DETECTION_RULES") {
+		t.Errorf("a rule tree that is not there was answered %v", err)
+	}
+
+	told, err := load(environment(t, map[string]string{"SEAGULL_DETECTION_RULES": ""}))
+	if err == nil && told.rules != "/etc/seagull/rules" {
+		t.Errorf("a control plane told nothing reads its starting rules from %q", told.rules)
+	}
+	if err != nil && !strings.Contains(err.Error(), `"/etc/seagull/rules"`) {
+		t.Errorf("a control plane told nothing did not look where the engine does: %v", err)
 	}
 }

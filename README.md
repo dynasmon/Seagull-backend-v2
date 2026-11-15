@@ -103,6 +103,12 @@ activating are separate acts, so a rollout can be rolled back to a version that
 cannot have changed underneath it. Nothing that fails to compile, whose own
 cases do not hold, or that is heavier than the topic carries, is ever written.
 
+The rules an installation starts from are its first publication: the control
+plane publishes the tree the engine starts on before it serves, under the name
+of the installation, so a rule an engine already ran cannot be published again
+at its revision asking something else. An upgrade brings the rules of its
+release the same way and never replaces a ruleset a person activated.
+
 ### Event hunting
 
 The query plane holds the only read connection to the store, consumes no topic
@@ -638,7 +644,7 @@ container without going through the environment. The settings that matter most:
 |---|---|
 | `SEAGULL_BACKBONE_BROKERS` | The event backbone every process depends on. |
 | `SEAGULL_GATEWAY_TLS_CERT`, `SEAGULL_GATEWAY_TLS_KEY`, `SEAGULL_GATEWAY_AGENT_CA` | The gateway's mutual TLS material; there is no plaintext mode. |
-| `SEAGULL_DETECTION_RULES` | The rule tree the engine starts on and falls back to. |
+| `SEAGULL_DETECTION_RULES` | The rule tree the engine starts on and falls back to, and the control plane publishes as the installation's first ruleset. |
 | `SEAGULL_DETECTION_STATE_WINDOW`, `SEAGULL_DETECTION_STATE_OBSERVATIONS`, `SEAGULL_DETECTION_STATE_KEYS` | What a counting or ordering rule may remember: the longest window, the events one key holds, and how many keys at once. The window is also what a restart re-reads. |
 | `SEAGULL_DETECTION_STATE_KEYS_PER_TENANT`, `SEAGULL_DETECTION_STATE_KEYS_PER_RULE` | What one tenant, and one rule of a tenant, may hold of those keys: a quarter of the store and half of that, unless a deployment says otherwise. [How to size them](docs/configuration.md). |
 | `SEAGULL_DETECTION_STATE_SOLE_READER` | Declares that this engine reads the whole stream, which is what makes a rule counting across agents answerable. Verified against the assignment; a broken claim stops the engine. |

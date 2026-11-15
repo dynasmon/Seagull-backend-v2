@@ -67,6 +67,10 @@ func (r rulesets) Publish(ctx context.Context, request *rulesetv1.PublishRequest
 		answer.Validation = &rulesetv1.ValidationResponse{RulesetId: validation.GetRulesetId(), Faults: faultsOf(err)}
 		return answer, nil
 	}
+	if r.catalogue.Published(version.ID()) {
+		answer.Published = true
+		return answer, nil
+	}
 
 	record := version.Record()
 	if size := proto.Size(record); size > r.largest {

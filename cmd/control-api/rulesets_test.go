@@ -25,6 +25,7 @@ var published = time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
 // document to a pinned ruleset without a broker in the room.
 type log struct {
 	records []*rulesetv1.Record
+	keys    []string
 	refuse  error
 }
 
@@ -33,17 +34,19 @@ func (l *log) Publish(_ context.Context, record *rulesetv1.Record) error {
 		return l.refuse
 	}
 	l.records = append(l.records, record)
+	l.keys = append(l.keys, record.GetVersion().GetId())
 	return nil
 }
 
 // The broker writes an activation twice; what a test reads back is what one
 // activation put on the log, so it is kept the way the log keeps it.
-func (l *log) Activate(_ context.Context, _ string, active *rulesetv1.Active) error {
+func (l *log) Activate(_ context.Context, key string, active *rulesetv1.Active) error {
 	if l.refuse != nil {
 		return l.refuse
 	}
 	record := &rulesetv1.Record{Record: &rulesetv1.Record_Active{Active: active}}
 	l.records = append(l.records, record, record)
+	l.keys = append(l.keys, key, broker.ActiveKey)
 	return nil
 }
 

@@ -100,6 +100,13 @@ func controlAPI(ctx context.Context) error {
 	}
 	defer published.close()
 
+	administered := rulesets{catalogue: published.catalogue, publisher: published.publisher, largest: settings.topology.Rulesets.LargestRecord()}
+	startingCtx, cancelStarting := context.WithTimeout(ctx, settings.startTimeout)
+	defer cancelStarting()
+	if err := administered.starting(startingCtx, os.DirFS(settings.rules), time.Now(), platform.Logger()); err != nil {
+		return err
+	}
+
 	raised, err := postgres.New(ctx, settings.alerts)
 	if err != nil {
 		return err
@@ -191,7 +198,7 @@ func controlAPI(ctx context.Context) error {
 		Guard:           guard,
 		Sessions:        sessions,
 		Registry:        registry,
-		Rulesets:        rulesets{catalogue: published.catalogue, publisher: published.publisher, largest: settings.topology.Rulesets.LargestRecord()},
+		Rulesets:        administered,
 		Alerts:          raised,
 		Incidents:       raised.Incidents(),
 		Agents:          raised.Agents(),

@@ -536,6 +536,10 @@ services:
       SEAGULL_CONTROL_API_AGENT_TRUST_BUNDLE: /run/pki/agent-trust.pem
       SEAGULL_CONTROL_API_AGENT_CERT_LIFETIME: ${SEAGULL_CONTROL_API_AGENT_CERT_LIFETIME:-168h}
       SEAGULL_CONTROL_API_POLICY: /etc/seagull/policy.yml
+      # The tree the engine starts on, mounted here as well: the control plane
+      # publishes it as the installation's first ruleset, so what the engine
+      # detected on before anybody published anything is in the log.
+      SEAGULL_DETECTION_RULES: /etc/seagull/rules
       SEAGULL_CONTROL_TELEMETRY_STORE_ADDRESS: clickhouse:9000
       SEAGULL_CONTROL_TELEMETRY_STORE_DATABASE: ${SEAGULL_EVENT_STORE_DATABASE:-seagull}
       SEAGULL_CONTROL_TELEMETRY_STORE_USER: ${SEAGULL_EVENT_STORE_USER:-seagull}
@@ -546,6 +550,7 @@ services:
     volumes:
       - ../.local/pki:/run/pki:ro
       - ./policy.yml:/etc/seagull/policy.yml:ro
+      - ./rules:/etc/seagull/rules:ro
     <<: *hardening
 
   # The read plane. It holds the only read connection to the store, consumes no

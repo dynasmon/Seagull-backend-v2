@@ -17,7 +17,7 @@ TEST_EVENT_STORE ?= 127.0.0.1:19000
 TEST_ALERT_STORE ?= 127.0.0.1:15432
 
 .PHONY: help fmt fmt-check vet mod-check lint test test-race test-integration \
-        test-load test-alerts record-agent-answers bench build images scan-images \
+        test-load test-alerts record-agent-answers record-starting-rules bench build images scan-images \
         scan-infrastructure vulncheck gosec verify-tag check-protection dev-pki up \
         down logs clean verify
 
@@ -33,6 +33,7 @@ help:
 	@echo "test-load           run the ingest load scenarios against a live Redpanda"
 	@echo "test-alerts         evaluate the operational alert rules against recorded series"
 	@echo "record-agent-answers record every answer an agent reads into tests/e2e/testdata/agent"
+	@echo "record-starting-rules record the shipped rule tree into cmd/control-api/testdata/starting"
 	@echo "bench               run the hot-path benchmarks"
 	@echo "build               build every component into $(DIST)"
 	@echo "images              build the container image of every component"
@@ -96,6 +97,10 @@ test-alerts:
 record-agent-answers:
 	SEAGULL_RECORD_AGENT_ANSWERS=$(CURDIR)/tests/e2e/testdata/agent/protocol-1 \
 	  $(GO) test -count=1 -run '^TestTheAnswersAnAgentReadsAreTheOnesRecorded$$' ./tests/e2e/
+
+record-starting-rules:
+	SEAGULL_RECORD_STARTING_RULES=$(CURDIR)/cmd/control-api/testdata/starting \
+	  $(GO) test -count=1 -run '^TestTheShippedRulesArePublishableOverEveryTreeShippedBefore$$' ./cmd/control-api/
 
 bench:
 	$(GO) test -run '^$$' -bench . -benchmem ./internal/...

@@ -126,6 +126,30 @@ func TestPublishingKeepsTheIdTheValidationReported(t *testing.T) {
 	}
 }
 
+func TestRulesPublishedAgainAreNotWrittenAgainAndKeepWhoPublishedThemFirst(t *testing.T) {
+	administrator, written := administer(t)
+	held := documents(t)
+
+	first, err := administrator.Publish(context.Background(), &rulesetv1.PublishRequest{Documents: held}, "dev-engineer", published)
+	if err != nil || !first.GetPublished() {
+		t.Fatalf("publish: %v %v", err, first.GetValidation().GetFaults())
+	}
+	again, err := administrator.Publish(context.Background(), &rulesetv1.PublishRequest{Documents: held}, "dev-admin", published.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("publish the same rules again: %v", err)
+	}
+	if !again.GetPublished() || again.GetRulesetId() != first.GetRulesetId() {
+		t.Fatalf("the same rules published again were answered as %v", again)
+	}
+
+	if len(written.records) != 1 {
+		t.Fatalf("%d records reached the log for one ruleset, and a compacted log keeps only the last under its key", len(written.records))
+	}
+	if version, _ := administrator.Version(first.GetRulesetId()); version.GetPublishedBy() != "dev-engineer" {
+		t.Errorf("publishing again rewrote who published the rules to %q", version.GetPublishedBy())
+	}
+}
+
 func TestARulesetThatDoesNotCompileNeverReachesTheLog(t *testing.T) {
 	administrator, written := administer(t)
 

@@ -146,6 +146,29 @@ func TestTheShippedPolicyTellsAnAdministratorOfThePlatformFromOneOfATenant(t *te
 	}
 }
 
+func TestTheShippedRolesReadAndDisposeOfVulnerabilitiesAsTheyWorkAlerts(t *testing.T) {
+	policy := shipped(t)
+	for name, holds := range map[string]map[authz.Action]bool{
+		"analyst":              {authz.Read: true},
+		"responder":            {authz.Read: true, authz.Write: true},
+		"tenant-administrator": {authz.Read: true, authz.Write: true},
+		"administrator":        {authz.Read: true, authz.Write: true},
+		"engineer":             {},
+	} {
+		role, declared := policy.Role(name)
+		if !declared {
+			t.Errorf("the shipped policy declares no role %q", name)
+			continue
+		}
+		for _, action := range authz.Actions() {
+			permission := authz.Permission{Resource: authz.Vulnerabilities, Action: action}
+			if role.Allows(permission) != holds[action] {
+				t.Errorf("the shipped %s holds %s: %v, want %v", name, permission, role.Allows(permission), holds[action])
+			}
+		}
+	}
+}
+
 // Nothing may hold a permission this build does not declare: the policy is read
 // at startup, and a role naming something undeclared stops the process.
 func TestEveryPermissionTheShippedPolicyGrantsIsDeclared(t *testing.T) {

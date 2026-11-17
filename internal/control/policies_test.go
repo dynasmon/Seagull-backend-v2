@@ -173,7 +173,8 @@ func policyListener(t *testing.T, h *harness, held *stubAgents, published *stubP
 		Guard: h.guard, Sessions: h.sessions, Registry: h.registry,
 		Rulesets: newStubRulesets(), Alerts: newStubAlerts(), Incidents: newStubIncidents(),
 		Agents: held, Admissions: &stubAdmissions{}, Policies: published, PolicySigners: signers,
-		Authority: signing, TrustBundle: bundle, CertificateLife: time.Hour,
+		Dispositions: newStubDispositions(),
+		Authority:    signing, TrustBundle: bundle, CertificateLife: time.Hour,
 		Metrics: h.metrics, Logger: slog.New(slog.DiscardHandler),
 		Instrumentation: httpx.NewInstrumentation(metrics.New("control-api-policies")),
 	})

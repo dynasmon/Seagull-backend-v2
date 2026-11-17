@@ -92,6 +92,7 @@ func listenerRegistering(
 		TrustBundle:     bundle,
 		CertificateLife: 24 * time.Hour,
 		Policies:        newStubPolicies(held),
+		Dispositions:    newStubDispositions(),
 		Metrics:         h.metrics,
 		Logger:          slog.New(slog.DiscardHandler),
 		Instrumentation: httpx.NewInstrumentation(metrics.New("control-api-routes")),

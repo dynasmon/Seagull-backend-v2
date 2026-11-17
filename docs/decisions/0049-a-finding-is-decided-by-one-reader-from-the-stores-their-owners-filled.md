@@ -1,5 +1,10 @@
 # 49. A finding is decided by one reader from the stores their owners filled, and kept as one row for each episode of exposure
 
+> Amended by [ADR 52](0052-a-disposition-is-kept-beside-the-findings-it-covers.md):
+> what people decide about a vulnerability is kept by `control-api` in
+> PostgreSQL beside the findings, and nothing that decides or keeps a finding
+> reads it.
+
 ## Context
 
 [ADR 27](0027-inventory-is-a-record-kind-of-its-own.md) keeps what every asset

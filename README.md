@@ -458,6 +458,15 @@ writes neither, and kept by another:
                  one row per episode       one row per evaluation
 ```
 
+What a person decides about a vulnerability instead of fixing it is kept apart,
+by the control plane, and never read by the matcher:
+
+```text
+ control-api ──▶ PostgreSQL vulnerability_dispositions · …_withdrawals
+   ignored or accepted risk, for a tenant, an agent or a package,
+   with a reason, an actor and an expiry; ended only by a withdrawal
+```
+
 Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 
 | Process | Role |
@@ -474,7 +483,7 @@ Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 | `advisory-writer` | Keeps every version of every advisory and every attempt to follow a feed, under a group and a quarantine of its own. |
 | `vulnerability-matcher` | Decides which packages of each asset are vulnerable from the inventory and advisory stores, read-only, and publishes the decisions to `security.findings`. It reads both streams alone in one loop, waits for each store's owner before reading it, and holds no internet access and no credential that writes. |
 | `finding-writer` | Keeps what the vulnerability matcher decided, one row per episode of a finding and one per evaluation of an asset, under a group and a quarantine of its own, so a findings store outage costs how current findings are and never a decision. |
-| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry with how recently each agent reported and its posture, the authority that signs an agent's certificate, the signed policies agents are handed, and the signed catalog of releases agents may install with their packages. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates and asking for their policy and their updates on a second one. |
+| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry with how recently each agent reported and its posture, the authority that signs an agent's certificate, the signed policies agents are handed, the signed catalog of releases agents may install with their packages, and what people decide about vulnerabilities instead of fixing them. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates and asking for their policy and their updates on a second one. |
 | `query-api` | The read plane, and the only reader of the analytical store. |
 | `backbone-migrator`, `store-migrator`, `control-migrator` | Apply the topic topology, the analytical schema and the relational schema, then exit. Nothing migrates on the way to serving traffic. |
 
@@ -614,6 +623,13 @@ it renew that certificate itself, and revoke it:
 
 ```bash
 go run ./tools/devprobe -agents https://127.0.0.1:8445 -renewals https://127.0.0.1:8446
+```
+
+Accept the risk of a vulnerability for the `default` tenant, read it back, and
+withdraw it:
+
+```bash
+go run ./tools/devprobe -dispositions https://127.0.0.1:8445
 ```
 
 Stop everything and drop its state with `make down`. If a port is taken, publish

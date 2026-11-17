@@ -14,6 +14,7 @@ roles:
       - alerts:read
       - incidents:read
       - agents:read
+      - vulnerabilities:read
 
   - name: responder
     description: works alerts and incidents through their lifecycle without changing what detects them
@@ -25,6 +26,8 @@ roles:
       - incidents:read
       - incidents:write
       - agents:read
+      - vulnerabilities:read
+      - vulnerabilities:write
 
   - name: engineer
     description: writes and publishes the rules the analysis engine runs for every tenant
@@ -49,6 +52,8 @@ roles:
       - incidents:read
       - incidents:write
       - rulesets:read
+      - vulnerabilities:read
+      - vulnerabilities:write
 
   - name: administrator
     description: administers the platform itself, from what detects for every tenant to what an agent may install and who is signed in
@@ -70,6 +75,8 @@ roles:
       - rulesets:write
       - sessions:read
       - sessions:delete
+      - vulnerabilities:read
+      - vulnerabilities:write
 
 # A subject is the common name of a verified client certificate. A binding says
 # what it reaches: `platform` holds what every tenant shares, `tenant` only what

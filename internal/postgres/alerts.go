@@ -340,8 +340,12 @@ func instant(value *time.Time) *timestamppb.Timestamp {
 	return timestamppb.New(value.UTC())
 }
 
+// The instant is written to the microsecond PostgreSQL keeps it to, since one
+// batch is raised at one instant and a coarser cursor skips the rest of it. A
+// cursor written to the millisecond, as earlier builds issued, is refused rather
+// than read as a position nothing is listed behind.
 func encodeCursor(at time.Time, id string) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(strconv.FormatInt(at.UnixMilli(), 10) + "." + id))
+	return base64.RawURLEncoding.EncodeToString([]byte(strconv.FormatInt(at.UnixMicro(), 10) + "/" + id))
 }
 
 func decodeCursor(token string) (time.Time, string, error) {
@@ -349,13 +353,13 @@ func decodeCursor(token string) (time.Time, string, error) {
 	if err != nil {
 		return time.Time{}, "", alert.ErrCursor
 	}
-	written, id, found := strings.Cut(string(payload), ".")
+	written, id, found := strings.Cut(string(payload), "/")
 	if !found || id == "" {
 		return time.Time{}, "", alert.ErrCursor
 	}
-	millis, err := strconv.ParseInt(written, 10, 64)
+	micros, err := strconv.ParseInt(written, 10, 64)
 	if err != nil {
 		return time.Time{}, "", alert.ErrCursor
 	}
-	return time.UnixMilli(millis).UTC(), id, nil
+	return time.UnixMicro(micros).UTC(), id, nil
 }

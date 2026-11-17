@@ -38,6 +38,7 @@ import (
 	incidentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/incident/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
 	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
+	vulnerabilityv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/vulnerability/v1"
 )
 
 func main() {
@@ -47,6 +48,7 @@ func main() {
 	alertEndpoint := flag.String("alerts", "", "control plane base URL; works an alert through its lifecycle instead of sending a batch")
 	incidentEndpoint := flag.String("incidents", "", "control plane base URL; reads a correlated story back to its events and works it")
 	agentEndpoint := flag.String("agents", "", "control plane base URL; registers an agent, has its certificate issued and renewed, and revokes it")
+	dispositionEndpoint := flag.String("dispositions", "", "control plane base URL; accepts the risk of a vulnerability for the default tenant, reads it back and withdraws it")
 	renewalEndpoint := flag.String("renewals", "https://127.0.0.1:8446", "agent-facing control plane base URL the registry probe renews against")
 	agentID := flag.String("agent-id", "probe-agent-01", "agent the registry probe registers")
 	window := flag.Duration("window", time.Hour, "how far back a hunt looks")
@@ -73,6 +75,9 @@ func main() {
 	}
 	if *agentEndpoint != "" {
 		run = func() error { return enrol(*agentEndpoint, *renewalEndpoint, *pki, *agentID) }
+	}
+	if *dispositionEndpoint != "" {
+		run = func() error { return accept(*dispositionEndpoint, *pki) }
 	}
 	if *assets {
 		run = func() error { return survey(*endpoint, *registry, *pki, *batchID, *packages, *kernels, *accounts) }
@@ -294,6 +299,88 @@ func triage(endpoint, pki string) error {
 		return nil
 	}
 	return walk(client, endpoint, token, page.GetAlerts()[0].GetAlertId())
+}
+
+func accept(endpoint, pki string) error {
+	client, token, err := authenticate(endpoint, pki)
+	if err != nil {
+		return err
+	}
+
+	status, body, err := send(client, http.MethodPost, endpoint+control.DispositionsPath, token, &vulnerabilityv1.DispositionRequest{
+		TenantId:        "default",
+		VulnerabilityId: "CVE-2026-0001",
+		PackageName:     "openssl",
+		Kind:            vulnerabilityv1.DispositionKind_DISPOSITION_KIND_ACCEPTED_RISK,
+		Reason:          "accepted by devprobe until the probe ends",
+		ExpiresAt:       timestamppb.New(time.Now().Add(7 * 24 * time.Hour)),
+	})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusCreated {
+		return refused("record", status, body)
+	}
+	var recorded vulnerabilityv1.Disposition
+	if err := proto.Unmarshal(body, &recorded); err != nil {
+		return err
+	}
+	fmt.Printf("recorded %s %s %s %s by %s until %s\n", recorded.GetDispositionId(), recorded.GetKind(),
+		recorded.GetVulnerabilityId(), recorded.GetPackageName(), recorded.GetActor(),
+		recorded.GetExpiresAt().AsTime().Format(time.RFC3339))
+	if err := listDispositions(client, endpoint, token, false); err != nil {
+		return err
+	}
+
+	withdrawal := endpoint + strings.Replace(control.DispositionWithdrawal, "{id}", recorded.GetDispositionId(), 1)
+	ending := &vulnerabilityv1.WithdrawalRequest{Reason: "the devprobe run is over"}
+	status, body, err = send(client, http.MethodPost, withdrawal, token, ending)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return refused("withdraw", status, body)
+	}
+	var withdrawn vulnerabilityv1.Disposition
+	if err := proto.Unmarshal(body, &withdrawn); err != nil {
+		return err
+	}
+	fmt.Printf("withdrawn %s by %s at %s\n", withdrawn.GetDispositionId(), withdrawn.GetWithdrawnBy(),
+		withdrawn.GetWithdrawnAt().AsTime().Format(time.RFC3339))
+	status, body, err = send(client, http.MethodPost, withdrawal, token, ending)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("withdrawing again: %v\n", refused("withdraw", status, body))
+
+	if err := listDispositions(client, endpoint, token, false); err != nil {
+		return err
+	}
+	return listDispositions(client, endpoint, token, true)
+}
+
+func listDispositions(client *http.Client, endpoint, token string, lapsed bool) error {
+	status, body, err := send(client, http.MethodPost, endpoint+control.DispositionSearch, token,
+		&vulnerabilityv1.DispositionQuery{Lapsed: lapsed, Limit: 10})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return refused("search", status, body)
+	}
+	var page vulnerabilityv1.DispositionPage
+	if err := proto.Unmarshal(body, &page); err != nil {
+		return err
+	}
+	fmt.Printf("dispositions (lapsed included: %v) %d\n", lapsed, len(page.GetDispositions()))
+	for _, one := range page.GetDispositions() {
+		ended := "in force"
+		if one.GetWithdrawnAt() != nil {
+			ended = "withdrawn by " + one.GetWithdrawnBy() + ": " + one.GetWithdrawalReason()
+		}
+		fmt.Printf("  %s %s %s by %s: %s\n", one.GetDispositionId(), one.GetKind(), one.GetVulnerabilityId(), one.GetActor(), ended)
+	}
+	return nil
 }
 
 func authenticate(endpoint, pki string) (*http.Client, string, error) {

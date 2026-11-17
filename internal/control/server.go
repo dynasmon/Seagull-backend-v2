@@ -207,6 +207,8 @@ func NewHandler(options ServerOptions) (http.Handler, error) {
 		return nil, errors.New("the control listener works incidents and needs somewhere to read and move them")
 	case options.Admissions == nil:
 		return nil, errors.New("the control listener decides what a gateway admits and needs somewhere to say so")
+	case options.Dispositions == nil:
+		return nil, errors.New("the control listener records what people decide about vulnerabilities and needs somewhere to keep it")
 	}
 
 	server, err := newServer(options)

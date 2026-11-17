@@ -130,7 +130,8 @@ func TestAListenerRefusesToServeOnABundleThatDoesNotTrustItsAuthority(t *testing
 		Guard: h.guard, Sessions: h.sessions, Registry: h.registry,
 		Rulesets: newStubRulesets(), Alerts: newStubAlerts(), Incidents: newStubIncidents(),
 		Agents: newStubAgents(), Admissions: &stubAdmissions{}, Policies: newStubPolicies(nil),
-		Authority: signing, TrustBundle: elsewhere, CertificateLife: time.Hour,
+		Dispositions: newStubDispositions(),
+		Authority:    signing, TrustBundle: elsewhere, CertificateLife: time.Hour,
 		Metrics: h.metrics, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Instrumentation: httpx.NewInstrumentation(metrics.New("control-api-bundle")),
 	})

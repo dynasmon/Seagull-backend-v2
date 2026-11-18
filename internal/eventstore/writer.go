@@ -161,6 +161,7 @@ func (w *Writer) classify(records []Record) ([]Row, []Refused) {
 			refused = append(refused, refuse(record, ReasonUnstorable, err.Error()))
 			continue
 		}
+		row.LogPartition, row.LogOffset = record.Partition, record.Offset
 		rows = append(rows, row)
 	}
 	return rows, refused

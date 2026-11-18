@@ -4,6 +4,10 @@
 > step 3 below holds for a synchronous insert. ClickHouse 26.2 made inserts asynchronous by
 > default, and a queued insert holds no table, so every connection now states
 > `async_insert = 0`.
+> Amended by [ADR 53](0053-a-stored-event-keeps-the-position-it-was-read-from.md):
+> of the rows one event leaves, the one kept is its first arrival, chosen by the
+> version `arrival_precedence`, and a rebuild is recognised by the engine as well
+> as the sorting key, so an engine changes by the same procedure.
 
 ## Context
 

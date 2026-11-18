@@ -9,6 +9,10 @@
 > `security_events` is ordered by `(tenant_id, event_time, agent_id, event_id)`,
 > so a replay still collapses but one agent can no longer collapse another's
 > event, and a sorting key changes by a rebuild `store-migrator` carries out.
+> Amended by [ADR 53](0053-a-stored-event-keeps-the-position-it-was-read-from.md):
+> a stored event keeps the partition and offset it was read from, and of an
+> event delivered twice the store keeps the first arrival, the one the engine
+> decided.
 
 ## Context
 

@@ -76,6 +76,31 @@ DROP COLUMN IF EXISTS obsolete`},
 	}
 }
 
+func TestAColumnTheStoreComputesIsNotOneTheWriterSupplies(t *testing.T) {
+	history := []migration{{
+		version: 1,
+		name:    "security_events",
+		statements: []string{`CREATE TABLE IF NOT EXISTS security_events
+(
+    event_id           String,
+    log_offset         Int64 DEFAULT -1,
+    arrival_precedence Int64 MATERIALIZED -log_offset,
+    shown              String ALIAS concat(event_id, '!'),
+    reason             String DEFAULT 'MATERIALIZED'
+)
+ENGINE = ReplacingMergeTree(arrival_precedence)
+ORDER BY event_id`},
+	}}
+
+	got, err := declaredColumnsIn(history, table)
+	if err != nil {
+		t.Fatalf("build the final schema: %v", err)
+	}
+	if want := []string{"event_id", "log_offset", "reason"}; !slices.Equal(got, want) {
+		t.Fatalf("a writer supplies %v, want %v", got, want)
+	}
+}
+
 func TestEveryColumnIsGivenAValue(t *testing.T) {
 	if got, want := len(values(eventstore.Row{})), len(storedColumns); got != want {
 		t.Fatalf("the adapter names %d columns and supplies %d values", want, got)

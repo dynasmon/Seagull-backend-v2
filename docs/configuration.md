@@ -1096,6 +1096,44 @@ assessment has already been able to see what it covered.
 **Quarantine.** `security.findings.quarantine`, on the same terms as the other
 quarantines.
 
+## Vulnerability dispositions
+
+What a person decides about a vulnerability instead of fixing it is kept by
+`control-api` in the control store, beside the findings and never in them: the
+matcher goes on deciding as it reads. A disposition is `IGNORED` or
+`ACCEPTED_RISK`, covers one vulnerability on every asset of its tenant, or on one
+agent the tenant registered, or on one package as the asset names it, and always
+expires, at most 365 days after it is recorded. Its reason, and a withdrawal's,
+is required, at most 1,024 bytes, with no control character but a tab or a line
+break. The actor is the caller's certificate subject and the instant is the
+control plane's.
+
+| Route | Needs | Answers |
+|---|---|---|
+| `POST /v1/vulnerabilities/dispositions` | `vulnerabilities:write` in the tenant | `201` with the `Disposition` |
+| `POST /v1/vulnerabilities/dispositions/search` | `vulnerabilities:read` | a `DispositionPage`, newest first, within the caller's tenants |
+| `POST /v1/vulnerabilities/dispositions/{id}/withdrawal` | `vulnerabilities:write` | `200` with the `Disposition` and its withdrawal |
+
+A search leaves out dispositions that expired or were withdrawn unless `lapsed`
+asks for them, and answers `agent_ids` with every disposition covering one of
+the agents, the tenant's that name no agent included. A malformed request is
+refused with `malformed_disposition`, an agent the tenant never registered with
+`disposition_names_unregistered_agent`, a disposition outside the caller's
+tenants with `404 unknown_disposition`, and withdrawing one that expired or was
+already withdrawn with `409 disposition_lapsed`.
+
+- **`vulnerability_dispositions`** — one row per disposition, written once.
+- **`vulnerability_disposition_withdrawals`** — one row per withdrawal, keyed by
+  the disposition, so two at once are one withdrawal and one refusal.
+
+Neither is ever updated or deleted.
+
+| Metric | Labels |
+|---|---|
+| `seagull_control_vulnerability_dispositions_total` | `outcome`: `ignored`, `accepted_risk`, `withdrawn`, `refused` |
+
+See [ADR 52](decisions/0052-a-disposition-is-kept-beside-the-findings-it-covers.md).
+
 ## The access policy
 
 `control-api` and `query-api` read one document when they start,
@@ -1116,6 +1154,7 @@ A permission is the platform's or a tenant's:
 | `rulesets:write` | platform | publishing and activating the ruleset every tenant is detected by |
 | `sessions:read`, `sessions:delete` | platform | listing and ending the sessions of another subject; a caller lists and ends its own without either |
 | `releases:write` | platform | publishing an update root, a catalog and a package |
+| `vulnerabilities:read`, `vulnerabilities:write` | tenant | reading what people decided about the vulnerabilities of a tenant, and recording and withdrawing a disposition there |
 
 Every other pairing of a resource and an action is declared, and whose it is
 is said in `internal/authz/scope.go`, though no route asks for it yet;

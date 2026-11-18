@@ -76,6 +76,31 @@ DROP COLUMN IF EXISTS obsolete`},
 	}
 }
 
+func TestAColumnTheStoreComputesIsNotOneTheWriterSupplies(t *testing.T) {
+	history := []migration{{
+		version: 1,
+		name:    "security_events",
+		statements: []string{`CREATE TABLE IF NOT EXISTS security_events
+(
+    event_id           String,
+    log_offset         Int64 DEFAULT -1,
+    arrival_precedence Int64 MATERIALIZED -log_offset,
+    shown              String ALIAS concat(event_id, '!'),
+    reason             String DEFAULT 'MATERIALIZED'
+)
+ENGINE = ReplacingMergeTree(arrival_precedence)
+ORDER BY event_id`},
+	}}
+
+	got, err := declaredColumnsIn(history, table)
+	if err != nil {
+		t.Fatalf("build the final schema: %v", err)
+	}
+	if want := []string{"event_id", "log_offset", "reason"}; !slices.Equal(got, want) {
+		t.Fatalf("a writer supplies %v, want %v", got, want)
+	}
+}
+
 func TestEveryColumnIsGivenAValue(t *testing.T) {
 	if got, want := len(values(eventstore.Row{})), len(storedColumns); got != want {
 		t.Fatalf("the adapter names %d columns and supplies %d values", want, got)
@@ -222,6 +247,45 @@ func TestASortingKeyIsReadTheWayTheStoreReportsIt(t *testing.T) {
 	}
 }
 
+// A rebuild that changes the engine and keeps the key is a rebuild still: read by
+// its key alone, the table would already look rebuilt and the migration would be
+// recorded without moving a row.
+func TestAShapeIsTheEngineAndTheSortingKeyTheStoreReports(t *testing.T) {
+	declared, err := declaredShape(`CREATE TABLE IF NOT EXISTS security_events_rebuild (event_id String)
+ENGINE = ReplacingMergeTree( arrival_precedence )
+PARTITION BY toYYYYMM(event_time)
+ORDER BY (tenant_id, event_time,
+    agent_id, event_id)
+SETTINGS index_granularity = 8192`)
+	if err != nil {
+		t.Fatalf("read the declared shape: %v", err)
+	}
+
+	const key = "tenant_id, event_time, agent_id, event_id"
+	tail := " PARTITION BY toYYYYMM(event_time) ORDER BY (tenant_id, event_time, agent_id, event_id) TTL toDateTime(event_time) + toIntervalDay(365) SETTINGS index_granularity = 8192"
+	for _, reported := range []struct {
+		engine, key string
+		same        bool
+	}{
+		{"ReplacingMergeTree(arrival_precedence)" + tail, key, true},
+		{"ReplacingMergeTree" + tail, key, false},
+		{"ReplacingMergeTree(decided_at)" + tail, key, false},
+		{"ReplacingMergeTree(arrival_precedence)" + tail, "tenant_id, event_time, event_id", false},
+	} {
+		held, err := reportedShape(reported.engine, reported.key)
+		if err != nil {
+			t.Fatalf("read the reported shape %q: %v", reported.engine, err)
+		}
+		if got := held.same(declared); got != reported.same {
+			t.Errorf("a table reported as %q ordered by %q is taken as the declared one: %t, want %t",
+				reported.engine, reported.key, got, reported.same)
+		}
+	}
+	if _, err := declaredShape("CREATE TABLE IF NOT EXISTS t (a String) ORDER BY a"); err == nil {
+		t.Error("a statement naming no engine was read as having one")
+	}
+}
+
 func TestARebuiltTableHasTheColumnsOfTheTableItWasRebuiltAs(t *testing.T) {
 	history := []migration{
 		{
@@ -271,6 +335,7 @@ func TestARebuildIsOneStatementCreatingTheTableItIsRebuiltAs(t *testing.T) {
 		"another table":      {"CREATE TABLE IF NOT EXISTS security_events_other (event_id String) ENGINE = MergeTree ORDER BY event_id"},
 		"a second statement": {create, "ALTER TABLE security_detections ADD COLUMN IF NOT EXISTS process_name String"},
 		"no sorting key":     {"CREATE TABLE IF NOT EXISTS security_events_rebuild (event_id String) ENGINE = Log"},
+		"no engine":          {"CREATE TABLE IF NOT EXISTS security_events_rebuild (event_id String) ORDER BY event_id"},
 		"no statement":       nil,
 	} {
 		if err := plan.check(migration{version: 9, name: "order_security_events_by_agent", statements: statements}); err == nil {

@@ -43,6 +43,8 @@ var storedColumns = []string{
 
 	"gateway",
 	"batch_id",
+	"log_partition",
+	"log_offset",
 
 	"auth_activity",
 	"auth_outcome",
@@ -83,6 +85,8 @@ func values(row eventstore.Row) []any {
 
 		row.Gateway,
 		row.BatchID,
+		row.LogPartition,
+		row.LogOffset,
 
 		row.AuthActivity,
 		row.AuthOutcome,
@@ -127,6 +131,8 @@ func eventPointers(row *eventstore.Row) []any {
 
 		&row.Gateway,
 		&row.BatchID,
+		&row.LogPartition,
+		&row.LogOffset,
 
 		&row.AuthActivity,
 		&row.AuthOutcome,

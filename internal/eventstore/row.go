@@ -19,6 +19,8 @@ var (
 	latest   = time.Date(2262, time.April, 11, 23, 47, 16, 0, time.UTC)
 )
 
+const noPosition = -1
+
 type Row struct {
 	EventID       string
 	SchemaVersion uint32
@@ -38,8 +40,10 @@ type Row struct {
 	Source    string
 	Sequence  uint64
 
-	Gateway string
-	BatchID string
+	Gateway      string
+	BatchID      string
+	LogPartition int32
+	LogOffset    int64
 
 	AuthActivity        string
 	AuthOutcome         string
@@ -118,8 +122,10 @@ func Project(record *eventv1.Event) Row {
 		Source:    record.GetCollection().GetSource(),
 		Sequence:  record.GetCollection().GetSequence(),
 
-		Gateway: record.GetReception().GetGateway(),
-		BatchID: record.GetReception().GetBatchId(),
+		Gateway:      record.GetReception().GetGateway(),
+		BatchID:      record.GetReception().GetBatchId(),
+		LogPartition: noPosition,
+		LogOffset:    noPosition,
 
 		AuthActivity:        name(authentication.GetActivity().String(), "ACTIVITY_"),
 		AuthOutcome:         name(authentication.GetOutcome().String(), "OUTCOME_"),

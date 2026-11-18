@@ -24,11 +24,22 @@ import (
 )
 
 const (
-	rebuiltKey       = "tenant_id, event_time, agent_id, event_id"
-	rebuildTable     = "security_events_rebuild"
-	rebuildMigration = 9
-	schemaOnDisk     = "../../internal/clickhouse/schema"
-	rebuildTenant    = "rebuilt"
+	rebuiltKey    = "tenant_id, event_time, agent_id, event_id"
+	rebuiltEngine = "ReplacingMergeTree(arrival_precedence)"
+	rebuildTable  = "security_events_rebuild"
+	schemaOnDisk  = "../../internal/clickhouse/schema"
+	rebuildTenant = "rebuilt"
+)
+
+var (
+	releasedColumns = []string{"event_id", "event_time", "tenant_id", "agent_id"}
+	rebuildsOnDisk  = []struct {
+		migration int
+		file      string
+	}{
+		{9, "0009_order_security_events_by_agent.sql"},
+		{13, "0013_security_events_log_position.sql"},
+	}
 )
 
 // Every test here migrates a database of its own, so the state a previous
@@ -51,8 +62,9 @@ func freshDatabase(t *testing.T, address string) (string, driver.Conn) {
 	})
 
 	connection, err := chgo.Open(&chgo.Options{
-		Addr: []string{address},
-		Auth: chgo.Auth{Database: name, Username: storeUser},
+		Addr:     []string{address},
+		Auth:     chgo.Auth{Database: name, Username: storeUser},
+		Settings: chgo.Settings{"async_insert": 0},
 	})
 	if err != nil {
 		t.Fatalf("connect to %s: %v", name, err)
@@ -76,10 +88,11 @@ func run(t *testing.T, connection driver.Conn, statement string, arguments ...an
 	}
 }
 
-// What the release before the rebuild left behind: every migration numbered
-// below it, applied from the files in the tree, and recorded in a ledger shaped
-// like the migrator's.
-func previousRelease(t *testing.T, connection driver.Conn) {
+// What a release left behind: every migration up to its last, applied from the
+// files in the tree with a rebuild applied as the table it rebuilds, recorded in
+// a ledger shaped like the migrator's, and filled by a writer that knew only the
+// columns every release has held.
+func releasedThrough(t *testing.T, connection driver.Conn, last int) {
 	t.Helper()
 
 	run(t, connection, `CREATE TABLE IF NOT EXISTS schema_migrations
@@ -102,10 +115,14 @@ ORDER BY version`)
 		if err != nil {
 			t.Fatalf("read the version of %s: %v", file, err)
 		}
-		if version >= rebuildMigration {
+		if version > last {
 			continue
 		}
 		for _, statement := range statementsIn(t, file) {
+			if strings.Contains(statement, rebuildTable) {
+				run(t, connection, "DROP TABLE IF EXISTS security_events SYNC")
+				statement = strings.Replace(statement, rebuildTable, "security_events", 1)
+			}
 			run(t, connection, statement)
 		}
 		run(t, connection, "INSERT INTO schema_migrations (version, name) VALUES (?, ?)", uint32(version), name)
@@ -150,32 +167,33 @@ func migrate(t *testing.T, address, database string) {
 	}
 }
 
-func writerIn(t *testing.T, address, database string) *clickhouse.Store {
-	t.Helper()
-
-	store, err := clickhouse.NewStore(settingsFor(address, database))
-	if err != nil {
-		t.Fatalf("build the store: %v", err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	return store
-}
-
 func sent(agentID, eventID string, at time.Time) eventstore.Row {
 	record := fixtures.SSHAuthentication{EventID: eventID, AgentID: agentID, At: at}.Event()
 	record.Origin.TenantId = rebuildTenant
 	return eventstore.Project(record)
 }
 
-func write(t *testing.T, store *clickhouse.Store, rows ...eventstore.Row) {
+func writeAsReleased(t *testing.T, connection driver.Conn, rows ...eventstore.Row) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	for _, row := range rows {
-		if err := store.Store(ctx, []eventstore.Row{row}); err != nil {
+		if err := insertAsReleased(ctx, connection, row); err != nil {
 			t.Fatalf("write %s of %s: %v", row.EventID, row.AgentID, err)
 		}
 	}
+}
+
+func insertAsReleased(ctx context.Context, connection driver.Conn, row eventstore.Row) error {
+	batch, err := connection.PrepareBatch(ctx, "INSERT INTO security_events ("+strings.Join(releasedColumns, ", ")+")")
+	if err != nil {
+		return err
+	}
+	if err := batch.Append(row.EventID, row.EventTime, row.TenantID, row.AgentID); err != nil {
+		_ = batch.Abort()
+		return err
+	}
+	return batch.Send()
 }
 
 func named(rows ...eventstore.Row) []string {
@@ -223,34 +241,38 @@ func held(t *testing.T, connection driver.Conn, table string, final bool) []stri
 	return slices.Compact(names)
 }
 
-func sortingKey(t *testing.T, connection driver.Conn, table string) (string, bool) {
+func keptAs(t *testing.T, connection driver.Conn, table string) (string, string, bool) {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	rows, err := connection.Query(ctx,
-		"SELECT sorting_key FROM system.tables WHERE database = currentDatabase() AND name = ?", table)
+		"SELECT engine_full, sorting_key FROM system.tables WHERE database = currentDatabase() AND name = ?", table)
 	if err != nil {
-		t.Fatalf("read the sorting key of %s: %v", table, err)
+		t.Fatalf("read how %s is kept: %v", table, err)
 	}
 	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
-		return "", false
+		return "", "", false
 	}
-	var key string
-	if err := rows.Scan(&key); err != nil {
-		t.Fatalf("read the sorting key of %s: %v", table, err)
+	var engine, key string
+	if err := rows.Scan(&engine, &key); err != nil {
+		t.Fatalf("read how %s is kept: %v", table, err)
 	}
-	return key, true
+	return engine, key, true
 }
 
 func rebuilt(t *testing.T, connection driver.Conn) {
 	t.Helper()
 
-	if key, _ := sortingKey(t, connection, "security_events"); key != rebuiltKey {
+	engine, key, _ := keptAs(t, connection, "security_events")
+	if key != rebuiltKey {
 		t.Errorf("security_events is ordered by %q, want %q", key, rebuiltKey)
 	}
-	if key, found := sortingKey(t, connection, rebuildTable); found {
+	if !strings.HasPrefix(engine, rebuiltEngine+" ") {
+		t.Errorf("security_events is kept by %q, want %s", engine, rebuiltEngine)
+	}
+	if _, key, found := keptAs(t, connection, rebuildTable); found {
 		t.Errorf("%s was left behind, ordered by %q", rebuildTable, key)
 	}
 
@@ -265,9 +287,24 @@ func rebuilt(t *testing.T, connection driver.Conn) {
 		"SELECT groupArray(version) FROM (SELECT version FROM schema_migrations ORDER BY version)").Scan(&recorded); err != nil {
 		t.Fatalf("read the ledger: %v", err)
 	}
-	if !slices.Contains(recorded, rebuildMigration) {
-		t.Errorf("the ledger records %v and not the rebuild", recorded)
+	for _, rebuild := range rebuildsOnDisk {
+		if !slices.Contains(recorded, uint32(rebuild.migration)) {
+			t.Errorf("the ledger records %v and not the rebuild of %s", recorded, rebuild.file)
+		}
 	}
+}
+
+func positioned(t *testing.T, connection driver.Conn) uint64 {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	var placed uint64
+	if err := connection.QueryRow(ctx,
+		"SELECT countIf(log_partition != -1 OR log_offset != -1) FROM security_events WHERE tenant_id = ?",
+		rebuildTenant).Scan(&placed); err != nil {
+		t.Fatalf("read the positions of the rebuilt store: %v", err)
+	}
+	return placed
 }
 
 func TestAnEmptyStoreIsMigratedToEventsNamedByTheirAgent(t *testing.T) {
@@ -280,17 +317,17 @@ func TestAnEmptyStoreIsMigratedToEventsNamedByTheirAgent(t *testing.T) {
 	rebuilt(t, connection)
 }
 
-// The previous release kept two agents' events of one identifier and instant as
-// separate parts until a merge collapsed them. Merges are held so both are still
-// there to be kept, as they would be in a store whose parts had not yet met.
-func populated(t *testing.T, address string) (string, driver.Conn, []string) {
+// A release kept two agents' events of one identifier and instant, and one
+// agent's event delivered twice, as separate parts until a merge collapsed them.
+// Merges are held so all are still there to be kept, as they would be in a store
+// whose parts had not yet met.
+func populated(t *testing.T, address string, last int) (string, driver.Conn, []string) {
 	t.Helper()
 
 	database, connection := freshDatabase(t, address)
-	previousRelease(t, connection)
+	releasedThrough(t, connection, last)
 	run(t, connection, "SYSTEM STOP MERGES security_events")
 
-	store := writerIn(t, address, database)
 	september := time.Date(2026, time.September, 30, 23, 59, 59, 0, time.UTC)
 	october := time.Date(2026, time.October, 1, 0, 0, 1, 0, time.UTC)
 	written := []eventstore.Row{
@@ -300,30 +337,43 @@ func populated(t *testing.T, address string) (string, driver.Conn, []string) {
 		sent("web-01", "aaaaaaaa-0000-4000-8000-000000000002", october),
 		sent("web-03", "aaaaaaaa-0000-4000-8000-000000000003", october.Add(time.Millisecond)),
 	}
-	write(t, store, written...)
+	writeAsReleased(t, connection, written...)
 
 	if before := held(t, connection, "security_events", false); !slices.Equal(before, named(written...)) {
-		t.Fatalf("the previous release holds %v before the rebuild, want %v", before, named(written...))
+		t.Fatalf("release %d holds %v before the rebuild, want %v", last, before, named(written...))
 	}
 	return database, connection, named(written...)
 }
 
 func TestARebuildKeepsEveryEventOfAPopulatedStore(t *testing.T) {
 	address := storeAddress(t)
-	database, connection, want := populated(t, address)
+	for _, rebuild := range rebuildsOnDisk {
+		t.Run(rebuild.file, func(t *testing.T) {
+			database, connection, want := populated(t, address, rebuild.migration-1)
 
-	migrate(t, address, database)
+			migrate(t, address, database)
 
-	rebuilt(t, connection)
-	if got := held(t, connection, "security_events", true); !slices.Equal(got, want) {
-		t.Errorf("the rebuilt store holds %v, want %v", got, want)
+			rebuilt(t, connection)
+			if got := held(t, connection, "security_events", true); !slices.Equal(got, want) {
+				t.Errorf("the rebuilt store holds %v, want %v", got, want)
+			}
+			if placed := positioned(t, connection); placed != 0 {
+				t.Errorf("%d rows written before positions were kept were given one", placed)
+			}
+		})
 	}
 }
 
 func TestARebuildResumesFromWhereItStopped(t *testing.T) {
+	for _, rebuild := range rebuildsOnDisk {
+		t.Run(rebuild.file, func(t *testing.T) { resumed(t, rebuild.migration, rebuild.file) })
+	}
+}
+
+func resumed(t *testing.T, migration int, file string) {
 	address := storeAddress(t)
-	staging := statementsIn(t, filepath.Join(schemaOnDisk, "0009_order_security_events_by_agent.sql"))[0]
-	columns := strings.Join([]string{"event_id", "event_time", "tenant_id", "agent_id"}, ", ")
+	staging := statementsIn(t, filepath.Join(schemaOnDisk, file))[0]
+	columns := strings.Join(releasedColumns, ", ")
 	copyOneMonth := func(connection driver.Conn, from, to string) {
 		run(t, connection, "INSERT INTO "+to+" ("+columns+") SELECT "+columns+" FROM "+from+" WHERE _partition_id = '202609'")
 	}
@@ -352,14 +402,14 @@ func TestARebuildResumesFromWhereItStopped(t *testing.T) {
 		},
 		"once the old table was dropped": func(t *testing.T, connection driver.Conn) eventstore.Row {
 			run(t, connection, staging)
-			run(t, connection, "INSERT INTO "+rebuildTable+" SELECT * FROM security_events")
+			run(t, connection, "INSERT INTO "+rebuildTable+" ("+columns+") SELECT "+columns+" FROM security_events")
 			run(t, connection, "EXCHANGE TABLES security_events AND "+rebuildTable)
 			run(t, connection, "DROP TABLE "+rebuildTable+" SYNC")
 			return eventstore.Row{}
 		},
 	} {
 		t.Run(stopped, func(t *testing.T) {
-			database, connection, want := populated(t, address)
+			database, connection, want := populated(t, address, migration-1)
 			if late := interrupt(t, connection); late.EventID != "" {
 				want = slices.Sorted(slices.Values(append(want, named(late)...)))
 			}
@@ -377,12 +427,11 @@ func TestARebuildResumesFromWhereItStopped(t *testing.T) {
 func TestEventsWrittenWhileTheStoreIsRebuiltAreKept(t *testing.T) {
 	address := storeAddress(t)
 	database, connection := freshDatabase(t, address)
-	previousRelease(t, connection)
+	releasedThrough(t, connection, rebuildsOnDisk[0].migration-1)
 	run(t, connection, `INSERT INTO security_events (event_id, event_time, tenant_id, agent_id)
 		SELECT concat('bulk-', toString(number)), now64(3) - toIntervalMillisecond(number), 'bulk', concat('web-0', toString(number % 4))
 		FROM numbers(2000000)`)
 
-	store := writerIn(t, address, database)
 	writing, stop := context.WithCancel(context.Background())
 	var (
 		stored  []eventstore.Row
@@ -397,7 +446,7 @@ func TestEventsWrittenWhileTheStoreIsRebuiltAreKept(t *testing.T) {
 			row := sent(fmt.Sprintf("web-%02d", index%7), fmt.Sprintf("bbbbbbbb-0000-4000-8000-%012d", index),
 				time.Now().UTC().Truncate(time.Millisecond))
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			if err := store.Store(ctx, []eventstore.Row{row}); err != nil {
+			if err := insertAsReleased(ctx, connection, row); err != nil {
 				refused = append(refused, err)
 			} else {
 				stored = append(stored, row)
@@ -430,7 +479,7 @@ func TestEventsWrittenWhileTheStoreIsRebuiltAreKept(t *testing.T) {
 
 func TestAWriteOnItsWayToTheOldTableWhenTheNamesAreExchangedIsKept(t *testing.T) {
 	address := storeAddress(t)
-	database, connection, want := populated(t, address)
+	database, connection, want := populated(t, address, rebuildsOnDisk[0].migration-1)
 
 	slow := make(chan error, 1)
 	go func() {

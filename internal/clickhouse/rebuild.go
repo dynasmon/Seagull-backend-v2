@@ -22,7 +22,8 @@ const (
 // began. A copy names the columns both tables hold: a column the old one lacks
 // takes its default, and a column the store computes is computed.
 var rebuilds = map[uint64]rebuild{
-	9: {table: "security_events", staging: "security_events_rebuild"},
+	9:  {table: "security_events", staging: "security_events_rebuild"},
+	13: {table: "security_events", staging: "security_events_rebuild"},
 }
 
 type rebuild struct {

@@ -64,10 +64,22 @@ func TestADeclaredFieldActuallyLands(t *testing.T) {
 
 	value := reflect.ValueOf(row)
 	for index := range value.NumField() {
+		if field := value.Type().Field(index).Name; field == "LogPartition" || field == "LogOffset" {
+			continue
+		}
 		if value.Field(index).IsZero() {
 			t.Errorf("%s stays at its zero value although the contract set it",
 				value.Type().Field(index).Name)
 		}
+	}
+}
+
+func TestAnEventAloneWasReadFromNoRecord(t *testing.T) {
+	row := Project(populated())
+
+	if row.LogPartition != -1 || row.LogOffset != -1 {
+		t.Fatalf("an event projected without its record is placed at partition %d offset %d",
+			row.LogPartition, row.LogOffset)
 	}
 }
 

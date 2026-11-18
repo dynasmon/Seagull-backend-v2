@@ -50,6 +50,7 @@ var layers = map[string]layer{
 	"internal/detectionstate":  domain,
 	"internal/detectionstore":  capability,
 	"internal/devpki":          development,
+	"internal/disposition":     domain,
 	"internal/event":           domain,
 	"internal/eventstore":      capability,
 	"internal/finding":         domain,
@@ -179,8 +180,9 @@ var within = map[string]restriction{
 			modulePath + "/internal/platform/httpx",
 			modulePath + "/internal/platform/tlsx",
 			modulePath + "/internal/alert",
+			modulePath + "/internal/disposition",
 		},
-		because: "deciding what is vulnerable has no transport of its own and never raises an alert: this half is reached from the backbone and its stores",
+		because: "deciding what is vulnerable has no transport of its own, never raises an alert and never reads what a person decided about it: this half is reached from the backbone and its stores",
 	},
 	"internal/osv": {
 		prefixes: []string{
@@ -245,8 +247,8 @@ var within = map[string]restriction{
 		because: "what a stored event is has no transport of its own: this half is reached from the backbone",
 	},
 	"internal/finding": {
-		prefixes: []string{modulePath + "/internal/alert"},
-		because:  "a finding is what the platform decided about a package an asset holds and an alert is a detection somebody owns: a person answers a finding with a disposition, and a finding never becomes an alert",
+		prefixes: []string{modulePath + "/internal/alert", modulePath + "/internal/disposition"},
+		because:  "a finding is what the platform decided about a package an asset holds and an alert is a detection somebody owns: a person answers a finding with a disposition kept beside it, the platform decides a finding without reading one, and a finding never becomes an alert",
 	},
 	"internal/findingstore": {
 		prefixes: []string{
@@ -254,8 +256,9 @@ var within = map[string]restriction{
 			modulePath + "/internal/platform/httpx",
 			modulePath + "/internal/platform/tlsx",
 			modulePath + "/internal/alert",
+			modulePath + "/internal/disposition",
 		},
-		because: "what a stored finding is has no transport of its own and is never an alert: this half is reached from the backbone",
+		because: "what a stored finding is has no transport of its own, is never an alert and is never changed by a disposition: this half is reached from the backbone",
 	},
 	"internal/inventorystore": {
 		prefixes: []string{

@@ -43,6 +43,7 @@ roles:
       - alerts:read
       - incidents:read
       - agents:read
+      - vulnerabilities:read
 
   - name: responder
     description: works alerts and incidents through their lifecycle
@@ -52,6 +53,8 @@ roles:
       - alerts:write
       - incidents:read
       - incidents:write
+      - vulnerabilities:read
+      - vulnerabilities:write
 
   - name: engineer
     description: writes and publishes the rules the engine runs
@@ -76,6 +79,8 @@ roles:
       - agents:read
       - agents:write
       - releases:write
+      - vulnerabilities:read
+      - vulnerabilities:write
 
   - name: tenant-administrator
     description: administers the tenants it is bound to
@@ -90,6 +95,8 @@ roles:
       - incidents:delete
       - agents:read
       - agents:write
+      - vulnerabilities:read
+      - vulnerabilities:write
 
 bindings:
   - subject: e2e-analyst
@@ -256,6 +263,7 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 		Updates:         updates,
 		UpdateRoot:      anchor,
 		Rollouts:        rollouts,
+		Dispositions:    newKeptDispositions(),
 		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
 		Logger:          platform.Logger(),

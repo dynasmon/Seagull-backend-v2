@@ -40,6 +40,7 @@ type Metrics struct {
 	inForce     prometheus.Gauge
 	readings    *prometheus.CounterVec
 	gated       *prometheus.CounterVec
+	disposals   *prometheus.CounterVec
 }
 
 func NewMetrics(registry *metrics.Registry) *Metrics {
@@ -212,6 +213,12 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "agent_rollout_gates_total",
 			Help:      "Waves the platform opened and rollouts it paused, on what it read of the agents they reached.",
 		}, []string{"step"}),
+		disposals: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "vulnerability_dispositions_total",
+			Help:      "Dispositions people recorded, by kind, the ones they withdrew, and the requests refused.",
+		}, []string{"outcome"}),
 	}
 
 	registry.MustRegister(
@@ -224,6 +231,7 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 		instruments.instructed, instruments.handed,
 		instruments.authorized, instruments.offered, instruments.downloaded,
 		instruments.inForce, instruments.readings, instruments.gated,
+		instruments.disposals,
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: "control",
@@ -403,5 +411,11 @@ func (m *Metrics) rolloutRead(outcome string) {
 func (m *Metrics) rolloutGated(step string) {
 	if m != nil {
 		m.gated.WithLabelValues(step).Inc()
+	}
+}
+
+func (m *Metrics) disposed(outcome string) {
+	if m != nil {
+		m.disposals.WithLabelValues(outcome).Inc()
 	}
 }

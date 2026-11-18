@@ -5,11 +5,13 @@ import (
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agent"
 	"github.com/dynasmon/Seagull-backend-v2/internal/alert"
+	"github.com/dynasmon/Seagull-backend-v2/internal/disposition"
 	"github.com/dynasmon/Seagull-backend-v2/internal/incident"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 	alertv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/alert/v1"
 	detectionv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/detection/v1"
 	incidentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/incident/v1"
+	vulnerabilityv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/vulnerability/v1"
 )
 
 // What a caller may narrow a listing by, decided here rather than by the store.
@@ -45,6 +47,15 @@ func agentFilters(asked *agentv1.Query) error {
 	for _, state := range asked.GetStates() {
 		if _, known := agent.FromWire(state); !known {
 			return fmt.Errorf("states names %s, which is not a state an agent is in", state)
+		}
+	}
+	return nil
+}
+
+func dispositionFilters(asked *vulnerabilityv1.DispositionQuery) error {
+	for _, kind := range asked.GetKinds() {
+		if _, known := disposition.KindOf(kind); !known {
+			return fmt.Errorf("kinds names %s, which is not a kind of disposition", kind)
 		}
 	}
 	return nil

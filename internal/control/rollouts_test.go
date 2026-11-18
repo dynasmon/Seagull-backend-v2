@@ -286,7 +286,8 @@ func rolloutListener(t *testing.T, h *harness, published publishedUpdates, rollo
 		Rulesets: newStubRulesets(), Alerts: newStubAlerts(), Incidents: newStubIncidents(),
 		Agents: published.held, Admissions: &stubAdmissions{}, Policies: newStubPolicies(published.held),
 		Updates: published.store, UpdateRoot: published.anchor, Rollouts: rollouts,
-		Authority: signing, TrustBundle: bundle, CertificateLife: time.Hour,
+		Dispositions: newStubDispositions(),
+		Authority:    signing, TrustBundle: bundle, CertificateLife: time.Hour,
 		Metrics: h.metrics, Logger: slog.New(slog.DiscardHandler),
 		Instrumentation: httpx.NewInstrumentation(metrics.New("control-api-rollouts")),
 	})

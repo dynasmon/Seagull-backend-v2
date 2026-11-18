@@ -74,6 +74,12 @@ const (
 	CodeUnknownPackage      = "unknown_package"
 	CodeUpdatesUnconfigured = "agent_updates_not_configured"
 	CodeUpdatesUnavailable  = "agent_updates_unavailable"
+
+	CodeMalformedDisposition    = "malformed_disposition"
+	CodeDispositionUnregistered = "disposition_names_unregistered_agent"
+	CodeUnknownDisposition      = "unknown_disposition"
+	CodeDispositionLapsed       = "disposition_lapsed"
+	CodeDispositionsUnavailable = "dispositions_unavailable"
 )
 
 // No value of this type means "anybody": the zero value refuses, so a route

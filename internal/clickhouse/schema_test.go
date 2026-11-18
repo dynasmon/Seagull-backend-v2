@@ -221,6 +221,55 @@ func TestAStoredEventIsNamedByTheAgentThatSentIt(t *testing.T) {
 	}
 }
 
+func TestAStoredEventKeepsThePositionItArrivedAt(t *testing.T) {
+	var created string
+	for _, applied := range migrations {
+		for _, statement := range applied.statements {
+			if _, creates := createTableBody(statement, table); creates {
+				created = statement
+			}
+		}
+		if applied.rebuild != nil && applied.rebuild.table == table {
+			created = applied.statements[0]
+		}
+	}
+
+	kept, err := declaredShape(created)
+	if err != nil {
+		t.Fatalf("read how %s is kept: %v", table, err)
+	}
+	if !kept.same(shape{engine: "ReplacingMergeTree(arrival_precedence)", key: "tenant_id, event_time, agent_id, event_id"}) {
+		t.Errorf("%s is kept as %s ordered by %s, so a replayed event keeps whichever arrival was written last",
+			table, kept.engine, kept.key)
+	}
+	body, _ := createTableBody(created, createdName(t, created))
+	definitions := map[string]string{}
+	for _, line := range strings.Split(body, "\n") {
+		if fields := strings.Fields(strings.TrimSuffix(strings.TrimSpace(line), ",")); len(fields) > 1 {
+			definitions[fields[0]] = strings.Join(fields[1:], " ")
+		}
+	}
+	for column, want := range map[string]string{
+		"log_partition":      "Int32 DEFAULT -1",
+		"log_offset":         "Int64 DEFAULT -1",
+		"arrival_precedence": "Int64 MATERIALIZED -log_offset",
+	} {
+		if got := definitions[column]; got != want {
+			t.Errorf("%s declares %s as %q, want %q", table, column, got, want)
+		}
+	}
+}
+
+func createdName(t *testing.T, statement string) string {
+	t.Helper()
+	head, _, _ := strings.Cut(statement, "(")
+	fields := strings.Fields(head)
+	if len(fields) == 0 {
+		t.Fatalf("%.60s creates nothing", statement)
+	}
+	return identifier(fields[len(fields)-1])
+}
+
 func sortingKeyOf(t *testing.T, statement string) string {
 	t.Helper()
 	key, err := declaredSortingKey(statement)

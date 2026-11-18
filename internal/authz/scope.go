@@ -28,6 +28,8 @@ var reach = map[Resource]map[Action]Scope{
 	Policies:   {Read: Platform, Write: Platform, Delete: Platform},
 	Sessions:   {Read: Platform, Write: Platform, Delete: Platform},
 	Releases:   {Read: Platform, Write: Platform, Delete: Platform},
+
+	Vulnerabilities: {Read: Tenant, Write: Tenant, Delete: Tenant},
 }
 
 func (p Permission) Scope() Scope { return reach[p.Resource][p.Action] }

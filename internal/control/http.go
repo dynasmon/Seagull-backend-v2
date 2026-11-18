@@ -203,6 +203,8 @@ var resources = map[authz.Resource]controlv1.Resource{
 	authz.Policies:   controlv1.Resource_RESOURCE_POLICIES,
 	authz.Sessions:   controlv1.Resource_RESOURCE_SESSIONS,
 	authz.Releases:   controlv1.Resource_RESOURCE_RELEASES,
+
+	authz.Vulnerabilities: controlv1.Resource_RESOURCE_VULNERABILITIES,
 }
 
 // What the platform authorises and the contract has no name for yet. A grant

@@ -896,7 +896,13 @@ trade the stream for the window.
 One table, `security_events`, holding one row per admitted event, projected from
 the contract by `internal/eventstore`. A field exists there because the contract
 carries it, and a test walks the protobuf descriptor to make sure the contract
-cannot grow a field the store quietly stops keeping.
+cannot grow a field the store quietly stops keeping. Two columns are not the
+contract's: `log_partition` and `log_offset` say where the backbone held the
+record a row was written from, so a partition's events can be read back in the
+order the analysis engine read them
+([ADR 53](decisions/0053-a-stored-event-keeps-the-position-it-was-read-from.md)).
+A row stored before positions were kept holds -1 in both, which is no record's
+position; offset zero is the first record of a partition.
 
 No column is `Nullable`: absence is the zero value, which is exactly what proto3
 means by an unset field. Enums are stored under their own name with the
@@ -915,6 +921,27 @@ for it:
 SELECT count() FROM security_events FINAL WHERE tenant_id = 'acme';
 ```
 
+An agent whose acknowledgement is lost sends its batch again, and the topic then
+holds two records of each event. The row kept is the first arrival, the one the
+engine decided from: the table's version, `arrival_precedence`, is the offset
+negated, and a row without a position precedes every row with one. Its
+`reception` is the first arrival's too.
+
+**Reading in position order.** The events of a window, each partition's in the
+order the topic held them, are read by the sorting key and a sort; no other
+structure keeps them:
+
+```sql
+SELECT event_id, agent_id, log_partition, log_offset
+FROM security_events FINAL
+WHERE tenant_id = 'acme'
+  AND event_time >= '2026-11-01 12:00:00' AND event_time < '2026-11-01 13:00:00'
+ORDER BY log_partition, log_offset;
+```
+
+The sort holds the window in memory, about 470 bytes for each row of it: on the
+development host a day of nine million events took 5 seconds and 4.1 GiB.
+
 **Retention.** `TTL event_time + INTERVAL 365 DAY`. A security store without
 retention fills disks; changing the window is a later migration.
 
@@ -926,8 +953,8 @@ that every migration it ships is applied, and refuses to run otherwise:
 docker compose -f deploy/compose.yaml run --rm store-migrator
 ```
 
-A sorting key cannot change in place, so a migration that changes one rebuilds
-the table ([ADR 34](decisions/0034-a-stored-event-is-named-by-the-agent-that-sent-it.md)):
+Neither a sorting key nor an engine can change in place, so a migration that
+changes either rebuilds the table ([ADR 34](decisions/0034-a-stored-event-is-named-by-the-agent-that-sent-it.md)):
 `store-migrator` copies it into a table ordered the new way while the writers
 keep writing, exchanges the two names, waits for the inserts already on their
 way to the old table, copies what reached it after the first copy began, and
@@ -936,8 +963,10 @@ drops it. It logs `table_rebuild_started`, one
 `table_rebuild_finished`, and a run stopped anywhere carries on from the state
 the store was left in. The store needs room for two copies of the table while
 it runs, and the migrator's account must be able to create, exchange, detach,
-attach and drop tables in its database. Migration 9 rebuilds `security_events`;
-on the development host twenty million events took under a minute.
+attach and drop tables in its database. Migration 9 rebuilds `security_events`
+to its sorting key and migration 13 to the version that keeps the first arrival;
+on the development host twenty million events took under a minute for the first,
+and ten million 22 seconds for the second.
 
 **Scaling** is horizontal. One `event-writer` is a single sequential loop —
 poll, write, commit — with no worker pool and no buffering, because at 5000-row

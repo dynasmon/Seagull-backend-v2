@@ -122,6 +122,35 @@ func TestARecordThatIsNotAnEventIsQuarantinedAndTheBatchContinues(t *testing.T) 
 	}
 }
 
+func TestARowIsStoredAtThePositionItsRecordWasReadFrom(t *testing.T) {
+	second := populated()
+	second.EventId = "22222222-3333-4444-8555-666666666666"
+	first := encoded(t, populated())
+	first.Partition, first.Offset = 0, 0
+
+	shared := &journal{}
+	from := &source{records: []Record{first, encoded(t, second)}}
+	to := &sink{journal: shared}
+
+	if err := writerFor(t, from, to, &quarantine{journal: shared}).Run(context.Background()); err != nil {
+		t.Fatalf("run the writer: %v", err)
+	}
+
+	if len(to.stored) != 1 || len(to.stored[0]) != 2 {
+		t.Fatalf("both events did not reach the store: %+v", to.stored)
+	}
+	for index, want := range []struct {
+		partition int32
+		offset    int64
+	}{{0, 0}, {2, 9}} {
+		row := to.stored[0][index]
+		if row.LogPartition != want.partition || row.LogOffset != want.offset {
+			t.Errorf("%s was stored at partition %d offset %d, and its record was read at partition %d offset %d",
+				row.EventID, row.LogPartition, row.LogOffset, want.partition, want.offset)
+		}
+	}
+}
+
 func TestARecordThatBreaksTheContractIsQuarantined(t *testing.T) {
 	broken := populated()
 	broken.EventId = ""

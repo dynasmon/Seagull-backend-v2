@@ -57,3 +57,4 @@ rediscovered by reading the code.
 - [51. The rules an installation starts from are its first publication, and the pointer is the installation's until a person moves it](0051-the-rules-an-installation-starts-from-are-its-first-publication.md)
 - [52. A disposition is kept beside the findings it covers: it always expires, ends early only by a withdrawal written beside it, and nothing that decides a finding reads it](0052-a-disposition-is-kept-beside-the-findings-it-covers.md)
 - [53. A stored event keeps the position it was read from, and of an event delivered twice the store keeps the arrival the engine decided](0053-a-stored-event-keeps-the-position-it-was-read-from.md)
+- [54. A gateway asks an agent how often to report and imposes nothing by it, and the fleet is counted the way an agent is read](0054-a-gateway-asks-how-often-to-report-and-the-fleet-is-counted-as-it-is-read.md)

@@ -163,6 +163,7 @@ func TestAReportTheGatewayAdmitsIsFoldedAndReadBackAndFoldingItAgainChangesNothi
 		Gateway:            "gateway-integration",
 		MaxReportsPerBatch: 16,
 		Report:             event.Policy{MaxClockSkew: 5 * time.Minute, MaxAge: 168 * time.Hour},
+		Interval:           time.Minute,
 	}, ingest.NewStatusMetrics(metrics.New("integration")))
 	if err != nil {
 		t.Fatalf("build the status admitter: %v", err)

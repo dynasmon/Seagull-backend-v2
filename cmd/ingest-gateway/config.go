@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentstatus"
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
@@ -114,6 +115,7 @@ func load(parser *config.Parser) (configuration, error) {
 			MaxClockSkew: parser.Duration("SEAGULL_STATUS_MAX_CLOCK_SKEW", 5*time.Minute, time.Second, time.Hour),
 			MaxAge:       parser.Duration("SEAGULL_STATUS_MAX_AGE", 168*time.Hour, time.Minute, 8760*time.Hour),
 		},
+		Interval: parser.Duration("SEAGULL_GATEWAY_STATUS_INTERVAL", time.Minute, agentstatus.MinInterval, agentstatus.MaxInterval),
 	}
 
 	// An agent keeps every assessment that changed something until the platform

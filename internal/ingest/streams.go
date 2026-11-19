@@ -146,6 +146,7 @@ func (s statusStream) describe() *platformv1.Stream {
 		MaxRecordBytes:     sendable(agentstatus.MaxReportBytes, stamping(&agentv1.Status{}, s.admitter.stamp)),
 		MaxAge:             durationpb.New(policy.Report.MaxAge),
 		MaxClockSkew:       durationpb.New(policy.Report.MaxClockSkew),
+		Interval:           durationpb.New(policy.Interval),
 	}
 }
 

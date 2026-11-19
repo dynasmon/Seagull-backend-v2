@@ -466,6 +466,7 @@
           },
           {
             "batch": "seagull.agent.v1.StatusBatch",
+            "interval": "1m0s",
             "max_age": "168h0m0s",
             "max_clock_skew": "5m0s",
             "max_record_bytes": 982755,

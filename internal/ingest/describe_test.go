@@ -57,7 +57,7 @@ var describedRoster = heldRoster{
 var (
 	eventRules      = ingest.Policy{Gateway: "gateway-a", MaxEventsPerBatch: 11, Event: event.Policy{MaxClockSkew: 4 * time.Minute, MaxAge: 100 * time.Hour}}
 	inventoryRules  = ingest.InventoryPolicy{Gateway: "gateway-a", MaxRecordsPerBatch: 5, Record: event.Policy{MaxClockSkew: 3 * time.Minute, MaxAge: 200 * time.Hour}}
-	statusRules     = ingest.StatusPolicy{Gateway: "gateway-a", MaxReportsPerBatch: 3, Report: event.Policy{MaxClockSkew: 2 * time.Minute, MaxAge: 50 * time.Hour}}
+	statusRules     = ingest.StatusPolicy{Gateway: "gateway-a", MaxReportsPerBatch: 3, Report: event.Policy{MaxClockSkew: 2 * time.Minute, MaxAge: 50 * time.Hour}, Interval: 7 * time.Minute}
 	assessmentRules = ingest.AssessmentPolicy{Gateway: "gateway-a", MaxAssessmentsPerBatch: 2, Assessment: event.Policy{MaxClockSkew: time.Minute, MaxAge: 300 * time.Hour}}
 )
 
@@ -170,7 +170,7 @@ func TestTheGatewayDescribesEveryStreamItRoutesAsItsAdmitterJudgesIt(t *testing.
 		schema                     [2]uint32
 		records, items, itemsBatch uint32
 		ceiling                    int
-		age, skew                  time.Duration
+		age, skew, interval        time.Duration
 	}
 	wanted := []limits{
 		{route: ingest.EventsRoute, batch: "seagull.ingest.v1.EventBatch", record: "seagull.event.v1.Event",
@@ -181,7 +181,7 @@ func TestTheGatewayDescribesEveryStreamItRoutesAsItsAdmitterJudgesIt(t *testing.
 			items: inventory.MaxItemsPerRecord, itemsBatch: inventory.MaxItemsPerBatch, age: 200 * time.Hour, skew: 3 * time.Minute},
 		{route: ingest.StatusRoute, batch: "seagull.agent.v1.StatusBatch", record: "seagull.agent.v1.Status",
 			schema: [2]uint32{agentstatus.MinSchemaVersion, agentstatus.MaxSchemaVersion}, records: 3, ceiling: agentstatus.MaxReportBytes,
-			age: 50 * time.Hour, skew: 2 * time.Minute},
+			age: 50 * time.Hour, skew: 2 * time.Minute, interval: 7 * time.Minute},
 		{route: ingest.AssessmentsRoute, batch: "seagull.assessment.v1.AssessmentBatch", record: "seagull.assessment.v1.Assessment",
 			schema: [2]uint32{assessment.MinSchemaVersion, assessment.MaxSchemaVersion}, records: 2, ceiling: assessment.MaxAssessmentBytes,
 			age: 300 * time.Hour, skew: time.Minute},
@@ -194,7 +194,8 @@ func TestTheGatewayDescribesEveryStreamItRoutesAsItsAdmitterJudgesIt(t *testing.
 		if got.GetRoute() != want.route || got.GetBatch() != want.batch || got.GetRecord() != want.record ||
 			got.GetSupportedSchema().GetMinimum() != want.schema[0] || got.GetSupportedSchema().GetMaximum() != want.schema[1] ||
 			got.GetMaxRecordsPerBatch() != want.records || got.GetMaxItemsPerRecord() != want.items || got.GetMaxItemsPerBatch() != want.itemsBatch ||
-			got.GetMaxAge().AsDuration() != want.age || got.GetMaxClockSkew().AsDuration() != want.skew {
+			got.GetMaxAge().AsDuration() != want.age || got.GetMaxClockSkew().AsDuration() != want.skew ||
+			got.GetInterval().AsDuration() != want.interval || (got.GetInterval() != nil) != (want.interval != 0) {
 			t.Errorf("stream %d is described as %v, and its admitter judges it as %+v", index, got, want)
 		}
 		if room := want.ceiling - int(got.GetMaxRecordBytes()); room <= 0 || room > 1024 {
@@ -230,7 +231,7 @@ func TestARecordKeptWithinTheDescribedSizeIsNeverRefusedForIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	reports, err := ingest.NewStatusAdmitter(&recordingStatus{},
-		ingest.StatusPolicy{Gateway: longest.Gateway, MaxReportsPerBatch: 1, Report: statusRules.Report},
+		ingest.StatusPolicy{Gateway: longest.Gateway, MaxReportsPerBatch: 1, Report: statusRules.Report, Interval: statusRules.Interval},
 		ingest.NewStatusMetrics(registry), ingest.WithStatusClock(clock))
 	if err != nil {
 		t.Fatal(err)

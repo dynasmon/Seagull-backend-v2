@@ -10,3 +10,8 @@ import (
 func ConditionName(condition agentv1.Status_Condition) string {
 	return strings.ToLower(strings.TrimPrefix(condition.String(), "CONDITION_"))
 }
+
+// The word a liveness is counted under, such as `silent`.
+func LivenessName(liveness agentv1.Liveness) string {
+	return strings.ToLower(strings.TrimPrefix(liveness.String(), "LIVENESS_"))
+}

@@ -265,6 +265,7 @@ func controlAPI(ctx context.Context) error {
 		slog.Int("agent_policy_signers", accepted),
 		slog.Uint64("agent_update_root", anchored),
 		slog.Duration("agent_rollout_interval", settings.rolloutEvery),
+		slog.Duration("agent_fleet_interval", settings.fleetEvery),
 	)
 
 	platform.Health().Register("backbone", published.publisher.Ping)
@@ -275,6 +276,17 @@ func controlAPI(ctx context.Context) error {
 	platform.Add(renewals)
 	platform.Add(announcer)
 	platform.Add(sweeper{sessions: sessions, every: settings.sessionLife})
+	fleet, err := control.NewFleetReader(control.FleetReaderOptions{
+		Registry: raised.Agents(),
+		Reports:  seen,
+		Metrics:  instruments,
+		Logger:   platform.Logger(),
+		Every:    settings.fleetEvery,
+	})
+	if err != nil {
+		return err
+	}
+	platform.Add(fleet)
 	if updateRoot != nil {
 		evaluator, err := control.NewRolloutEvaluator(control.RolloutEvaluatorOptions{
 			Rollouts:   raised.AgentRollouts(),

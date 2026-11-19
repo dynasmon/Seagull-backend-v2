@@ -82,6 +82,33 @@ func (a *Agents) Outstanding(ctx context.Context, limit int) ([]*agentv1.Admissi
 	return pgx.CollectRows(rows, restoreAdmission)
 }
 
+func (a *Agents) Admitted(ctx context.Context) (map[string]string, error) {
+	var admitting []string
+	for _, state := range agent.States() {
+		if state.Admits() {
+			admitting = append(admitting, state.String())
+		}
+	}
+	rows, err := a.store.pool.Query(ctx, `SELECT agent_id, tenant_id FROM agents WHERE state = ANY($1)`, admitting)
+	if err != nil {
+		return nil, fmt.Errorf("read the agents the registry admits: %w", err)
+	}
+	defer rows.Close()
+
+	admitted := map[string]string{}
+	for rows.Next() {
+		var id, tenant string
+		if err := rows.Scan(&id, &tenant); err != nil {
+			return nil, fmt.Errorf("read the agents the registry admits: %w", err)
+		}
+		admitted[id] = tenant
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read the agents the registry admits: %w", err)
+	}
+	return admitted, nil
+}
+
 func (a *Agents) Announced(ctx context.Context, agentID string, revision uint64) error {
 	if _, err := a.store.pool.Exec(ctx,
 		`UPDATE agents SET published_revision = $2

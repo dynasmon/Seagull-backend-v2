@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"google.golang.org/protobuf/proto"
@@ -140,19 +141,8 @@ func (l *Liveness) Newest(ctx context.Context, agents, tenants []string) (map[st
 	if len(agents) == 0 || len(tenants) == 0 {
 		return map[string]agentstatus.Report{}, nil
 	}
-	arguments := make([]any, 0, len(tenants)+len(agents))
-	for _, tenant := range tenants {
-		arguments = append(arguments, tenant)
-	}
-	for _, agentID := range agents {
-		arguments = append(arguments, agentID)
-	}
-
-	rows, err := l.connection.Query(ctx,
-		"SELECT agent_id, ingest_time, report FROM "+statusTable+" FINAL"+
-			" WHERE tenant_id IN ("+placeholders(len(tenants))+")"+
-			" AND agent_id IN ("+placeholders(len(agents))+")",
-		arguments...)
+	where, arguments := scopedTo(agents, tenants)
+	rows, err := l.connection.Query(ctx, "SELECT agent_id, ingest_time, report FROM "+statusTable+" FINAL"+where, arguments...)
 	if err != nil {
 		return nil, fmt.Errorf("read what agents last reported: %w", err)
 	}
@@ -181,4 +171,53 @@ func (l *Liveness) Newest(ctx context.Context, agents, tenants []string) (map[st
 		return nil, fmt.Errorf("read what agents last reported: %w", err)
 	}
 	return newest, nil
+}
+
+// What was last heard of each agent asked about, read as Newest reads it but
+// without the report: the columns liveness is judged from, so a count of the
+// whole fleet costs what those columns hold and never decodes a report.
+func (l *Liveness) Heard(ctx context.Context, agents, tenants []string) (map[string]agentstatus.Heard, error) {
+	if len(agents) == 0 || len(tenants) == 0 {
+		return map[string]agentstatus.Heard{}, nil
+	}
+	where, arguments := scopedTo(agents, tenants)
+	rows, err := l.connection.Query(ctx,
+		"SELECT agent_id, ingest_time, interval_ms, condition FROM "+statusTable+" FINAL"+where, arguments...)
+	if err != nil {
+		return nil, fmt.Errorf("read when agents last reported: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	stopping := agentstatus.ConditionName(agentv1.Status_CONDITION_STOPPED)
+	heard := make(map[string]agentstatus.Heard, len(agents))
+	for rows.Next() {
+		var (
+			id        string
+			received  time.Time
+			interval  uint32
+			condition string
+		)
+		if err := rows.Scan(&id, &received, &interval, &condition); err != nil {
+			return nil, fmt.Errorf("read when agents last reported: %w", err)
+		}
+		held := agentstatus.Heard{Received: received.UTC(), Interval: time.Duration(interval) * time.Millisecond, Stopping: condition == stopping}
+		if previous, found := heard[id]; !found || held.Received.After(previous.Received) {
+			heard[id] = held
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read when agents last reported: %w", err)
+	}
+	return heard, nil
+}
+
+func scopedTo(agents, tenants []string) (string, []any) {
+	arguments := make([]any, 0, len(tenants)+len(agents))
+	for _, tenant := range tenants {
+		arguments = append(arguments, tenant)
+	}
+	for _, agentID := range agents {
+		arguments = append(arguments, agentID)
+	}
+	return " WHERE tenant_id IN (" + placeholders(len(tenants)) + ") AND agent_id IN (" + placeholders(len(agents)) + ")", arguments
 }

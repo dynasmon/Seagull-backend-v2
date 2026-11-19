@@ -69,3 +69,26 @@ func TestNothingHeldIsNoLiveness(t *testing.T) {
 		}
 	}
 }
+
+func TestWhatAStoreHoldsOfAReportIsJudgedByTheSameRule(t *testing.T) {
+	received := time.Date(2026, time.November, 19, 12, 0, 0, 0, time.UTC)
+	for _, one := range []struct {
+		heard Heard
+		after time.Duration
+		want  agentv1.Liveness
+	}{
+		{Heard{}, 0, agentv1.Liveness_LIVENESS_UNSPECIFIED},
+		{Heard{Interval: time.Minute}, 0, agentv1.Liveness_LIVENESS_UNSPECIFIED},
+		{Heard{Received: received, Interval: time.Minute}, 2 * time.Minute, agentv1.Liveness_LIVENESS_ACTIVE},
+		{Heard{Received: received, Interval: time.Minute}, 3 * time.Minute, agentv1.Liveness_LIVENESS_LATE},
+		{Heard{Received: received, Interval: 30 * time.Second}, 150 * time.Second, agentv1.Liveness_LIVENESS_LATE},
+		{Heard{Received: received, Interval: 30 * time.Second}, 151 * time.Second, agentv1.Liveness_LIVENESS_SILENT},
+		{Heard{Received: received}, 50 * time.Second, agentv1.Liveness_LIVENESS_LATE},
+		{Heard{Received: received}, 51 * time.Second, agentv1.Liveness_LIVENESS_SILENT},
+		{Heard{Received: received, Interval: time.Minute, Stopping: true}, 24 * time.Hour, agentv1.Liveness_LIVENESS_STOPPED},
+	} {
+		if got := one.heard.Liveness(received.Add(one.after)); got != one.want {
+			t.Errorf("%+v judged %s later is %s, and %s was expected", one.heard, one.after, got, one.want)
+		}
+	}
+}

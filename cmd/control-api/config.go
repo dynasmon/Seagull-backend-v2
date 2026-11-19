@@ -46,6 +46,7 @@ type configuration struct {
 	updatePullBurst      int
 	trackedUpdateAgents  int
 	rolloutEvery         time.Duration
+	fleetEvery           time.Duration
 
 	brokers      []string
 	topology     broker.Topology
@@ -106,6 +107,7 @@ func load(parser *config.Parser) (configuration, error) {
 		updatePullBurst:     parser.Int("SEAGULL_CONTROL_API_AGENT_UPDATE_BURST", 4, 1, 1_000),
 		trackedUpdateAgents: parser.Int("SEAGULL_CONTROL_API_TRACKED_UPDATE_AGENTS", 8192, 1, 1_000_000),
 		rolloutEvery:        parser.Duration("SEAGULL_CONTROL_API_AGENT_ROLLOUT_INTERVAL", 30*time.Second, 5*time.Second, 10*time.Minute),
+		fleetEvery:          parser.Duration("SEAGULL_CONTROL_API_FLEET_INTERVAL", 30*time.Second, 5*time.Second, 10*time.Minute),
 
 		brokers:      parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
 		topology:     broker.LoadTopology(parser),

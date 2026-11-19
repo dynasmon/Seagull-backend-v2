@@ -44,6 +44,7 @@ func newStatusAdmitter(t *testing.T, backbone ingest.StatusBackbone) *ingest.Sta
 			Gateway:            "gateway-a",
 			MaxReportsPerBatch: 2,
 			Report:             event.Policy{MaxClockSkew: 5 * time.Minute, MaxAge: 168 * time.Hour},
+			Interval:           time.Minute,
 		},
 		ingest.NewStatusMetrics(metrics.New("test")),
 		ingest.WithStatusClock(func() time.Time { return admissionClock }),

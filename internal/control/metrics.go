@@ -6,8 +6,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentstatus"
 	"github.com/dynasmon/Seagull-backend-v2/internal/authz"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
+	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 )
 
 type Metrics struct {
@@ -41,6 +43,8 @@ type Metrics struct {
 	readings    *prometheus.CounterVec
 	gated       *prometheus.CounterVec
 	disposals   *prometheus.CounterVec
+	fleet       *prometheus.GaugeVec
+	fleetReads  *prometheus.CounterVec
 }
 
 func NewMetrics(registry *metrics.Registry) *Metrics {
@@ -219,6 +223,18 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "vulnerability_dispositions_total",
 			Help:      "Dispositions people recorded, by kind, the ones they withdrew, and the requests refused.",
 		}, []string{"outcome"}),
+		fleet: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "fleet_agents",
+			Help:      "Agents the registry admits, by how recently their newest status report arrived, as the platform last read the whole fleet.",
+		}, []string{"liveness"}),
+		fleetReads: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "fleet_readings_total",
+			Help:      "Readings of the liveness of the whole fleet, by what came of them.",
+		}, []string{"outcome"}),
 	}
 
 	registry.MustRegister(
@@ -231,7 +247,7 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 		instruments.instructed, instruments.handed,
 		instruments.authorized, instruments.offered, instruments.downloaded,
 		instruments.inForce, instruments.readings, instruments.gated,
-		instruments.disposals,
+		instruments.disposals, instruments.fleet, instruments.fleetReads,
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: "control",
@@ -417,5 +433,21 @@ func (m *Metrics) rolloutGated(step string) {
 func (m *Metrics) disposed(outcome string) {
 	if m != nil {
 		m.disposals.WithLabelValues(outcome).Inc()
+	}
+}
+
+func (m *Metrics) fleetCounted(counted map[agentv1.Liveness]int) {
+	if m == nil {
+		return
+	}
+	for value := range agentv1.Liveness_name {
+		liveness := agentv1.Liveness(value)
+		m.fleet.WithLabelValues(agentstatus.LivenessName(liveness)).Set(float64(counted[liveness]))
+	}
+}
+
+func (m *Metrics) fleetRead(outcome string) {
+	if m != nil {
+		m.fleetReads.WithLabelValues(outcome).Inc()
 	}
 }

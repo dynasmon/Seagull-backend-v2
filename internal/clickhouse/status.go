@@ -140,19 +140,8 @@ func (l *Liveness) Newest(ctx context.Context, agents, tenants []string) (map[st
 	if len(agents) == 0 || len(tenants) == 0 {
 		return map[string]agentstatus.Report{}, nil
 	}
-	arguments := make([]any, 0, len(tenants)+len(agents))
-	for _, tenant := range tenants {
-		arguments = append(arguments, tenant)
-	}
-	for _, agentID := range agents {
-		arguments = append(arguments, agentID)
-	}
-
-	rows, err := l.connection.Query(ctx,
-		"SELECT agent_id, ingest_time, report FROM "+statusTable+" FINAL"+
-			" WHERE tenant_id IN ("+placeholders(len(tenants))+")"+
-			" AND agent_id IN ("+placeholders(len(agents))+")",
-		arguments...)
+	where, arguments := scopedTo(agents, tenants)
+	rows, err := l.connection.Query(ctx, "SELECT agent_id, ingest_time, report FROM "+statusTable+" FINAL"+where, arguments...)
 	if err != nil {
 		return nil, fmt.Errorf("read what agents last reported: %w", err)
 	}
@@ -181,4 +170,15 @@ func (l *Liveness) Newest(ctx context.Context, agents, tenants []string) (map[st
 		return nil, fmt.Errorf("read what agents last reported: %w", err)
 	}
 	return newest, nil
+}
+
+func scopedTo(agents, tenants []string) (string, []any) {
+	arguments := make([]any, 0, len(tenants)+len(agents))
+	for _, tenant := range tenants {
+		arguments = append(arguments, tenant)
+	}
+	for _, agentID := range agents {
+		arguments = append(arguments, agentID)
+	}
+	return " WHERE tenant_id IN (" + placeholders(len(tenants)) + ") AND agent_id IN (" + placeholders(len(agents)) + ")", arguments
 }

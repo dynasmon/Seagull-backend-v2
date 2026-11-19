@@ -57,6 +57,9 @@ func NewStatusAdmitter(backbone StatusBackbone, policy StatusPolicy, metrics *St
 		return nil, errors.New("status admission needs a gateway identity")
 	case policy.MaxReportsPerBatch <= 0 || policy.MaxReportsPerBatch > agentstatus.MaxReportsPerBatch:
 		return nil, fmt.Errorf("status admission needs a batch ceiling between 1 and %d", agentstatus.MaxReportsPerBatch)
+	case policy.Interval < agentstatus.MinInterval || policy.Interval > agentstatus.MaxInterval:
+		return nil, fmt.Errorf("status admission asks agents for an interval a report may announce, between %s and %s",
+			agentstatus.MinInterval, agentstatus.MaxInterval)
 	}
 
 	admitter := &StatusAdmitter{backbone: backbone, policy: policy, metrics: metrics, now: time.Now}

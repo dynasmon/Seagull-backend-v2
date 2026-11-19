@@ -148,16 +148,31 @@ func TestAStatusBatchTheBackboneRefusedIsNeverAcknowledged(t *testing.T) {
 
 func TestTheStatusAdmitterRefusesAnIncompletePolicy(t *testing.T) {
 	instruments := ingest.NewStatusMetrics(metrics.New("test"))
-	for name, policy := range map[string]ingest.StatusPolicy{
-		"no gateway":         {MaxReportsPerBatch: 1},
-		"no ceiling":         {Gateway: "gateway-a"},
-		"above the contract": {Gateway: "gateway-a", MaxReportsPerBatch: agentstatus.MaxReportsPerBatch + 1},
+	for name, change := range map[string]func(*ingest.StatusPolicy){
+		"no gateway":                     func(p *ingest.StatusPolicy) { p.Gateway = "" },
+		"no ceiling":                     func(p *ingest.StatusPolicy) { p.MaxReportsPerBatch = 0 },
+		"above the contract":             func(p *ingest.StatusPolicy) { p.MaxReportsPerBatch = agentstatus.MaxReportsPerBatch + 1 },
+		"no interval":                    func(p *ingest.StatusPolicy) { p.Interval = 0 },
+		"an interval below the contract": func(p *ingest.StatusPolicy) { p.Interval = 10*time.Second - time.Millisecond },
+		"an interval above the contract": func(p *ingest.StatusPolicy) { p.Interval = time.Hour + time.Millisecond },
 	} {
 		t.Run(name, func(t *testing.T) {
+			policy := ingest.StatusPolicy{Gateway: "gateway-a", MaxReportsPerBatch: 1, Interval: time.Minute}
+			change(&policy)
 			if _, err := ingest.NewStatusAdmitter(&recordingStatus{}, policy, instruments); err == nil {
 				t.Fatal("expected the admitter to refuse the policy")
 			}
 		})
+	}
+}
+
+func TestTheStatusAdmitterAsksForEveryIntervalTheContractAdmits(t *testing.T) {
+	instruments := ingest.NewStatusMetrics(metrics.New("test"))
+	for _, interval := range []time.Duration{10 * time.Second, time.Minute, time.Hour} {
+		policy := ingest.StatusPolicy{Gateway: "gateway-a", MaxReportsPerBatch: 1, Interval: interval}
+		if _, err := ingest.NewStatusAdmitter(&recordingStatus{}, policy, instruments); err != nil {
+			t.Errorf("a gateway asking for a report every %s was refused: %v", interval, err)
+		}
 	}
 }
 

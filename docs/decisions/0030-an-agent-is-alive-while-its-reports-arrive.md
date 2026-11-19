@@ -1,5 +1,10 @@
 # 30. An agent's status is a record of its own, and an agent is alive while its reports arrive
 
+> Amended by [ADR 54](0054-a-gateway-asks-how-often-to-report-and-the-fleet-is-counted-as-it-is-read.md): the gateway's descriptor
+> asks agents how often to report, a report is still judged against the interval
+> it announces, and `control-api` counts the agents the registry admits by
+> liveness, so the fleet has the gauges this record left out.
+
 ## Context
 
 There is no heartbeat. `Agent.last_seen` is read from `security_events`, so it

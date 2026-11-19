@@ -66,6 +66,7 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_INVENTORY_MAX_AGE` | `720h` | how old a scan may be and still be admitted |
 | `SEAGULL_STATUS_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock a status report may be |
 | `SEAGULL_STATUS_MAX_AGE` | `168h` | how old a status report may be and still be admitted |
+| `SEAGULL_GATEWAY_STATUS_INTERVAL` | `1m` | how often the gateway asks an agent to report its status, between the `10s` and `1h` a report may announce; asked for and never imposed |
 | `SEAGULL_ASSESSMENT_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock an assessment may be |
 | `SEAGULL_ASSESSMENT_MAX_AGE` | `720h` | how old an assessment may be and still be admitted |
 
@@ -73,6 +74,10 @@ What bounds a batch or a record above — the body, the records a batch carries,
 and how old and how far ahead a record may be, per stream — is served to agents as
 it is in force, at `GET /v1/descriptor` on this listener, with the contract's own
 bounds on a record and its items ([ADR 45](decisions/0045-a-listener-tells-an-agent-what-it-serves-and-decides-nothing-by-it.md)).
+The status stream's description also names the interval the gateway asks agents
+to report at. A report is still judged against the interval it announces, so an
+agent that keeps another one within the bounds is admitted and is not taken for
+one gone quiet ([ADR 54](decisions/0054-a-gateway-asks-how-often-to-report-and-the-fleet-is-counted-as-it-is-read.md)).
 
 The batch ceiling is measured, not chosen. No event in a batch is published until
 every event in it has been decoded and validated, so a larger batch is a larger
@@ -713,6 +718,7 @@ detection away from somebody's triage.
 | `SEAGULL_CONTROL_API_AGENT_UPDATE_BURST` | `4` | such requests one agent may make at once above that |
 | `SEAGULL_CONTROL_API_TRACKED_UPDATE_AGENTS` | `8192` | agents whose requests about updates are counted at once |
 | `SEAGULL_CONTROL_API_AGENT_ROLLOUT_INTERVAL` | `30s` | how often the control plane reads how far every rollout in force went, and opens a wave or pauses one on what it read; between 5 seconds and 10 minutes. Read only where an update root is configured |
+| `SEAGULL_CONTROL_API_FLEET_INTERVAL` | `30s` | how often the control plane counts the agents the registry admits by liveness; between 5 seconds and 10 minutes, and a reading that takes longer is abandoned |
 
 The control plane authenticates a caller by certificate, so it has no plaintext
 mode and no mode without a caller authority: without one there is nobody to be
@@ -1071,6 +1077,26 @@ read, against the interval its newest report announced:
 An agent that never reported has no liveness, and silence decides nothing: no
 agent is disabled or revoked because it went quiet. A page carries liveness and
 `last_reported`; the report itself is carried when one agent is read.
+
+Every `SEAGULL_CONTROL_API_FLEET_INTERVAL`, `control-api` counts the whole fleet
+the same way: the agents the registry admits, pending or active, and what was
+last heard of each — when its newest report arrived, the interval it announced
+and whether it said it was stopping, read from the columns beside the report, a
+thousand agents at a time within their tenants — judged at one instant. A
+disabled, revoked or decommissioned agent is refused, so it is not counted. A
+reading that fails keeps the count it last read. Each replica counts the whole
+fleet and reports the same numbers. A hundred thousand registered agents are
+read in 1.0 to 1.6 seconds on the development host
+([ADR 54](decisions/0054-a-gateway-asks-how-often-to-report-and-the-fleet-is-counted-as-it-is-read.md)).
+
+| Metric | Labels |
+|---|---|
+| `seagull_control_fleet_agents` | `liveness`: `active`, `late`, `silent`, `stopped`, and `unspecified` for an agent that never reported or whose newest report the store no longer holds |
+| `seagull_control_fleet_readings_total` | `outcome`: `read`, `unreadable` |
+
+The count is what every listing would have shown at that instant, so while
+`status-projector` falls behind, agents grow late and silent in both; its
+consumer lag is what tells the two apart.
 
 **Quarantine.** `security.agents.status.quarantine`, on the same terms as the
 other quarantines.

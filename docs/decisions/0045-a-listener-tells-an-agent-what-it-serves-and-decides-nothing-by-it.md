@@ -1,5 +1,9 @@
 # 45. A listener tells an agent what it serves, from what it runs with, and decides nothing by it
 
+> Amended by [ADR 54](0054-a-gateway-asks-how-often-to-report-and-the-fleet-is-counted-as-it-is-read.md): the status stream's
+> description names the interval the gateway asks agents to report at, asked for
+> and never imposed.
+
 ## Context
 
 An agent learns what the platform admits from what its batches are answered.

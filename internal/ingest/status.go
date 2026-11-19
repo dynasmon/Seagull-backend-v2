@@ -27,6 +27,7 @@ type StatusPolicy struct {
 	Gateway            string
 	MaxReportsPerBatch int
 	Report             event.Policy
+	Interval           time.Duration
 }
 
 // The third sibling, for the same reason the inventory admitter is one: what an

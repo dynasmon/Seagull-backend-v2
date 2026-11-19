@@ -398,8 +398,15 @@ Seagull Agent
                            │
                            ▼
      ClickHouse agent_status ──▶ control-api: active · late · silent · stopped
-          one row per agent        judged when an agent is read, never decided
+          one row per agent        judged when an agent is read, never decided,
+                                   and the admitted fleet counted the same way
 ```
+
+The gateway's descriptor names the interval the platform asks agents to report
+at, and a report is still judged against the interval it announces; every thirty
+seconds `control-api` counts the agents the registry admits by liveness, into one
+series per liveness, never one per agent
+([ADR 54](docs/decisions/0054-a-gateway-asks-how-often-to-report-and-the-fleet-is-counted-as-it-is-read.md)).
 
 What an agent found when it ran the checks of its policy travels on a fourth,
 and every assessment is kept, because the ones before the newest are what a
@@ -483,7 +490,7 @@ Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 | `advisory-writer` | Keeps every version of every advisory and every attempt to follow a feed, under a group and a quarantine of its own. |
 | `vulnerability-matcher` | Decides which packages of each asset are vulnerable from the inventory and advisory stores, read-only, and publishes the decisions to `security.findings`. It reads both streams alone in one loop, waits for each store's owner before reading it, and holds no internet access and no credential that writes. |
 | `finding-writer` | Keeps what the vulnerability matcher decided, one row per episode of a finding and one per evaluation of an asset, under a group and a quarantine of its own, so a findings store outage costs how current findings are and never a decision. |
-| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry with how recently each agent reported and its posture, the authority that signs an agent's certificate, the signed policies agents are handed, the signed catalog of releases agents may install with their packages, and what people decide about vulnerabilities instead of fixing them. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates and asking for their policy and their updates on a second one. |
+| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry with how recently each agent reported and its posture, the fleet counted by liveness, the authority that signs an agent's certificate, the signed policies agents are handed, the signed catalog of releases agents may install with their packages, and what people decide about vulnerabilities instead of fixing them. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates and asking for their policy and their updates on a second one. |
 | `query-api` | The read plane, and the only reader of the analytical store. |
 | `backbone-migrator`, `store-migrator`, `control-migrator` | Apply the topic topology, the analytical schema and the relational schema, then exit. Nothing migrates on the way to serving traffic. |
 

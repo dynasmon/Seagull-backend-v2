@@ -85,3 +85,20 @@ func TestARosterGoesStaleOnlyOnceTwoConfirmationsWereMissed(t *testing.T) {
 		t.Errorf("a roster that would go stale after one missed confirmation was answered %v", err)
 	}
 }
+
+func TestAGatewayAsksForAReportEveryIntervalItIsToldWithinTheContract(t *testing.T) {
+	unset, err := load(environment(t, nil))
+	if err != nil || unset.statusRules.Interval != time.Minute {
+		t.Errorf("a gateway configured with nothing asks for a report every %s (%v)", unset.statusRules.Interval, err)
+	}
+	told, err := load(environment(t, map[string]string{"SEAGULL_GATEWAY_STATUS_INTERVAL": "5m"}))
+	if err != nil || told.statusRules.Interval != 5*time.Minute {
+		t.Errorf("a gateway told 5m asks for a report every %s (%v)", told.statusRules.Interval, err)
+	}
+	for _, outside := range []string{"9s", "61m"} {
+		if _, err := load(environment(t, map[string]string{"SEAGULL_GATEWAY_STATUS_INTERVAL": outside})); err == nil ||
+			!strings.Contains(err.Error(), "SEAGULL_GATEWAY_STATUS_INTERVAL") {
+			t.Errorf("a gateway told to ask for a report every %s, which no report may announce, was answered %v", outside, err)
+		}
+	}
+}

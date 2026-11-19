@@ -248,6 +248,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		Gateway:            "gateway-test",
 		MaxReportsPerBatch: options.maxReportsPerBatch,
 		Report:             event.Policy{MaxClockSkew: 5 * time.Minute, MaxAge: 168 * time.Hour},
+		Interval:           time.Minute,
 	}, reported)
 	if err != nil {
 		t.Fatalf("build status admitter: %v", err)

@@ -593,6 +593,15 @@ make verify     # the full gate: lint, module graph, tests, race detector
 `make up` writes nothing outside the repository and reads nothing that is not in
 it; the development material lands in `.local/pki`, which Git ignores.
 
+`make dev-pki`, which `make up` runs first, keeps the material it finds while it
+still serves. An agent enrolled under the development agent authority trusts that
+authority alone, so minting it again would cut off every agent enrolled so far. A
+certificate close to its end, or one that does not name what is asked, is issued
+again by the same authority, and a running process serves it once restarted.
+`make rotate-dev-pki` mints new authorities: every agent enrolled before has to
+be enrolled again, and the stack restarted. Every process restarts with the
+host, so a reboot needs no `make up`.
+
 Send a batch through the running gateway, then ask the query plane what became
 of it. The probe first registers the development agent in the `default` tenant as
 `dev-admin`, because the gateway admits only an agent the registry placed in a

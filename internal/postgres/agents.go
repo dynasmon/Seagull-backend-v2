@@ -109,6 +109,18 @@ func (a *Agents) Admitted(ctx context.Context) (map[string]string, error) {
 	return admitted, nil
 }
 
+func (a *Agents) State(ctx context.Context, id string) (agent.State, error) {
+	var state string
+	err := a.store.pool.QueryRow(ctx, `SELECT state FROM agents WHERE agent_id = $1`, id).Scan(&state)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return "", agent.ErrUnknown
+	case err != nil:
+		return "", fmt.Errorf("read where agent %s stands: %w", id, err)
+	}
+	return agent.State(state), nil
+}
+
 func (a *Agents) Announced(ctx context.Context, agentID string, revision uint64) error {
 	if _, err := a.store.pool.Exec(ctx,
 		`UPDATE agents SET published_revision = $2

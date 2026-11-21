@@ -35,6 +35,7 @@ type ServerOptions struct {
 	Liveness          Liveness
 	Reports           Reports
 	Postures          Postures
+	Findings          Findings
 	Authority         *pki.Authority
 	TrustBundle       func() ([]byte, error)
 	CertificateLife   time.Duration
@@ -71,6 +72,7 @@ type Server struct {
 	liveness   Liveness
 	reports    Reports
 	postures   Postures
+	findings   Findings
 	metrics    *Metrics
 	logger     *slog.Logger
 	now        func() time.Time
@@ -170,6 +172,7 @@ func newServer(options ServerOptions) (*Server, error) {
 		liveness:   options.Liveness,
 		reports:    options.Reports,
 		postures:   options.Postures,
+		findings:   options.Findings,
 		metrics:    options.Metrics,
 		logger:     options.Logger,
 		now:        options.Now,

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"time"
+
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/log"
 	"github.com/dynasmon/Seagull-backend-v2/internal/postgres"
@@ -11,6 +13,7 @@ const serviceName = "control-migrator"
 type configuration struct {
 	logLevel  string
 	logFormat string
+	wait      time.Duration
 	store     postgres.Config
 }
 
@@ -20,6 +23,7 @@ func load(parser *config.Parser) (configuration, error) {
 	loaded := configuration{
 		logLevel:  parser.Enum("SEAGULL_LOG_LEVEL", "info", "debug", "info", "warn", "error"),
 		logFormat: parser.Enum("SEAGULL_LOG_FORMAT", log.FormatJSON, log.FormatJSON, log.FormatText),
+		wait:      parser.Duration("SEAGULL_MIGRATOR_WAIT", time.Minute, 0, time.Hour),
 		store:     postgres.LoadConfig("SEAGULL_ALERT_STORE", parser),
 	}
 

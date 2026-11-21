@@ -19,6 +19,7 @@ type Metrics struct {
 	synced     *prometheus.GaugeVec
 	listed     *prometheus.GaugeVec
 	held       *prometheus.GaugeVec
+	owed       *prometheus.GaugeVec
 	duration   *prometheus.HistogramVec
 }
 
@@ -60,6 +61,12 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "held_advisories",
 			Help:      "Advisories the platform holds from a feed.",
 		}, []string{"feed"}),
+		owed: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "advisoryfeed",
+			Name:      "owed_advisories",
+			Help:      "Records the attempt in progress still has to read from a feed, and none once it is over.",
+		}, []string{"feed"}),
 		duration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: "advisoryfeed",
@@ -75,6 +82,7 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 		instruments.synced,
 		instruments.listed,
 		instruments.held,
+		instruments.owed,
 		instruments.duration,
 	)
 	return instruments
@@ -84,6 +92,10 @@ func (m *Metrics) settled(feed, outcome string, count int) {
 	if count > 0 {
 		m.advisories.WithLabelValues(feed, outcome).Add(float64(count))
 	}
+}
+
+func (m *Metrics) owing(feed string, records int) {
+	m.owed.WithLabelValues(feed).Set(float64(records))
 }
 
 func (m *Metrics) recalled(feed string, synced time.Time) {

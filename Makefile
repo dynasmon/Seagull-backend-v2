@@ -3,6 +3,7 @@ GO ?= go
 MODULE := github.com/dynasmon/Seagull-backend-v2
 DIST ?= dist
 PKI ?= .local/pki
+HOSTS ?= localhost,127.0.0.1
 COMPOSE := docker compose -f deploy/compose.yaml
 COMPOSE_TEST := docker compose -f deploy/compose.yaml -f deploy/compose.test.yaml
 COMPONENTS := ingest-gateway control-api query-api analysis-engine event-writer detection-writer alert-writer inventory-projector status-projector assessment-projector advisory-importer advisory-writer finding-writer vulnerability-matcher store-migrator backbone-migrator control-migrator
@@ -39,7 +40,7 @@ help:
 	@echo "images              build the container image of every component"
 	@echo "scan-images         refuse a built image holding a fixable high or critical vulnerability"
 	@echo "scan-infrastructure report what is known of the images this project runs and builds on"
-	@echo "dev-pki             mint development certificates into $(PKI), keeping what still serves"
+	@echo "dev-pki             mint development certificates into $(PKI) for HOSTS, keeping what still serves"
 	@echo "rotate-dev-pki      mint new development authorities, which every enrolled agent stops trusting"
 	@echo "up                  start the local stack"
 	@echo "upgrade-backbone    stop the local stack and walk its backbone volume up every Redpanda release it missed"
@@ -164,10 +165,10 @@ check-protection:
 	fi; echo "main is enforced as declared"
 
 dev-pki:
-	$(GO) run ./tools/devpki -directory $(PKI)
+	$(GO) run ./tools/devpki -directory $(PKI) -hosts $(HOSTS)
 
 rotate-dev-pki:
-	$(GO) run ./tools/devpki -directory $(PKI) -rotate
+	$(GO) run ./tools/devpki -directory $(PKI) -hosts $(HOSTS) -rotate
 
 up: dev-pki
 	SEAGULL_RUNTIME_USER="$$(id -u):$$(id -g)" $(COMPOSE) up -d --build

@@ -60,6 +60,7 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_GATEWAY_ROSTER_RECORDS` | `500` | admission records read per fetch |
 | `SEAGULL_GATEWAY_ROSTER_CHECK_INTERVAL` | `5s` | how often the gateway confirms it holds every decision the agent log holds |
 | `SEAGULL_GATEWAY_ROSTER_STALE_AFTER` | `30s` | how long it may go unconfirmed before it answers every batch `503 roster_stale`; at least two check intervals |
+| `SEAGULL_GATEWAY_BEACON_INTERVAL` | `5s` | how often it says on `security.gateways` that it serves, and whether it admits (not while its roster is stale); `1s` to `1m`. Its last beacon, as it stops, says it no longer admits ([ADR 56](decisions/0056-a-finding-about-an-agent-is-a-record-of-its-own-judged-only-while-the-platform-listens.md)) |
 | `SEAGULL_EVENT_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock an event may be |
 | `SEAGULL_EVENT_MAX_AGE` | `168h` | how old an event may be and still be admitted |
 | `SEAGULL_INVENTORY_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock a scan may be |
@@ -156,6 +157,13 @@ capacity does not count, so a host is sized for it beside this setting. See
 | `SEAGULL_BACKBONE_FINDINGS_QUARANTINE_TOPIC` | `security.findings.quarantine` | finding records the finding writer refused |
 | `SEAGULL_BACKBONE_FINDINGS_QUARANTINE_PARTITIONS` | `1` | |
 | `SEAGULL_BACKBONE_FINDINGS_QUARANTINE_RETENTION` | `720h` | |
+| `SEAGULL_BACKBONE_AGENT_FINDINGS_TOPIC` | `security.agents.findings` | every decision about a finding the platform made about an agent |
+| `SEAGULL_BACKBONE_AGENT_FINDINGS_PARTITIONS` | `3` | how far per-agent ordering spreads |
+| `SEAGULL_BACKBONE_AGENT_FINDINGS_RETENTION` | `720h` | at least `48h`: an open finding is decided again every day, so its newest decision is always on the log |
+| `SEAGULL_BACKBONE_AGENT_FINDINGS_QUARANTINE_TOPIC` | `security.agents.findings.quarantine` | decisions the agent finding writer refused |
+| `SEAGULL_BACKBONE_AGENT_FINDINGS_QUARANTINE_PARTITIONS` | `1` | |
+| `SEAGULL_BACKBONE_AGENT_FINDINGS_QUARANTINE_RETENTION` | `720h` | |
+| `SEAGULL_BACKBONE_GATEWAYS_TOPIC` | `security.gateways` | the newest beacon of every gateway |
 | `SEAGULL_BACKBONE_QUARANTINE_PARTITIONS` | `3` | |
 | `SEAGULL_BACKBONE_QUARANTINE_RETENTION` | `720h` | |
 | `SEAGULL_BACKBONE_DURABILITY` | `production` | `production` refuses a topic that keeps fewer than 3 replicas or acknowledges a write fewer than 2 hold; `development`, which the development Compose file sets beside one replica, admits one broker and is reported as a warning |
@@ -456,6 +464,48 @@ everything the record was about to confirm.
 A report is a few kilobytes and a fleet sends one per agent every interval, so a
 batch is counted generously. A store outage costs how fresh liveness is and is
 retried until the batch is durable; a report is never skipped to make progress.
+
+### fleet-judge
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEAGULL_FLEET_JUDGE_INTERVAL` | `5s` | how often it confirms it reads the end of the status log and judges; `1s` to `1m` |
+| `SEAGULL_FLEET_JUDGE_STALE_AFTER` | `30s` | how long a confirmation lasts; at least two intervals |
+| `SEAGULL_FLEET_JUDGE_MAX_AGENTS` | `200000` | the most agents it holds the newest report of; past it, it judges no silence until it is raised |
+| `SEAGULL_FLEET_JUDGE_LOG_RECORDS` | `1000` | records per poll of each log it reads |
+| `SEAGULL_FLEET_JUDGE_START_TIMEOUT` | `30s` | budget to verify its topics before it reads them |
+
+It reads `security.agents.status`, `security.agents`, `security.gateways` and its
+own decisions on `security.agents.findings` whole, as a gateway reads the agent
+log, and writes nothing but decisions. It judges an agent's silence only while it
+confirmed it reads the end of the status log and a gateway said it admits, and
+only once that has lasted five of the agent's intervals without a break: an
+outage of the backbone, of the gateways or of the judge itself never reads as a
+silent fleet. Every replica judges every agent and names the same findings, so a
+second replica doubles decisions the store collapses. It holds about a few hundred
+bytes per agent.
+
+### agent-finding-writer
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEAGULL_AGENT_FINDING_WRITER_CONSUMER_GROUP` | `agent-finding-writer` | the consumer group that owns the offsets |
+| `SEAGULL_AGENT_FINDING_WRITER_BATCH_RECORDS` | `256` | decisions per poll, and per store batch |
+| `SEAGULL_AGENT_FINDING_WRITER_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
+| `SEAGULL_AGENT_FINDING_WRITER_RETRY_DELAY` | `1s` | first delay before a batch is retried |
+| `SEAGULL_AGENT_FINDING_WRITER_RETRY_DELAY_MAX` | `30s` | ceiling the delay backs off to |
+| `SEAGULL_AGENT_FINDING_STORE_ADDRESS` | required | the store's native protocol address, `clickhouse:9000` |
+| `SEAGULL_AGENT_FINDING_STORE_DATABASE` | `seagull` | the database holding `agent_findings`, which `control-api` reads through `SEAGULL_CONTROL_TELEMETRY_STORE_*` |
+| `SEAGULL_AGENT_FINDING_STORE_USER` | `seagull` | |
+| `SEAGULL_AGENT_FINDING_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
+| `SEAGULL_AGENT_FINDING_STORE_TIMEOUT` | `30s` | budget for one write attempt, and to dial |
+| `SEAGULL_AGENT_FINDING_STORE_TLS` | `true` | verify and encrypt the native connection; development Compose explicitly sets `false` |
+| `SEAGULL_AGENT_FINDING_STORE_TLS_CA` | unset | authority the store must chain to; the system pool when unset |
+| `SEAGULL_AGENT_FINDING_STORE_TLS_SERVER_NAME` | unset | name the store certificate must carry; the dialled host when unset |
+
+A decision is a few hundred bytes and a fleet makes few of them. A store outage
+costs how current the findings an operator reads are and is retried until the
+batch is durable; a decision is never skipped to make progress.
 
 ### assessment-projector
 
@@ -844,7 +894,7 @@ before its body is read.
 
 ## The backbone topology
 
-Sixteen topics, declared once in `internal/broker` and applied by
+Nineteen topics, declared once in `internal/broker` and applied by
 `backbone-migrator`:
 
 | Topic | Partitions | Retention | Largest batch | Why |
@@ -865,6 +915,9 @@ Sixteen topics, declared once in `internal/broker` and applied by
 | `security.assessments.quarantine` | 1 | 30 days | 1 MiB + 64 KiB | assessments the assessment projector could not store |
 | `security.findings` | 6 | 30 days | 1 MiB | every decision the vulnerability matcher made and the assessment it made it in, keyed by the agent so one asset's decisions are read in the order they were made, an assessment after the findings it covered |
 | `security.findings.quarantine` | 1 | 30 days | 1 MiB + 64 KiB | finding records the finding writer could not store |
+| `security.agents.findings` | 3 | 30 days | 1 MiB | every decision about what the platform found about an agent, keyed by the agent; not compacted, because a decider reads its own decisions back to learn which findings it left open |
+| `security.agents.findings.quarantine` | 1 | 30 days | 1 MiB + 64 KiB | decisions the agent finding writer could not store |
+| `security.gateways` | 1 | compacted, kept | 1 MiB | the newest beacon of every gateway, keyed by it: whether it admits what agents send, which is how the fleet judge tells a silent agent from a platform that stopped listening |
 
 **Partitions and replication are refused, never converged.** Records are keyed
 by `agent_id`, so growing the partition count moves an agent to a different
@@ -1155,6 +1208,32 @@ assessment has already been able to see what it covered.
 
 **Quarantine.** `security.findings.quarantine`, on the same terms as the other
 quarantines.
+
+## The agent findings store
+
+`agent_findings` holds what the platform found about every agent from how it
+reports and presents itself, one row per finding, written by
+`agent-finding-writer` from `security.agents.findings`
+([ADR 56](decisions/0056-a-finding-about-an-agent-is-a-record-of-its-own-judged-only-while-the-platform-listens.md)).
+A finding is a `ReplacingMergeTree` versioned by `decided_at`, so where it stands
+is its newest decision, whatever order the decisions arrived in; it is ordered
+by tenant, agent and finding, and has no partition, for the reason `agent_status`
+has none. A closed finding leaves a year after it was last decided, and an open
+one is decided again every day, so it never does.
+
+`control-api` reads it through `SEAGULL_CONTROL_TELEMETRY_STORE_*`: the open
+findings of an agent when one agent is read, at most 32, newest first; a listing
+at `POST /v1/agents/findings/search`, which needs `agents:read` and is held to the
+tenants the caller holds, by kind, state, agent and when the finding opened, paged
+by when it opened and its identifier; and every `SEAGULL_CONTROL_API_FLEET_INTERVAL`
+the open findings by kind, beside the fleet's liveness:
+
+```text
+seagull_control_fleet_findings_open{kind="silence|copied_installation|shared_identity|replaced_certificate"}
+```
+
+A reading that cannot count them publishes neither count and is counted
+`unreadable`, as one that cannot count the fleet.
 
 ## Vulnerability dispositions
 

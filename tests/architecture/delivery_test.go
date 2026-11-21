@@ -321,3 +321,32 @@ func TestTheDevelopmentStackForwardsWhatTheFleetIsRunWith(t *testing.T) {
 		t.Error("control-api mounts nothing a policy signer or an update root can be read from")
 	}
 }
+
+func TestEveryImageTheDevelopmentStackBuildsKnowsItsRevision(t *testing.T) {
+	var compose struct {
+		Services map[string]struct {
+			Build struct {
+				Args map[string]string `yaml:"args"`
+			} `yaml:"build"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(read(t, "deploy", "compose.yaml"), &compose); err != nil {
+		t.Fatalf("compose.yaml: %v", err)
+	}
+	built := 0
+	for name, service := range compose.Services {
+		if service.Build.Args["COMPONENT"] == "" {
+			continue
+		}
+		built++
+		if revision := service.Build.Args["REVISION"]; revision != "${SEAGULL_REVISION:-unknown}" {
+			t.Errorf("%s is built with the revision %q, so it reports none it was built from", name, revision)
+		}
+	}
+	if built < 10 {
+		t.Fatalf("compose.yaml builds %d images, fewer than the platform runs", built)
+	}
+	if !strings.Contains(string(read(t, "Makefile")), "SEAGULL_REVISION=$(REVISION) ") {
+		t.Error("make up gives the stack it builds no revision")
+	}
+}

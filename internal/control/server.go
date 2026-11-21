@@ -22,41 +22,42 @@ import (
 const DescriptorPath = "/v1/descriptor"
 
 type ServerOptions struct {
-	Address         string
-	TLS             *tls.Config
-	Guard           *Guard
-	Sessions        *Sessions
-	Registry        *Registry
-	Rulesets        Rulesets
-	Alerts          Alerts
-	Incidents       Incidents
-	Agents          Agents
-	Admissions      Admissions
-	Liveness        Liveness
-	Reports         Reports
-	Postures        Postures
-	Authority       *pki.Authority
-	TrustBundle     func() ([]byte, error)
-	CertificateLife time.Duration
-	RenewalAddress  string
-	RenewalTLS      *tls.Config
-	RenewalLimiter  *ratelimit.Limiter
-	Policies        AgentPolicies
-	PolicySigners   func() (*agentpolicy.Signers, error)
-	PolicyLimiter   *ratelimit.Limiter
-	Updates         AgentUpdates
-	UpdateRoot      func() (*agentupdate.Root, error)
-	UpdateLimiter   *ratelimit.Limiter
-	Rollouts        AgentRollouts
-	Dispositions    Dispositions
-	Metrics         *Metrics
-	Instrumentation *httpx.Instrumentation
-	Logger          *slog.Logger
-	Now             func() time.Time
-	ReadTimeout     time.Duration
-	WriteTimeout    time.Duration
-	IdleTimeout     time.Duration
-	ShutdownTimeout time.Duration
+	Address           string
+	TLS               *tls.Config
+	Guard             *Guard
+	Sessions          *Sessions
+	Registry          *Registry
+	Rulesets          Rulesets
+	Alerts            Alerts
+	Incidents         Incidents
+	Agents            Agents
+	Admissions        Admissions
+	Liveness          Liveness
+	Reports           Reports
+	Postures          Postures
+	Authority         *pki.Authority
+	TrustBundle       func() ([]byte, error)
+	CertificateLife   time.Duration
+	RenewalAddress    string
+	RenewalTLS        *tls.Config
+	RenewalLimiter    *ratelimit.Limiter
+	Policies          AgentPolicies
+	PolicySigners     func() (*agentpolicy.Signers, error)
+	PolicyLimiter     *ratelimit.Limiter
+	Updates           AgentUpdates
+	UpdateRoot        func() (*agentupdate.Root, error)
+	UpdateLimiter     *ratelimit.Limiter
+	DescriptorLimiter *ratelimit.Limiter
+	Rollouts          AgentRollouts
+	Dispositions      Dispositions
+	Metrics           *Metrics
+	Instrumentation   *httpx.Instrumentation
+	Logger            *slog.Logger
+	Now               func() time.Time
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	IdleTimeout       time.Duration
+	ShutdownTimeout   time.Duration
 }
 
 type Server struct {
@@ -83,11 +84,12 @@ type Server struct {
 	policySigners func() (*agentpolicy.Signers, error)
 	policyPulls   *ratelimit.Limiter
 
-	updates     AgentUpdates
-	updateRoot  func() (*agentupdate.Root, error)
-	updatePulls *ratelimit.Limiter
-	downloads   chan struct{}
-	rollouts    AgentRollouts
+	updates      AgentUpdates
+	updateRoot   func() (*agentupdate.Root, error)
+	updatePulls  *ratelimit.Limiter
+	descriptions *ratelimit.Limiter
+	downloads    chan struct{}
+	rollouts     AgentRollouts
 
 	dispositions Dispositions
 }
@@ -181,11 +183,12 @@ func newServer(options ServerOptions) (*Server, error) {
 		policySigners: options.PolicySigners,
 		policyPulls:   options.PolicyLimiter,
 
-		updates:     options.Updates,
-		updateRoot:  options.UpdateRoot,
-		updatePulls: options.UpdateLimiter,
-		downloads:   make(chan struct{}, MaxDownloads),
-		rollouts:    options.Rollouts,
+		updates:      options.Updates,
+		updateRoot:   options.UpdateRoot,
+		updatePulls:  options.UpdateLimiter,
+		descriptions: options.DescriptorLimiter,
+		downloads:    make(chan struct{}, MaxDownloads),
+		rollouts:     options.Rollouts,
 
 		dispositions: options.Dispositions,
 	}, nil

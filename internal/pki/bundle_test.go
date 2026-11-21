@@ -1,6 +1,9 @@
 package pki_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"strings"
 	"testing"
@@ -69,5 +72,27 @@ func TestTrustsRefusesABundleWithoutTheSigningAuthority(t *testing.T) {
 	}
 	if err := pki.Trusts(signing.Chain(), signing); err != nil {
 		t.Fatalf("a bundle carrying the signing authority was refused: %v", err)
+	}
+}
+
+// On 2026-11-20 a second mint of the development material left a running
+// plane signing under one authority and publishing another of the same name,
+// and the refusal named the same authority on both sides.
+func TestARefusedBundleTellsApartAuthoritiesOfOneName(t *testing.T) {
+	signing := authority(t, time.Hour)
+	minted, err := devpki.NewAuthority(signing.Subject(), time.Hour)
+	if err != nil {
+		t.Fatalf("build another authority of the same name: %v", err)
+	}
+	err = pki.Trusts(minted.Material().CertificatePEM, signing)
+	if !errors.Is(err, pki.ErrMalformedBundle) {
+		t.Fatalf("a bundle missing the signing authority was answered with %v", err)
+	}
+	for name, held := range map[string][]byte{"signing": signing.Chain(), "carried": minted.Material().CertificatePEM} {
+		block, _ := pem.Decode(held)
+		digest := sha256.Sum256(block.Bytes)
+		if !strings.Contains(err.Error(), hex.EncodeToString(digest[:])) {
+			t.Errorf("the refusal %q does not tell the %s authority apart by its digest", err, name)
+		}
 	}
 }

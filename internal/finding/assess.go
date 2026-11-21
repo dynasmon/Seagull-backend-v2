@@ -166,7 +166,7 @@ func (e *evaluation) place() vulnerabilityv1.Unassessable {
 	switch {
 	case errors.Is(err, vulnerability.ErrUnknownRelease):
 		return vulnerabilityv1.Unassessable_UNASSESSABLE_UNKNOWN_RELEASE
-	case err != nil:
+	case err != nil, e.intelligence.Feed.Source == "" && !e.intelligence.AsOf.After(time.Unix(0, 0)):
 		return vulnerabilityv1.Unassessable_UNASSESSABLE_UNKNOWN_DISTRIBUTION
 	case e.intelligence.Feed.SyncedAt.IsZero():
 		return vulnerabilityv1.Unassessable_UNASSESSABLE_STALE_INTELLIGENCE

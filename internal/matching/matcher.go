@@ -227,6 +227,7 @@ func reached(committed, needed map[int32]int64) bool {
 func (m *Matcher) triggers(ctx context.Context, records []Record) ([]Asset, map[Key]bool, error) {
 	assets := map[Asset]bool{}
 	changed := map[Key]bool{}
+	freshened := map[string]bool{}
 	for _, record := range records {
 		if record.Topic == m.owners.Inventory.Topic {
 			var observed inventoryv1.Record
@@ -248,6 +249,19 @@ func (m *Matcher) triggers(ctx context.Context, records []Record) ([]Asset, map[
 			m.metrics.trigger("advisory", "unreadable")
 			continue
 		}
+		if sync := read.GetSync(); sync != nil {
+			fresh, err := m.turnedFresh(ctx, sync)
+			if err != nil {
+				return nil, nil, fmt.Errorf("read how fresh %s was before %s: %w", sync.GetFeed(), sync.GetCheckedAt().AsTime().Format(time.RFC3339), err)
+			}
+			if !fresh {
+				m.metrics.trigger("feed", "ignored")
+				continue
+			}
+			freshened[sync.GetFeed()] = true
+			m.metrics.trigger("feed", "assessed")
+			continue
+		}
 		advisory := read.GetAdvisory()
 		if advisory == nil {
 			m.metrics.trigger("advisory", "ignored")
@@ -266,12 +280,41 @@ func (m *Matcher) triggers(ctx context.Context, records []Record) ([]Asset, map[
 		m.metrics.trigger("advisory", "assessed")
 	}
 
+	if len(freshened) > 0 {
+		systems, err := m.inventory.Systems(ctx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("read what the assets run: %w", err)
+		}
+		for asset, system := range systems {
+			if ecosystem, err := vulnerability.EcosystemOf(system); err == nil {
+				if feed, err := vulnerability.FeedOf(ecosystem); err == nil && freshened[feed] {
+					assets[asset] = true
+				}
+			}
+		}
+	}
+
 	sorted := make([]Asset, 0, len(assets))
 	for asset := range assets {
 		sorted = append(sorted, asset)
 	}
 	slices.SortFunc(sorted, compareAssets)
 	return sorted, changed, nil
+}
+
+// A feed turns fresh when the platform holds all of it for the first time, or
+// again after a gap long enough for an asset to have been judged stale in it.
+// Every asset the feed covers is then assessed whole at once rather than at
+// its next inventory, which an agent sends once a day (ADR 55).
+func (m *Matcher) turnedFresh(ctx context.Context, sync *vulnerabilityv1.FeedSync) (bool, error) {
+	if !sync.GetSyncedAt().AsTime().After(time.Unix(0, 0)) {
+		return false, nil
+	}
+	previous, err := m.intelligence.Synced(ctx, sync.GetSource(), sync.GetFeed(), sync.GetCheckedAt().AsTime())
+	if err != nil {
+		return false, err
+	}
+	return previous.IsZero() || sync.GetSyncedAt().AsTime().Sub(previous) > m.policy.Freshness, nil
 }
 
 func (m *Matcher) whole(ctx context.Context, asset Asset) error {

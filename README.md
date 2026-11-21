@@ -634,6 +634,24 @@ docker compose -f deploy/compose.yaml exec clickhouse clickhouse-client --user s
    FROM vulnerability_feed_syncs GROUP BY feed"
 ```
 
+An agent on another machine reaches this one by an address the server
+certificates name, and they name only `localhost`, `127.0.0.1` and each service
+by default. Issue them for this machine's address as well, from the same
+authorities, publish the two listeners an agent talks to beyond the loopback, and
+restart what serves the new certificates:
+
+```bash
+make dev-pki HOSTS=localhost,127.0.0.1,192.0.2.10
+SEAGULL_GATEWAY_PUBLISH=0.0.0.0:8443 SEAGULL_CONTROL_API_RENEWAL_PUBLISH=0.0.0.0:8446 make up
+docker compose -f deploy/compose.yaml restart ingest-gateway control-api query-api
+```
+
+On that machine the agent's `platform-ca.pem` is `.local/pki/agent-trust.pem`,
+every authority an agent is told to trust, and its settings name
+`https://192.0.2.10:8443` and `https://192.0.2.10:8446`; its enrollment request is
+registered and signed as `-agents` below does. A later `make up` keeps those
+certificates, since they cover every host asked by default.
+
 Register an agent, have the platform sign the certificate it will present, watch
 it renew that certificate itself, and revoke it:
 

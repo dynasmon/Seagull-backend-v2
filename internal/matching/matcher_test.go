@@ -93,9 +93,18 @@ func (i *inventory) Holders(_ context.Context, packages []string) ([]Asset, erro
 	return holders, nil
 }
 
+func (i *inventory) Systems(context.Context) (map[Asset]*inventoryv1.OperatingSystem, error) {
+	systems := map[Asset]*inventoryv1.OperatingSystem{}
+	for asset, held := range i.assets {
+		systems[asset] = held.System
+	}
+	return systems, nil
+}
+
 type intelligence struct {
 	advisories []finding.Advisory
 	before     []Key
+	synced     map[string]time.Time
 }
 
 func (i *intelligence) Read(_ context.Context, ecosystem string, packages []string) (finding.Intelligence, error) {
@@ -114,6 +123,10 @@ func (i *intelligence) Read(_ context.Context, ecosystem string, packages []stri
 
 func (i *intelligence) Before(context.Context, string, string, time.Time, uint32) ([]Key, error) {
 	return i.before, nil
+}
+
+func (i *intelligence) Synced(_ context.Context, _, feed string, _ time.Time) (time.Time, error) {
+	return i.synced[feed], nil
 }
 
 type decisions struct {

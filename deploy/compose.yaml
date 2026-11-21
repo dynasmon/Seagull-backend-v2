@@ -511,6 +511,7 @@ services:
       SEAGULL_GATEWAY_AGENT_CA: /run/pki/agent-ca.pem
       SEAGULL_GATEWAY_MAX_INFLIGHT_BYTES: ${SEAGULL_GATEWAY_MAX_INFLIGHT_BYTES:-128MiB}
       SEAGULL_GATEWAY_MAX_INFLIGHT_REQUESTS: ${SEAGULL_GATEWAY_MAX_INFLIGHT_REQUESTS:-512}
+      SEAGULL_GATEWAY_STATUS_INTERVAL: ${SEAGULL_GATEWAY_STATUS_INTERVAL:-}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
     volumes:
@@ -550,6 +551,11 @@ services:
       SEAGULL_CONTROL_API_AGENT_AUTHORITY_KEY: /run/pki/agent-ca-key.pem
       SEAGULL_CONTROL_API_AGENT_TRUST_BUNDLE: /run/pki/agent-trust.pem
       SEAGULL_CONTROL_API_AGENT_CERT_LIFETIME: ${SEAGULL_CONTROL_API_AGENT_CERT_LIFETIME:-168h}
+      # What is signed off the platform reaches it as files under .local/signing,
+      # named here as /run/signing/<file>; unset, there is no policy and no update.
+      SEAGULL_CONTROL_API_AGENT_POLICY_SIGNERS: ${SEAGULL_CONTROL_API_AGENT_POLICY_SIGNERS:-}
+      SEAGULL_CONTROL_API_AGENT_UPDATE_ROOT: ${SEAGULL_CONTROL_API_AGENT_UPDATE_ROOT:-}
+      SEAGULL_CONTROL_API_FLEET_INTERVAL: ${SEAGULL_CONTROL_API_FLEET_INTERVAL:-}
       SEAGULL_CONTROL_API_POLICY: /etc/seagull/policy.yml
       # The tree the engine starts on, mounted here as well: the control plane
       # publishes it as the installation's first ruleset, so what the engine
@@ -564,6 +570,7 @@ services:
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
     volumes:
       - ../.local/pki:/run/pki:ro
+      - ../.local/signing:/run/signing:ro
       - ./policy.yml:/etc/seagull/policy.yml:ro
       - ./rules:/etc/seagull/rules:ro
     restart: unless-stopped

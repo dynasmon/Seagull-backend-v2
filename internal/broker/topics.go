@@ -13,6 +13,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentfinding"
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentstatus"
 	"github.com/dynasmon/Seagull-backend-v2/internal/assessment"
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
@@ -51,22 +52,24 @@ type Topic struct {
 }
 
 type Topology struct {
-	Events                Topic
-	Quarantine            Topic
-	Detections            Topic
-	DetectionsQuarantine  Topic
-	Inventory             Topic
-	InventoryQuarantine   Topic
-	Advisories            Topic
-	AdvisoriesQuarantine  Topic
-	Rulesets              Topic
-	Agents                Topic
-	Status                Topic
-	StatusQuarantine      Topic
-	Assessments           Topic
-	AssessmentsQuarantine Topic
-	Findings              Topic
-	FindingsQuarantine    Topic
+	Events                  Topic
+	Quarantine              Topic
+	Detections              Topic
+	DetectionsQuarantine    Topic
+	Inventory               Topic
+	InventoryQuarantine     Topic
+	Advisories              Topic
+	AdvisoriesQuarantine    Topic
+	Rulesets                Topic
+	Agents                  Topic
+	Status                  Topic
+	StatusQuarantine        Topic
+	Assessments             Topic
+	AssessmentsQuarantine   Topic
+	Findings                Topic
+	FindingsQuarantine      Topic
+	AgentFindings           Topic
+	AgentFindingsQuarantine Topic
 }
 
 // Refused records and detections are both kept far longer than admitted events:
@@ -259,6 +262,28 @@ func LoadTopology(parser *config.Parser) Topology {
 			Durability:      durability,
 			MaxMessageBytes: quarantining(carrying(finding.MaxRecordBytes)),
 		},
+		AgentFindings: Topic{
+			Name:            parser.String("SEAGULL_BACKBONE_AGENT_FINDINGS_TOPIC", "security.agents.findings"),
+			Partitions:      int32(parser.Int("SEAGULL_BACKBONE_AGENT_FINDINGS_PARTITIONS", 3, 1, 1_000)),
+			Replicas:        replicas,
+			Retention:       parser.Duration("SEAGULL_BACKBONE_AGENT_FINDINGS_RETENTION", 30*24*time.Hour, 2*24*time.Hour, 10*365*24*time.Hour),
+			Cleanup:         cleanupDelete,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			Durability:      durability,
+			MaxMessageBytes: carrying(agentfinding.MaxFindingBytes),
+		},
+		AgentFindingsQuarantine: Topic{
+			Name:            parser.String("SEAGULL_BACKBONE_AGENT_FINDINGS_QUARANTINE_TOPIC", "security.agents.findings.quarantine"),
+			Partitions:      int32(parser.Int("SEAGULL_BACKBONE_AGENT_FINDINGS_QUARANTINE_PARTITIONS", 1, 1, 1_000)),
+			Replicas:        replicas,
+			Retention:       parser.Duration("SEAGULL_BACKBONE_AGENT_FINDINGS_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:         cleanupDelete,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			Durability:      durability,
+			MaxMessageBytes: quarantining(carrying(agentfinding.MaxFindingBytes)),
+		},
 	}
 }
 
@@ -272,6 +297,7 @@ func (t Topology) Topics() []Topic {
 		t.Status, t.StatusQuarantine,
 		t.Assessments, t.AssessmentsQuarantine,
 		t.Findings, t.FindingsQuarantine,
+		t.AgentFindings, t.AgentFindingsQuarantine,
 	}
 }
 

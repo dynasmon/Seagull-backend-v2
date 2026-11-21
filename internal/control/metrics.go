@@ -6,6 +6,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentfinding"
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentstatus"
 	"github.com/dynasmon/Seagull-backend-v2/internal/authz"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
@@ -45,6 +46,7 @@ type Metrics struct {
 	disposals   *prometheus.CounterVec
 	fleet       *prometheus.GaugeVec
 	fleetReads  *prometheus.CounterVec
+	findings    *prometheus.GaugeVec
 }
 
 func NewMetrics(registry *metrics.Registry) *Metrics {
@@ -235,6 +237,12 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "fleet_readings_total",
 			Help:      "Readings of the liveness of the whole fleet, by what came of them.",
 		}, []string{"outcome"}),
+		findings: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "fleet_findings_open",
+			Help:      "Findings about agents that are still open, by kind, as the platform last read the whole fleet.",
+		}, []string{"kind"}),
 	}
 
 	registry.MustRegister(
@@ -247,7 +255,7 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 		instruments.instructed, instruments.handed,
 		instruments.authorized, instruments.offered, instruments.downloaded,
 		instruments.inForce, instruments.readings, instruments.gated,
-		instruments.disposals, instruments.fleet, instruments.fleetReads,
+		instruments.disposals, instruments.fleet, instruments.fleetReads, instruments.findings,
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: "control",
@@ -443,6 +451,16 @@ func (m *Metrics) fleetCounted(counted map[agentv1.Liveness]int) {
 	for value := range agentv1.Liveness_name {
 		liveness := agentv1.Liveness(value)
 		m.fleet.WithLabelValues(agentstatus.LivenessName(liveness)).Set(float64(counted[liveness]))
+	}
+}
+
+func (m *Metrics) fleetFindingsCounted(open map[string]int) {
+	if m == nil {
+		return
+	}
+	for _, kind := range agentfinding.Kinds() {
+		name := agentfinding.KindName(kind)
+		m.findings.WithLabelValues(name).Set(float64(open[name]))
 	}
 }
 

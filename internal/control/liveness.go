@@ -36,8 +36,8 @@ type Postures interface {
 // A failure here costs the caller the observed columns and not the answer: the
 // registry holds what was decided, and what agents send lands in stores that
 // may be slower or absent without making an agent unreadable. A page carries
-// how recently each agent reported; the report itself and the agent's posture
-// are carried when one agent is read.
+// how recently each agent reported; the report itself, the agent's posture and
+// its open findings are carried when one agent is read.
 func (s *Server) observed(ctx context.Context, listed []*agentv1.Agent, tenants []string, whole bool) {
 	if len(listed) == 0 {
 		return
@@ -56,6 +56,16 @@ func (s *Server) observed(ctx context.Context, listed []*agentv1.Agent, tenants 
 				if at, found := seen[one.GetAgentId()]; found {
 					one.LastSeen = timestamppb.New(at.UTC())
 				}
+			}
+		}
+	}
+
+	if whole && s.findings != nil {
+		if open, err := s.findings.Open(ctx, asked, tenants); err != nil {
+			s.logger.Warn("agent_findings_unavailable", slog.String("error", err.Error()))
+		} else {
+			for _, one := range listed {
+				one.Findings = open[one.GetAgentId()]
 			}
 		}
 	}

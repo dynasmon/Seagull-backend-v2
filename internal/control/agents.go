@@ -221,6 +221,7 @@ func agentRoutes(s *Server) []route {
 	return []route{
 		{http.MethodPost, AgentsPath, "agent_register", Permits(authz.Agents, authz.Write), s.registerAgent()},
 		{http.MethodPost, AgentSearch, "agent_search", Permits(authz.Agents, authz.Read), s.searchAgents()},
+		{http.MethodPost, AgentFindingSearch, "agent_finding_search", Permits(authz.Agents, authz.Read), s.searchFindings()},
 		{http.MethodGet, AgentPath, "agent_describe", Permits(authz.Agents, authz.Read), s.describeAgent()},
 		{http.MethodGet, AgentHistory, "agent_history", Permits(authz.Agents, authz.Read), s.agentHistory()},
 		{http.MethodPost, AgentTransition, "agent_transition", Permits(authz.Agents, authz.Write), s.transitionAgent()},

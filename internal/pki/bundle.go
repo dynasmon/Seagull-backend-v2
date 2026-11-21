@@ -1,10 +1,13 @@
 package pki
 
 import (
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 const MaxBundleBytes = 65536
@@ -53,11 +56,20 @@ func Trusts(bundlePEM []byte, authority *Authority) error {
 	if err != nil {
 		return err
 	}
+	carried := make([]string, 0, len(authorities))
 	for _, held := range authorities {
 		if held.Equal(authority.certificate) {
 			return nil
 		}
+		carried = append(carried, named(held))
 	}
-	return fmt.Errorf("%w: it does not carry %s, which is the authority that signs",
-		ErrMalformedBundle, authority.Subject())
+	return fmt.Errorf("%w: it does not carry %s, which is the authority that signs; it carries %s",
+		ErrMalformedBundle, named(authority.certificate), strings.Join(carried, ", "))
+}
+
+// Two authorities can share a name, as every development mint of one does, so
+// each is told apart by the digest of what it is.
+func named(certificate *x509.Certificate) string {
+	digest := sha256.Sum256(certificate.Raw)
+	return fmt.Sprintf("%s (sha256 %s)", certificate.Subject.CommonName, hex.EncodeToString(digest[:]))
 }

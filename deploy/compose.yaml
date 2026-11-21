@@ -82,6 +82,7 @@ services:
       - --check=false
       - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
       - --advertise-kafka-addr=internal://redpanda:9092,external://127.0.0.1:19092
+    restart: unless-stopped
     networks: [backbone]
     volumes:
       - redpanda:/var/lib/redpanda/data
@@ -112,6 +113,7 @@ services:
 
   clickhouse:
     image: clickhouse/clickhouse-server:26.8.36.3@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7
+    restart: unless-stopped
     networks: [backbone]
     environment:
       CLICKHOUSE_DB: ${SEAGULL_EVENT_STORE_DATABASE:-seagull}
@@ -156,6 +158,7 @@ services:
   # which is the opposite of the analytical workload beside it.
   postgres:
     image: postgres:16.15-alpine@sha256:aa6cb33cf4c19c765cefcf48d96176258800870a9a1e930ad126200f9d825139
+    restart: unless-stopped
     networks: [backbone]
     environment:
       POSTGRES_DB: ${SEAGULL_ALERT_STORE_DATABASE:-seagull}
@@ -213,6 +216,7 @@ services:
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
     volumes:
       - ./rules:/etc/seagull/rules:ro
+    restart: unless-stopped
     <<: *hardening
 
   event-writer:
@@ -237,6 +241,7 @@ services:
       SEAGULL_EVENT_STORE_TLS: ${SEAGULL_EVENT_STORE_TLS:-false}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    restart: unless-stopped
     <<: *hardening
 
   detection-writer:
@@ -261,6 +266,7 @@ services:
       SEAGULL_DETECTION_STORE_TLS: ${SEAGULL_DETECTION_STORE_TLS:-false}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    restart: unless-stopped
     <<: *hardening
 
   # Folds what a collector saw into what an asset currently has. Its own process
@@ -288,6 +294,7 @@ services:
       SEAGULL_INVENTORY_STORE_TLS: ${SEAGULL_INVENTORY_STORE_TLS:-false}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    restart: unless-stopped
     <<: *hardening
 
   # Decides what is vulnerable on every asset from the stores the inventory
@@ -317,6 +324,7 @@ services:
       SEAGULL_VULNERABILITY_MATCHER_STORE_TLS: ${SEAGULL_VULNERABILITY_MATCHER_STORE_TLS:-false}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    restart: unless-stopped
     <<: *hardening
 
   # Keeps what the vulnerability matcher decides, under a group and a
@@ -344,6 +352,7 @@ services:
       SEAGULL_FINDING_STORE_TLS: ${SEAGULL_FINDING_STORE_TLS:-false}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    restart: unless-stopped
     <<: *hardening
 
   # Keeps the newest thing each agent said of itself, under a group and a
@@ -371,6 +380,7 @@ services:
       SEAGULL_STATUS_STORE_TLS: ${SEAGULL_STATUS_STORE_TLS:-false}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    restart: unless-stopped
     <<: *hardening
 
   # Keeps every assessment agents made of their hosts, under a group and a
@@ -398,6 +408,7 @@ services:
       SEAGULL_ASSESSMENT_STORE_TLS: ${SEAGULL_ASSESSMENT_STORE_TLS:-false}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    restart: unless-stopped
     <<: *hardening
 
   # Reads vulnerability advisories from their source and publishes them to the
@@ -421,6 +432,7 @@ services:
       SEAGULL_ADVISORY_SYNC_INTERVAL: ${SEAGULL_ADVISORY_SYNC_INTERVAL:-1h}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    restart: unless-stopped
     <<: *hardening
 
   # Keeps every version of every advisory the importer published. A process of
@@ -448,6 +460,7 @@ services:
       SEAGULL_ADVISORY_STORE_TLS: ${SEAGULL_ADVISORY_STORE_TLS:-false}
       SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    restart: unless-stopped
     <<: *hardening
 
   # Opens a piece of work from what the engine decided. It consumes the same
@@ -474,6 +487,7 @@ services:
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
     volumes:
       - ./alerting.yml:/etc/seagull/alerting.yml:ro
+    restart: unless-stopped
     <<: *hardening
 
   ingest-gateway:
@@ -501,6 +515,7 @@ services:
       SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
     volumes:
       - ../.local/pki:/run/pki:ro
+    restart: unless-stopped
     <<: *hardening
 
   control-api:
@@ -551,6 +566,7 @@ services:
       - ../.local/pki:/run/pki:ro
       - ./policy.yml:/etc/seagull/policy.yml:ro
       - ./rules:/etc/seagull/rules:ro
+    restart: unless-stopped
     <<: *hardening
 
   # The read plane. It holds the only read connection to the store, consumes no
@@ -587,6 +603,7 @@ services:
     volumes:
       - ../.local/pki:/run/pki:ro
       - ./policy.yml:/etc/seagull/policy.yml:ro
+    restart: unless-stopped
     <<: *hardening
 
 volumes:

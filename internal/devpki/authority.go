@@ -102,11 +102,15 @@ func (a *Authority) issue(commonName string, organisation, hosts []string, valid
 	}
 
 	now := time.Now().UTC()
+	expires := now.Add(validity)
+	if expires.After(a.certificate.NotAfter) {
+		expires = a.certificate.NotAfter
+	}
 	template := &x509.Certificate{
 		SerialNumber:          serial,
 		Subject:               pkix.Name{CommonName: commonName, Organization: organisation},
 		NotBefore:             now.Add(-time.Minute),
-		NotAfter:              now.Add(validity),
+		NotAfter:              expires,
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{usage},
 		BasicConstraintsValid: true,

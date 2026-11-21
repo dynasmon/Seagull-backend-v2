@@ -93,9 +93,18 @@ func (i *inventory) Holders(_ context.Context, packages []string) ([]Asset, erro
 	return holders, nil
 }
 
+func (i *inventory) Systems(context.Context) (map[Asset]*inventoryv1.OperatingSystem, error) {
+	systems := map[Asset]*inventoryv1.OperatingSystem{}
+	for asset, held := range i.assets {
+		systems[asset] = held.System
+	}
+	return systems, nil
+}
+
 type intelligence struct {
 	advisories []finding.Advisory
 	before     []Key
+	synced     map[string]time.Time
 }
 
 func (i *intelligence) Read(_ context.Context, ecosystem string, packages []string) (finding.Intelligence, error) {
@@ -114,6 +123,10 @@ func (i *intelligence) Read(_ context.Context, ecosystem string, packages []stri
 
 func (i *intelligence) Before(context.Context, string, string, time.Time, uint32) ([]Key, error) {
 	return i.before, nil
+}
+
+func (i *intelligence) Synced(_ context.Context, _, feed string, _ time.Time) (time.Time, error) {
+	return i.synced[feed], nil
 }
 
 type decisions struct {
@@ -458,6 +471,70 @@ func TestTheMatcherRefusesAnIncompleteComposition(t *testing.T) {
 		breaking(&options)
 		if _, err := NewMatcher(options); err == nil {
 			t.Errorf("%s: the matcher was built", name)
+		}
+	}
+}
+
+func syncRecord(t *testing.T, feed string, synced time.Time, offset int64) Record {
+	t.Helper()
+	value, err := proto.Marshal(&vulnerabilityv1.Record{Record: &vulnerabilityv1.Record_Sync{Sync: &vulnerabilityv1.FeedSync{
+		Source: "osv", Feed: feed, Outcome: vulnerabilityv1.FeedSync_OUTCOME_COMPLETE,
+		CheckedAt: timestamppb.New(synced), SyncedAt: timestamppb.New(synced),
+	}}})
+	if err != nil {
+		t.Fatalf("encode a feed sync record: %v", err)
+	}
+	return Record{Topic: owners.Advisories.Topic, Partition: 0, Offset: offset, Value: value}
+}
+
+func feedWorld(t *testing.T, sync Record, previous time.Time) world {
+	t.Helper()
+	return world{
+		source:    &source{records: []Record{sync}},
+		positions: settledPositions(),
+		inventory: &inventory{assets: map[Asset]finding.Asset{
+			debian:  host(debian, "debian", "12", libssl("3.0.11-1~deb12u2")),
+			another: host(another, "debian", "12.5", libssl("3.0.14-1~deb12u2")),
+			alpine:  host(alpine, "alpine", "3.19.1", &inventoryv1.Package{Name: "libcrypto3", Version: "3.1.4-r5", Manager: "apk", Source: "openssl"}),
+		}},
+		intelligence: &intelligence{advisories: []finding.Advisory{dsa()}, synced: map[string]time.Time{"Debian": previous}},
+		published:    &publisher{},
+	}
+}
+
+// On 2026-11-20 a host stayed unassessed for want of intelligence beside tens
+// of thousands of findings once its feed's first read ended, until it sent its
+// next inventory.
+func TestAFeedThatTurnsFreshAssessesWholeEveryAssetItCovers(t *testing.T) {
+	for name, previous := range map[string]time.Time{
+		"held whole for the first time":           {},
+		"held whole again after a gap gone stale": scanned.Add(-72 * time.Hour),
+	} {
+		w := feedWorld(t, syncRecord(t, "Debian", scanned, 9), previous)
+		if err := matcherOver(t, w).Run(context.Background()); err != nil {
+			t.Fatalf("%s: decide the batch: %v", name, err)
+		}
+		want := map[string]vulnerabilityv1.Assessment_Scope{
+			debian.AgentID:  vulnerabilityv1.Assessment_SCOPE_ASSET,
+			another.AgentID: vulnerabilityv1.Assessment_SCOPE_ASSET,
+		}
+		if scopes := w.published.assessments(); !maps.Equal(scopes, want) {
+			t.Errorf("%s: the feed assessed %v, want every asset it covers whole and none it does not", name, scopes)
+		}
+	}
+}
+
+func TestAFeedThatStaysFreshOrIsStillNotHeldWholeAssessesNothing(t *testing.T) {
+	for name, w := range map[string]world{
+		"synced within the freshness bound": feedWorld(t, syncRecord(t, "Debian", scanned, 9), scanned.Add(-6*time.Hour)),
+		"never held whole yet":              feedWorld(t, syncRecord(t, "Debian", time.Unix(0, 0), 9), time.Time{}),
+		"a feed no asset runs":              feedWorld(t, syncRecord(t, "Ubuntu", scanned, 9), time.Time{}),
+	} {
+		if err := matcherOver(t, w).Run(context.Background()); err != nil {
+			t.Fatalf("%s: decide the batch: %v", name, err)
+		}
+		if len(w.published.records) != 0 || !w.source.committed {
+			t.Errorf("%s: the sync published %d records and advanced: %t", name, len(w.published.records), w.source.committed)
 		}
 	}
 }

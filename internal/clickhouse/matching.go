@@ -175,6 +175,29 @@ func (r *MatchingReader) Holders(ctx context.Context, packages []string) ([]matc
 	return holders, closed(rows)
 }
 
+func (r *MatchingReader) Systems(ctx context.Context) (map[matching.Asset]*inventoryv1.OperatingSystem, error) {
+	var newest []string
+	for _, column := range []string{"os_name", "os_version", "os_build", "os_platform", "os_codename", "os_family"} {
+		newest = append(newest, "argMax("+column+", (last_seen, item_id))")
+	}
+	rows, err := r.connection.Query(ctx, "SELECT tenant_id, agent_id, "+strings.Join(newest, ", ")+
+		" FROM "+inventoryTable+" WHERE kind = ? GROUP BY tenant_id, agent_id", systemKind)
+	if err != nil {
+		return nil, fmt.Errorf("read the systems assets run: %w", err)
+	}
+	systems := map[matching.Asset]*inventoryv1.OperatingSystem{}
+	for rows.Next() {
+		var asset matching.Asset
+		system := &inventoryv1.OperatingSystem{}
+		if err := rows.Scan(&asset.TenantID, &asset.AgentID, &system.Name, &system.Version, &system.Build, &system.Platform, &system.Codename, &system.Family); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("read the system an asset runs: %w", err)
+		}
+		systems[asset] = system
+	}
+	return systems, closed(rows)
+}
+
 // The newest version of every advisory naming one of the packages in the
 // ecosystem, read with the newest rules it was stored under, leaving out one
 // that version withdrew: the definition the vulnerability store states.
@@ -284,6 +307,28 @@ func (r *MatchingReader) freshness(ctx context.Context, intelligence *finding.In
 	}
 	intelligence.AsOf = fetched.UTC()
 	return nil
+}
+
+func (r *MatchingReader) Synced(ctx context.Context, source, feed string, before time.Time) (time.Time, error) {
+	rows, err := r.connection.Query(ctx, "SELECT synced_at FROM "+feedSyncTable+" WHERE source = ? AND feed = ? AND checked_at < "+instantPlaceholder+
+		" ORDER BY checked_at DESC LIMIT 1", source, feed, before.UnixMilli())
+	if err != nil {
+		return time.Time{}, fmt.Errorf("read how fresh %s was: %w", feed, err)
+	}
+	var synced time.Time
+	for rows.Next() {
+		if err := rows.Scan(&synced); err != nil {
+			_ = rows.Close()
+			return time.Time{}, fmt.Errorf("read how fresh %s was: %w", feed, err)
+		}
+	}
+	if err := closed(rows); err != nil {
+		return time.Time{}, fmt.Errorf("read how fresh %s was: %w", feed, err)
+	}
+	if !synced.After(time.Unix(0, 0)) {
+		return time.Time{}, nil
+	}
+	return synced.UTC(), nil
 }
 
 func (r *MatchingReader) Before(ctx context.Context, source, id string, modified time.Time, normalization uint32) ([]matching.Key, error) {

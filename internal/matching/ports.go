@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/finding"
+	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 	vulnerabilityv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/vulnerability/v1"
 )
 
@@ -40,6 +41,7 @@ type Asset struct {
 type Inventory interface {
 	Asset(ctx context.Context, asset Asset) (finding.Asset, bool, error)
 	Holders(ctx context.Context, packages []string) ([]Asset, error)
+	Systems(ctx context.Context) (map[Asset]*inventoryv1.OperatingSystem, error)
 }
 
 type Key struct {
@@ -50,6 +52,7 @@ type Key struct {
 type Intelligence interface {
 	Read(ctx context.Context, ecosystem string, packages []string) (finding.Intelligence, error)
 	Before(ctx context.Context, source, id string, modified time.Time, normalization uint32) ([]Key, error)
+	Synced(ctx context.Context, source, feed string, before time.Time) (time.Time, error)
 }
 
 type Findings interface {

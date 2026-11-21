@@ -311,3 +311,55 @@ func firstName(decided map[finding.Name]*vulnerabilityv1.Finding) finding.Name {
 	}
 	return finding.Name{}
 }
+
+func TestTheMatcherReadsWhatEachAssetRunsAndHowFreshAFeedWasBeforeASync(t *testing.T) {
+	address := storeAddress(t)
+	store := migratedInventoryStore(t, address)
+	advisories := migratedAdvisoryStore(t, address)
+	reader := matchingReaderOf(t, address)
+	owner, agentID := tenant(t), agentIdentifier(t)
+
+	first := time.Date(2026, time.November, 1, 6, 0, 0, 0, time.UTC)
+	foldRecord(t, store, owner, systemScan(agentID, first))
+	upgraded := systemScan(agentID, first.Add(24*time.Hour))
+	upgraded.RecordId = "inv-system-02"
+	upgraded.GetItems()[0].GetOperatingSystem().Version = "9.5"
+	foldRecord(t, store, owner, upgraded)
+
+	feed := "feed-" + owned(t)
+	attempt := func(checked, synced time.Time, outcome vulnerabilityv1.FeedSync_Outcome) *vulnerabilityv1.Record {
+		return &vulnerabilityv1.Record{Record: &vulnerabilityv1.Record_Sync{Sync: &vulnerabilityv1.FeedSync{
+			Source: "osv", Feed: feed, CheckedAt: timestamppb.New(checked), Outcome: outcome, SyncedAt: timestamppb.New(synced),
+		}}}
+	}
+	partial, complete, failed := first.Add(time.Hour), first.Add(2*time.Hour), first.Add(3*time.Hour)
+	hold(t, advisories,
+		attempt(partial, time.Unix(0, 0), vulnerabilityv1.FeedSync_OUTCOME_PARTIAL),
+		attempt(complete, complete, vulnerabilityv1.FeedSync_OUTCOME_COMPLETE),
+		attempt(failed, complete, vulnerabilityv1.FeedSync_OUTCOME_FAILED))
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	systems, err := reader.Systems(ctx)
+	if err != nil {
+		t.Fatalf("read what the assets run: %v", err)
+	}
+	if system := systems[matching.Asset{TenantID: owner, AgentID: agentID}]; system.GetPlatform() != "almalinux" || system.GetVersion() != "9.5" {
+		t.Errorf("the asset runs %v, and its newest scan named AlmaLinux 9.5", system)
+	}
+
+	for name, asked := range map[string]struct {
+		before time.Time
+		synced time.Time
+	}{
+		"after a failed attempt":         {failed.Add(time.Minute), complete},
+		"before the failed attempt":      {failed, complete},
+		"before the first complete sync": {complete, time.Time{}},
+		"before any attempt":             {partial, time.Time{}},
+	} {
+		synced, err := reader.Synced(ctx, "osv", feed, asked.before)
+		if err != nil || !synced.Equal(asked.synced) {
+			t.Errorf("%s the feed was synced at %s (%v), want %s", name, synced, err, asked.synced)
+		}
+	}
+}

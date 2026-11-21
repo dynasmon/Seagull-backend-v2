@@ -155,6 +155,12 @@ func controlAPI(ctx context.Context) error {
 	}
 	defer func() { _ = postures.Close() }()
 
+	found, err := clickhouse.NewAgentFindingStore(settings.telemetry)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = found.Close() }()
+
 	announcer, err := control.NewAnnouncer(control.AnnouncerOptions{
 		Agents:     raised.Agents(),
 		Admissions: admissions,
@@ -206,6 +212,7 @@ func controlAPI(ctx context.Context) error {
 		Liveness:        seen,
 		Reports:         seen,
 		Postures:        postures,
+		Findings:        found,
 		Authority:       authority,
 		TrustBundle:     bundle,
 		CertificateLife: settings.certificateLife,
@@ -281,6 +288,7 @@ func controlAPI(ctx context.Context) error {
 	fleet, err := control.NewFleetReader(control.FleetReaderOptions{
 		Registry: raised.Agents(),
 		Reports:  seen,
+		Findings: found,
 		Metrics:  instruments,
 		Logger:   platform.Logger(),
 		Every:    settings.fleetEvery,

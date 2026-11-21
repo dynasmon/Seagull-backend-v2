@@ -19,7 +19,7 @@ TEST_ALERT_STORE ?= 127.0.0.1:15432
 .PHONY: help fmt fmt-check vet mod-check lint test test-race test-integration \
         test-load test-alerts record-agent-answers record-starting-rules bench build images scan-images \
         scan-infrastructure vulncheck gosec verify-tag check-protection dev-pki rotate-dev-pki up \
-        down logs clean verify
+        upgrade-backbone down logs clean verify
 
 help:
 	@echo "fmt                 format the module"
@@ -42,6 +42,7 @@ help:
 	@echo "dev-pki             mint development certificates into $(PKI), keeping what still serves"
 	@echo "rotate-dev-pki      mint new development authorities, which every enrolled agent stops trusting"
 	@echo "up                  start the local stack"
+	@echo "upgrade-backbone    stop the local stack and walk its backbone volume up every Redpanda release it missed"
 	@echo "down                stop the local stack and drop its volumes"
 	@echo "vulncheck           refuse a known vulnerability in any package this module links"
 	@echo "gosec               refuse what the static security rules find"
@@ -170,6 +171,10 @@ rotate-dev-pki:
 
 up: dev-pki
 	SEAGULL_RUNTIME_USER="$$(id -u):$$(id -g)" $(COMPOSE) up -d --build
+
+upgrade-backbone:
+	$(COMPOSE) stop
+	deploy/upgrade-backbone.sh
 
 down:
 	$(COMPOSE) down --volumes --remove-orphans

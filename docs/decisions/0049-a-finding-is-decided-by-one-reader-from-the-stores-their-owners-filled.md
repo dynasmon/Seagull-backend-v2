@@ -4,6 +4,11 @@
 > what people decide about a vulnerability is kept by `control-api` in
 > PostgreSQL beside the findings, and nothing that decides or keeps a finding
 > reads it.
+>
+> Amended by [ADR 55](0055-an-asset-is-assessed-again-when-its-feed-turns-fresh.md):
+> a feed sync that makes a feed fresh, at the end of its first read or of a gap
+> longer than the freshness bound, assesses whole every asset the feed covers,
+> so the recovery this record left to each asset's next inventory happens at once.
 
 ## Context
 

@@ -101,6 +101,7 @@ services:
       args:
         COMPONENT: backbone-migrator
         VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
     depends_on:
       redpanda:
         condition: service_healthy
@@ -140,6 +141,7 @@ services:
       args:
         COMPONENT: store-migrator
         VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
     depends_on:
       clickhouse:
         condition: service_healthy
@@ -181,6 +183,7 @@ services:
       args:
         COMPONENT: control-migrator
         VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
     depends_on:
       postgres:
         condition: service_healthy
@@ -200,6 +203,7 @@ services:
       args:
         COMPONENT: analysis-engine
         VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
     depends_on:
       backbone-migrator:
         condition: service_completed_successfully
@@ -226,6 +230,7 @@ services:
       args:
         COMPONENT: event-writer
         VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
     depends_on:
       backbone-migrator:
         condition: service_completed_successfully
@@ -251,6 +256,7 @@ services:
       args:
         COMPONENT: detection-writer
         VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
     depends_on:
       backbone-migrator:
         condition: service_completed_successfully
@@ -279,6 +285,7 @@ services:
       args:
         COMPONENT: inventory-projector
         VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
     depends_on:
       backbone-migrator:
         condition: service_completed_successfully
@@ -309,6 +316,7 @@ services:
       args:
         COMPONENT: vulnerability-matcher
         VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
     depends_on:
       backbone-migrator:
         condition: service_completed_successfully
@@ -337,6 +345,7 @@ services:
       args:
         COMPONENT: finding-writer
         VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
     depends_on:
       backbone-migrator:
         condition: service_completed_successfully
@@ -365,6 +374,7 @@ services:
       args:
         COMPONENT: status-projector
         VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
     depends_on:
       backbone-migrator:
         condition: service_completed_successfully
@@ -393,6 +403,7 @@ services:
       args:
         COMPONENT: assessment-projector
         VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
     depends_on:
       backbone-migrator:
         condition: service_completed_successfully
@@ -421,6 +432,7 @@ services:
       args:
         COMPONENT: advisory-importer
         VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
     depends_on:
       backbone-migrator:
         condition: service_completed_successfully
@@ -445,6 +457,7 @@ services:
       args:
         COMPONENT: advisory-writer
         VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
     depends_on:
       backbone-migrator:
         condition: service_completed_successfully
@@ -473,6 +486,7 @@ services:
       args:
         COMPONENT: alert-writer
         VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
     depends_on:
       backbone-migrator:
         condition: service_completed_successfully
@@ -497,6 +511,7 @@ services:
       args:
         COMPONENT: ingest-gateway
         VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
     depends_on:
       backbone-migrator:
         condition: service_completed_successfully
@@ -526,6 +541,7 @@ services:
       args:
         COMPONENT: control-api
         VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
     depends_on:
       backbone-migrator:
         condition: service_completed_successfully
@@ -588,6 +604,7 @@ services:
       args:
         COMPONENT: query-api
         VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
     depends_on:
       store-migrator:
         condition: service_completed_successfully

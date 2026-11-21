@@ -194,6 +194,24 @@ type harness struct {
 	backbone *backbone
 	clock    *clock
 	registry *metrics.Registry
+	logs     *logs
+}
+
+type logs struct {
+	mu      sync.Mutex
+	written strings.Builder
+}
+
+func (l *logs) Write(line []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.written.Write(line)
+}
+
+func (l *logs) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.written.String()
 }
 
 func build(t *testing.T, past history, feeds ...string) harness {
@@ -201,7 +219,7 @@ func build(t *testing.T, past history, feeds ...string) harness {
 	if len(feeds) == 0 {
 		feeds = []string{"Debian"}
 	}
-	built := harness{origin: newOrigin(), backbone: &backbone{}, clock: &clock{now: started}, registry: metrics.New(t.Name())}
+	built := harness{origin: newOrigin(), backbone: &backbone{}, clock: &clock{now: started}, registry: metrics.New(t.Name()), logs: &logs{}}
 	importer, err := advisoryfeed.NewImporter(advisoryfeed.Options{
 		Source:        osv.Source,
 		Feeds:         feeds,
@@ -211,7 +229,7 @@ func build(t *testing.T, past history, feeds ...string) harness {
 		Log:           built.backbone,
 		History:       past,
 		Metrics:       advisoryfeed.NewMetrics(built.registry),
-		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:        slog.New(slog.NewTextHandler(built.logs, nil)),
 		Interval:      time.Hour,
 		RetryDelay:    time.Millisecond,
 		Backoff:       time.Millisecond,
@@ -278,6 +296,30 @@ func TestAFeedIsReadIntoAdvisoriesThatSayWhereAndWhenTheyWereRead(t *testing.T) 
 	}
 	if exposed(t, h.registry, `seagull_advisoryfeed_synced_timestamp_seconds{feed="Debian"}`) != float64(started.Unix()) {
 		t.Error("the freshness of the feed is not exposed")
+	}
+}
+
+// The first read of a feed is its whole index: Ubuntu's 74,862 records took 48
+// minutes on 2026-11-20, and nothing was said before the end.
+func TestALongReadSaysHowFarItGotAndWhatIsStillOwed(t *testing.T) {
+	h := build(t, nil)
+	listed := map[string]time.Time{}
+	for index := range 2500 {
+		id := fmt.Sprintf("DSA-%05d-1", index)
+		listed[id] = started.Add(-time.Hour)
+		h.origin.serve("Debian", id, record(id, started.Add(-time.Hour), "1.6.39-2+deb12u4"))
+	}
+	h.origin.list("Debian", `"generation-1"`, listed)
+
+	if sync, _ := h.sync(t, "Debian"); sync.GetOutcome() != vulnerabilityv1.FeedSync_OUTCOME_COMPLETE || sync.GetPublished() != 2500 {
+		t.Fatalf("the read ended as %v", sync)
+	}
+	said := h.logs.String()
+	if strings.Count(said, "msg=advisory_feed_reading") != 2 || !strings.Contains(said, "feed=Debian read=2000 owed=2500") {
+		t.Errorf("a read of 2500 records did not say how far it got every 1000:\n%s", said)
+	}
+	if owed := exposed(t, h.registry, `seagull_advisoryfeed_owed_advisories{feed="Debian"}`); owed != 0 {
+		t.Errorf("%v records are owed once the attempt is over", owed)
 	}
 }
 

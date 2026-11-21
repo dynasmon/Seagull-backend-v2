@@ -188,6 +188,7 @@ func TestStaleIntelligenceRaisesWhatItFindsAndClosesNothing(t *testing.T) {
 func TestAnAssetThePlatformCannotPlaceIsAssessedAsSuchAndItsFindingsStand(t *testing.T) {
 	never := intelligenceOf(fixedIn("DSA-5764-1", "3.0.14-1~deb12u2", "CVE-2024-6119"))
 	never.Feed.SyncedAt = time.Time{}
+	unread := Intelligence{Feed: Feed{Name: "Debian"}, AsOf: time.Unix(0, 0).UTC()}
 	for _, case_ := range []struct {
 		name         string
 		system       *inventoryv1.OperatingSystem
@@ -198,6 +199,7 @@ func TestAnAssetThePlatformCannotPlaceIsAssessedAsSuchAndItsFindingsStand(t *tes
 		{"a distribution no feed is read for", &inventoryv1.OperatingSystem{Platform: "arch"}, intelligenceOf(), vulnerabilityv1.Unassessable_UNASSESSABLE_UNKNOWN_DISTRIBUTION},
 		{"a release advisories are not scoped to", &inventoryv1.OperatingSystem{Platform: "debian", Codename: "sid"}, intelligenceOf(), vulnerabilityv1.Unassessable_UNASSESSABLE_UNKNOWN_RELEASE},
 		{"a feed never read whole", &inventoryv1.OperatingSystem{Platform: "debian", Version: "12"}, never, vulnerabilityv1.Unassessable_UNASSESSABLE_STALE_INTELLIGENCE},
+		{"a feed the platform does not follow", &inventoryv1.OperatingSystem{Platform: "debian", Version: "12"}, unread, vulnerabilityv1.Unassessable_UNASSESSABLE_UNKNOWN_DISTRIBUTION},
 	} {
 		asset := debianHost(held("libssl3", "3.0.11-1~deb12u2", "openssl"))
 		asset.System = case_.system

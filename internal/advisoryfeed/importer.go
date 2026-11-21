@@ -20,6 +20,8 @@ import (
 	vulnerabilityv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/vulnerability/v1"
 )
 
+const progressEvery = 1000
+
 type Options struct {
 	Source        string
 	Feeds         []string
@@ -388,7 +390,16 @@ func (i *Importer) read(ctx context.Context, feed string, state *follow, owed []
 		batch = nil
 	}
 	counts := map[string]int{}
+	done := 0
+	i.metrics.owing(feed, len(owed))
+	defer i.metrics.owing(feed, 0)
 	for outcome := range settled {
+		done++
+		i.metrics.owing(feed, len(owed)-done)
+		if done%progressEvery == 0 {
+			i.logger.Info("advisory_feed_reading", slog.String("feed", feed), slog.Int("read", done), slog.Int("owed", len(owed)),
+				slog.Int("published", int(report.GetPublished())), slog.Int("refused", int(report.GetRefused())))
+		}
 		switch {
 		case outcome.owed != nil:
 			if stranded == nil {

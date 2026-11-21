@@ -48,6 +48,10 @@ type configuration struct {
 	rolloutEvery         time.Duration
 	fleetEvery           time.Duration
 
+	descriptionsPerSecond float64
+	descriptionBurst      int
+	trackedDescribed      int
+
 	brokers      []string
 	topology     broker.Topology
 	security     broker.Security
@@ -108,6 +112,8 @@ func load(parser *config.Parser) (configuration, error) {
 		trackedUpdateAgents: parser.Int("SEAGULL_CONTROL_API_TRACKED_UPDATE_AGENTS", 8192, 1, 1_000_000),
 		rolloutEvery:        parser.Duration("SEAGULL_CONTROL_API_AGENT_ROLLOUT_INTERVAL", 30*time.Second, 5*time.Second, 10*time.Minute),
 		fleetEvery:          parser.Duration("SEAGULL_CONTROL_API_FLEET_INTERVAL", 30*time.Second, 5*time.Second, 10*time.Minute),
+		descriptionBurst:    parser.Int("SEAGULL_CONTROL_API_AGENT_DESCRIPTOR_BURST", 4, 1, 1_000),
+		trackedDescribed:    parser.Int("SEAGULL_CONTROL_API_TRACKED_DESCRIBED_AGENTS", 8192, 1, 1_000_000),
 
 		brokers:      parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
 		topology:     broker.LoadTopology(parser),
@@ -146,6 +152,8 @@ func load(parser *config.Parser) (configuration, error) {
 	loaded.policyPullsPerSecond = 1 / parser.Duration("SEAGULL_CONTROL_API_AGENT_POLICY_INTERVAL",
 		30*time.Second, time.Second, 24*time.Hour).Seconds()
 	loaded.updatePullsPerSecond = 1 / parser.Duration("SEAGULL_CONTROL_API_AGENT_UPDATE_INTERVAL",
+		30*time.Second, time.Second, 24*time.Hour).Seconds()
+	loaded.descriptionsPerSecond = 1 / parser.Duration("SEAGULL_CONTROL_API_AGENT_DESCRIPTOR_INTERVAL",
 		30*time.Second, time.Second, 24*time.Hour).Seconds()
 
 	if err := parser.Err(); err != nil {

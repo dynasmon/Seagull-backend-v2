@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -254,5 +255,44 @@ func TestEveryProcessOfTheStackComesBackAfterTheHostRestarts(t *testing.T) {
 		if service.Restart != wanted {
 			t.Errorf("%s restarts %q, and it has to restart %q", name, service.Restart, wanted)
 		}
+	}
+}
+
+// Redpanda runs on data written by its own feature release or the one before
+// it, so the backbone image moves one logical version at a time: on 2026-11-02
+// it moved six, and every development volume older than that stopped starting.
+func TestTheBackboneMovesOneLogicalVersionAtATime(t *testing.T) {
+	var compose struct {
+		Services map[string]struct {
+			Image string `yaml:"image"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(read(t, "deploy", "compose.yaml"), &compose); err != nil {
+		t.Fatalf("compose.yaml: %v", err)
+	}
+	var images []string
+	var versions []int
+	for line := range strings.Lines(string(read(t, "deploy", "redpanda-upgrade-path"))) {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || strings.HasPrefix(fields[0], "#") {
+			continue
+		}
+		version, err := strconv.Atoi(fields[len(fields)-1])
+		if len(fields) != 2 || err != nil {
+			t.Fatalf("%q is not an image and the logical version it runs", strings.TrimSpace(line))
+		}
+		if !imageByDigest.MatchString(fields[0]) {
+			t.Errorf("%s is named by a tag, which a registry can move: name it by its digest", fields[0])
+		}
+		if len(versions) > 0 && version != versions[len(versions)-1]+1 {
+			t.Errorf("%s runs logical version %d after %d, and a release reads data at most one behind it", fields[0], version, versions[len(versions)-1])
+		}
+		images, versions = append(images, fields[0]), append(versions, version)
+	}
+	if len(images) < 2 {
+		t.Fatalf("the upgrade path holds %d releases, and the backbone has run more than one", len(images))
+	}
+	if running := compose.Services["redpanda"].Image; running != images[len(images)-1] {
+		t.Errorf("deploy/compose.yaml runs %s, and the upgrade path ends at %s", running, images[len(images)-1])
 	}
 }

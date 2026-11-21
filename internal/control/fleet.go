@@ -28,6 +28,13 @@ type Heard interface {
 	Heard(ctx context.Context, agents, tenants []string) (map[string]agentstatus.Heard, error)
 }
 
+// How many findings about agents are open, by kind, across every tenant. Only a
+// count: which agents they are about is read through the findings themselves,
+// within the tenants a caller holds.
+type OpenFindings interface {
+	CountOpen(ctx context.Context) (map[string]int, error)
+}
+
 // How many agents of the fleet are in each liveness, judged at one instant the
 // way a listing judges each agent it shows, so the count is what an operator
 // reading the whole fleet would have read then. It decides nothing about any
@@ -35,6 +42,7 @@ type Heard interface {
 type FleetReader struct {
 	registry Admitted
 	reports  Heard
+	findings OpenFindings
 	metrics  *Metrics
 	logger   *slog.Logger
 	every    time.Duration
@@ -44,6 +52,7 @@ type FleetReader struct {
 type FleetReaderOptions struct {
 	Registry Admitted
 	Reports  Heard
+	Findings OpenFindings
 	Metrics  *Metrics
 	Logger   *slog.Logger
 	Every    time.Duration
@@ -69,6 +78,7 @@ func NewFleetReader(options FleetReaderOptions) (*FleetReader, error) {
 	return &FleetReader{
 		registry: options.Registry,
 		reports:  options.Reports,
+		findings: options.Findings,
 		metrics:  options.Metrics,
 		logger:   options.Logger,
 		every:    options.Every,
@@ -98,6 +108,10 @@ func (r *FleetReader) Sweep(ctx context.Context) {
 	defer cancel()
 
 	counted, err := r.count(reading, r.now())
+	var open map[string]int
+	if err == nil && r.findings != nil {
+		open, err = r.findings.CountOpen(reading)
+	}
 	switch {
 	case err != nil && ctx.Err() != nil:
 		return
@@ -107,6 +121,9 @@ func (r *FleetReader) Sweep(ctx context.Context) {
 		return
 	}
 	r.metrics.fleetCounted(counted)
+	if r.findings != nil {
+		r.metrics.fleetFindingsCounted(open)
+	}
 	r.metrics.fleetRead("read")
 }
 

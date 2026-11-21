@@ -2,17 +2,23 @@ package control_test
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentpolicy"
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentupdate"
 	"github.com/dynasmon/Seagull-backend-v2/internal/control"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/httpx"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
+	"github.com/dynasmon/Seagull-backend-v2/internal/platform/ratelimit"
 	"github.com/dynasmon/Seagull-backend-v2/internal/protocol"
+	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 	platformv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/platform/v1"
 )
 
@@ -123,4 +129,31 @@ func TestTheAgentListenerDescribesItselfOnlyToAnAgentItCanName(t *testing.T) {
 	if other := describedTo(t, updating, "web-01").Header().Get("ETag"); other == tag {
 		t.Fatal("a plane that hands out updates tags its descriptor as one that does not")
 	}
+}
+
+// INT-04 of the 2026-11-09 integration audit: the descriptor answered any
+// certificate the agent authority signed, registered or not, without a limiter.
+func TestTheAgentListenerDescribesItselfOnlyToAnAgentTheRegistryAdmits(t *testing.T) {
+	held := newStubAgents()
+	handler := renewals(t, held, nil)
+	refusedWith(t, describedTo(t, handler, "web-02"), http.StatusNotFound, control.CodeUnknownAgent)
+	held.held["web-01"].State = agentv1.State_STATE_REVOKED
+	refusedWith(t, describedTo(t, handler, "web-01"), http.StatusForbidden, control.CodeNotAdmitted)
+	held.unreached = errors.New("the registry is away")
+	refusedWith(t, describedTo(t, handler, "web-01"), http.StatusServiceUnavailable, control.CodeAgentsUnavailable)
+
+	signing, bundle := testAuthority(t)
+	limited, err := control.NewRenewalHandler(control.ServerOptions{
+		Agents: newStubAgents(), Policies: newStubPolicies(newStubAgents()), Authority: signing, TrustBundle: bundle,
+		CertificateLife: 24 * time.Hour, DescriptorLimiter: ratelimit.NewLimiter(1.0/3600, 1, 16),
+		Metrics: control.NewMetrics(metrics.New("control-api-descriptor-test")), Logger: slog.New(slog.DiscardHandler),
+		Instrumentation: httpx.NewInstrumentation(metrics.New("control-api-descriptor-routes")),
+	})
+	if err != nil {
+		t.Fatalf("build the agent listener: %v", err)
+	}
+	if first := describedTo(t, limited, "web-01"); first.Code != http.StatusOK {
+		t.Fatalf("the first request for the descriptor was answered %d", first.Code)
+	}
+	refusedWith(t, describedTo(t, limited, "web-01"), http.StatusTooManyRequests, control.CodeRateLimited)
 }

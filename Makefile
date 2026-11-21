@@ -172,7 +172,7 @@ rotate-dev-pki:
 
 up: dev-pki
 	@mkdir -p .local/signing
-	SEAGULL_RUNTIME_USER="$$(id -u):$$(id -g)" $(COMPOSE) up -d --build
+	SEAGULL_REVISION=$(REVISION) SEAGULL_RUNTIME_USER="$$(id -u):$$(id -g)" $(COMPOSE) up -d --build
 
 upgrade-backbone:
 	$(COMPOSE) stop

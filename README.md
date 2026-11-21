@@ -409,6 +409,14 @@ at, and a report is still judged against the interval it announces; every thirty
 seconds `control-api` counts the agents the registry admits by liveness, into one
 series per liveness, never one per agent
 ([ADR 54](docs/decisions/0054-a-gateway-asks-how-often-to-report-and-the-fleet-is-counted-as-it-is-read.md)).
+What the platform finds about an agent from how it reports is a record of its
+own, decided by `fleet-judge` while every gateway says on `security.gateways`
+whether it admits, and kept by `agent-finding-writer` in `agent_findings`: reading one agent carries
+its open findings, `POST /v1/agents/findings/search` lists them within the
+tenants a caller holds, and the open findings are counted by kind beside the
+fleet. A finding changes nothing by itself; no agent is disabled, revoked or
+refused for one
+([ADR 56](docs/decisions/0056-a-finding-about-an-agent-is-a-record-of-its-own-judged-only-while-the-platform-listens.md)).
 
 What an agent found when it ran the checks of its policy travels on a fourth,
 and every assessment is kept, because the ones before the newest are what a
@@ -487,6 +495,8 @@ Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 | `alert-writer` | Opens the work a detection at or above a severity floor becomes: an alert for a finding about one event, folded on a declared key, or an incident for a story several events told. It inserts and never updates. |
 | `inventory-projector` | Folds what a collector saw into what an asset currently has, under a group and a quarantine of its own. An item the newest full scan stops naming is no longer current, and nothing is deleted to say so. |
 | `status-projector` | Keeps the newest report each agent sent of itself, one row per agent, under a group and a quarantine of its own, so a status store outage costs how fresh liveness is and never telemetry. |
+| `fleet-judge` | Decides what agents' reports, and their absence, say about them: an agent the registry admits that stopped reporting is a silence, judged only while the judge confirmed it reads the end of the status log and a gateway said it admits, so an outage of the backbone, the gateways or the judge never reads as a silent fleet. It reads its logs whole and writes nothing but decisions. |
+| `agent-finding-writer` | Keeps what the platform found about its agents — a silence, an installation or an identity reporting from two places, a replaced certificate in use — one row per finding as its newest decision, under a group and a quarantine of its own, so a store outage costs how current the findings are and never a decision. |
 | `assessment-projector` | Keeps every assessment agents made of their hosts, one row per assessment, under a group and a quarantine of its own, so an assessment store outage costs how fresh a posture is and never telemetry. |
 | `advisory-importer` | Follows the vulnerability feeds a deployment names, translates each changed record into an advisory carrying its provenance, and publishes it with the freshness of the feed. The one process that reaches the internet; it holds no store and names no asset. |
 | `advisory-writer` | Keeps every version of every advisory and every attempt to follow a feed, under a group and a quarantine of its own. |

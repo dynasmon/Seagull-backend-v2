@@ -296,3 +296,28 @@ func TestTheBackboneMovesOneLogicalVersionAtATime(t *testing.T) {
 		t.Errorf("deploy/compose.yaml runs %s, and the upgrade path ends at %s", running, images[len(images)-1])
 	}
 }
+
+func TestTheDevelopmentStackForwardsWhatTheFleetIsRunWith(t *testing.T) {
+	var compose struct {
+		Services map[string]struct {
+			Environment map[string]string `yaml:"environment"`
+			Volumes     []string          `yaml:"volumes"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(read(t, "deploy", "compose.yaml"), &compose); err != nil {
+		t.Fatalf("compose.yaml: %v", err)
+	}
+	for service, settings := range map[string][]string{
+		"ingest-gateway": {"SEAGULL_GATEWAY_STATUS_INTERVAL"},
+		"control-api":    {"SEAGULL_CONTROL_API_AGENT_POLICY_SIGNERS", "SEAGULL_CONTROL_API_AGENT_UPDATE_ROOT", "SEAGULL_CONTROL_API_FLEET_INTERVAL"},
+	} {
+		for _, setting := range settings {
+			if forwarded := compose.Services[service].Environment[setting]; forwarded != "${"+setting+":-}" {
+				t.Errorf("%s is given %s as %q, so make up cannot set it", service, setting, forwarded)
+			}
+		}
+	}
+	if !slices.Contains(compose.Services["control-api"].Volumes, "../.local/signing:/run/signing:ro") {
+		t.Error("control-api mounts nothing a policy signer or an update root can be read from")
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
+	"github.com/dynasmon/Seagull-backend-v2/internal/listening"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/service"
 )
@@ -50,6 +51,7 @@ type configuration struct {
 	rosterRecords int
 	rosterCheck   time.Duration
 	rosterStale   time.Duration
+	beaconEvery   time.Duration
 }
 
 func load(parser *config.Parser) (configuration, error) {
@@ -83,6 +85,7 @@ func load(parser *config.Parser) (configuration, error) {
 		rosterRecords: parser.Int("SEAGULL_GATEWAY_ROSTER_RECORDS", 500, 1, 100_000),
 		rosterCheck:   parser.Duration("SEAGULL_GATEWAY_ROSTER_CHECK_INTERVAL", 5*time.Second, time.Second, time.Minute),
 		rosterStale:   parser.Duration("SEAGULL_GATEWAY_ROSTER_STALE_AFTER", 30*time.Second, 2*time.Second, 10*time.Minute),
+		beaconEvery:   parser.Duration("SEAGULL_GATEWAY_BEACON_INTERVAL", 5*time.Second, listening.MinEvery, listening.MaxEvery),
 	}
 
 	rate, limited := parser.Limit(rateSetting, 200, 1, 1_000_000)

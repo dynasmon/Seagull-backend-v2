@@ -393,6 +393,28 @@ services:
     restart: unless-stopped
     <<: *hardening
 
+  # Decides what agents' reports, and their absence, say about them. It reads
+  # its logs whole and writes nothing but decisions, so an outage of it costs how
+  # current findings are and never anything an agent sends.
+  fleet-judge:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        COMPONENT: fleet-judge
+        VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
+    depends_on:
+      backbone-migrator:
+        condition: service_completed_successfully
+    networks: [backbone]
+    environment:
+      <<: *backbone
+      SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
+      SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    restart: unless-stopped
+    <<: *hardening
+
   # Keeps what the platform found about its agents, under a group and a
   # quarantine of its own: a store outage costs how current the findings an
   # operator reads are, and never a decision about an agent.

@@ -92,12 +92,25 @@ func gateway(ctx context.Context) error {
 	}
 	defer findings.Close()
 
+	beacons, err := broker.NewBeacons(broker.Config{
+		Brokers:         settings.brokers,
+		Topic:           settings.topology.Gateways.Name,
+		MaxMessageBytes: settings.topology.Gateways.MaxMessageBytes,
+		ClientID:        settings.admissionRules.Gateway,
+		Security:        settings.security,
+	})
+	if err != nil {
+		return err
+	}
+	defer beacons.Close()
+
 	// The topology is applied by backbone-migrator, never here. This only refuses
 	// to serve agents when a topic it would publish to is missing or reshaped.
 	topologyCtx, cancel := context.WithTimeout(ctx, settings.publishTimeout)
 	defer cancel()
 	drift, err := publisher.VerifyTopics(topologyCtx,
-		settings.topology.Events, settings.topology.Inventory, settings.topology.Status, settings.topology.Assessments)
+		settings.topology.Events, settings.topology.Inventory, settings.topology.Status, settings.topology.Assessments,
+		settings.topology.Gateways)
 	if err != nil {
 		return err
 	}
@@ -155,9 +168,22 @@ func gateway(ctx context.Context) error {
 	platform.Health().Register("inventory-backbone", assets.Ping)
 	platform.Health().Register("status-backbone", reports.Ping)
 	platform.Health().Register("assessment-backbone", findings.Ping)
+	beacon, err := ingest.NewBeacon(ingest.BeaconOptions{
+		Gateway:  settings.admissionRules.Gateway,
+		Every:    settings.beaconEvery,
+		Current:  currency,
+		Beacons:  beacons,
+		Registry: platform.Metrics(),
+		Logger:   platform.Logger(),
+	})
+	if err != nil {
+		return err
+	}
+
 	platform.Add(admitted.follower(platform.Logger()))
 	platform.Add(currency)
 	platform.Add(listener)
+	platform.Add(beacon)
 
 	return platform.Run(ctx)
 }

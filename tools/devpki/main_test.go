@@ -14,7 +14,7 @@ func minted(t *testing.T) string {
 
 	directory := t.TempDir()
 	if err := generate(directory, "dev-agent-01", "dev-analyst", "dev-tenant-admin", "dev-admin",
-		[]string{"default"}, []string{"localhost", "127.0.0.1"}, time.Hour); err != nil {
+		[]string{"default"}, []string{"localhost", "127.0.0.1"}, time.Hour, false, time.Now()); err != nil {
 		t.Fatalf("mint the development material: %v", err)
 	}
 	return directory

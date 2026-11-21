@@ -114,7 +114,7 @@ func TestTheAgentListenerDescribesItselfOnlyToAnAgentItCanName(t *testing.T) {
 	if first.Code != http.StatusOK || tag == "" {
 		t.Fatalf("the descriptor was answered %d with the tag %q", first.Code, tag)
 	}
-	if again := describedTo(t, handler, "web-02", tag); again.Code != http.StatusNotModified || again.Body.Len() != 0 || again.Header().Get("ETag") != tag {
+	if again := describedTo(t, handler, "web-01", tag); again.Code != http.StatusNotModified || again.Body.Len() != 0 || again.Header().Get("ETag") != tag {
 		t.Fatalf("asked again with its tag, the descriptor was answered %d with %d bytes", again.Code, again.Body.Len())
 	}
 

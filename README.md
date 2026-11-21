@@ -666,6 +666,20 @@ withdraw it:
 go run ./tools/devprobe -dispositions https://127.0.0.1:8445
 ```
 
+Agent policies, the checks they carry and agent updates are signed off the
+platform, so the development stack runs without them until it is given what
+verifies them. That goes in `.local/signing`, which `make up` mounts at
+`/run/signing` in `control-api`, and is named there; the signing key itself stays
+off the machine the platform runs on. `SEAGULL_GATEWAY_STATUS_INTERVAL` and
+`SEAGULL_CONTROL_API_FLEET_INTERVAL` reach the gateway and `control-api` the same
+way:
+
+```bash
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out ~/policy-signer.pem
+openssl pkey -in ~/policy-signer.pem -pubout -out .local/signing/policy-signers.pem
+SEAGULL_CONTROL_API_AGENT_POLICY_SIGNERS=/run/signing/policy-signers.pem make up
+```
+
 Stop everything and drop its state with `make down`. If a port is taken, publish
 elsewhere with `SEAGULL_GATEWAY_PUBLISH`, `SEAGULL_QUERY_API_PUBLISH`,
 `SEAGULL_CONTROL_API_PUBLISH` or `SEAGULL_CONTROL_API_RENEWAL_PUBLISH`.

@@ -322,6 +322,28 @@ func TestTheDevelopmentStackForwardsWhatTheFleetIsRunWith(t *testing.T) {
 	}
 }
 
+// A store's image answers its own loopback while it initialises the data
+// directory and only then the address its dependents dial, so a healthcheck of
+// the loopback let store-migrator dial a store that refused it (INT-01).
+func TestAStoreIsHealthyOnlyAtTheAddressItsDependentsDial(t *testing.T) {
+	var compose struct {
+		Services map[string]struct {
+			Healthcheck struct {
+				Test []string `yaml:"test"`
+			} `yaml:"healthcheck"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(read(t, "deploy", "compose.yaml"), &compose); err != nil {
+		t.Fatalf("compose.yaml: %v", err)
+	}
+	for _, store := range []string{"clickhouse", "postgres"} {
+		probe := strings.Join(compose.Services[store].Healthcheck.Test, " ")
+		if !strings.Contains(probe, "$(hostname)") || strings.Contains(probe, "127.0.0.1") {
+			t.Errorf("%s is judged healthy by %q, which is not the address its dependents dial", store, probe)
+		}
+	}
+}
+
 func TestEveryImageTheDevelopmentStackBuildsKnowsItsRevision(t *testing.T) {
 	var compose struct {
 		Services map[string]struct {

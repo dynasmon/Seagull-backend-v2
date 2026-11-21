@@ -1,0 +1,11 @@
+# Every Redpanda release a development backbone volume may have been written by, oldest
+# first, with the logical version it runs its data at: a release starts only on data
+# one logical version behind it or at it. The last line is the image deploy/compose.yaml
+# runs; raising it adds a line here, and make upgrade-backbone walks a volume up them.
+redpandadata/redpanda:v24.2.20@sha256:f8700de71e9d9d2a0e014ceda2ad16a89d29b2ac0715f541af2ca57cbda6819a 13
+redpandadata/redpanda:v24.3.18@sha256:5c6bdbaf30c97de1ebc2ad417b7d02e0bdb5bf88e243bd3079d74bfde9c7754f 14
+redpandadata/redpanda:v25.1.12@sha256:840030ecf6194070bf5b5824331518faffa1c9af5765c378606f5f462efad994 15
+redpandadata/redpanda:v25.2.14@sha256:b53a3a981be7536c2b5240efa13d7284e760ed01911627f3533e628117e427e2 16
+redpandadata/redpanda:v25.3.18@sha256:f932b4ebedf5711d4c19d3f38c428ee10208a162f232a313aa741e0271212f8a 17
+redpandadata/redpanda:v26.1.21@sha256:5e6cb499a81db038c810eaad24ed5bd9c979b6627b68b19084f0256cfb4a692e 18
+redpandadata/redpanda:v26.2.6@sha256:8b1076e0d61bfceb66594dc01536427ce0b529f8ead35fdab9763ab6085891ce 19

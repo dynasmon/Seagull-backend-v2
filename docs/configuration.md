@@ -381,6 +381,7 @@ that spread, so an analyst can see the order was not established by the data. Se
 | `SEAGULL_EVENT_STORE_TLS` | `true` | verify and encrypt the native connection; development Compose explicitly sets `false` |
 | `SEAGULL_EVENT_STORE_TLS_CA` | unset | authority the store must chain to; the system pool when unset |
 | `SEAGULL_EVENT_STORE_TLS_SERVER_NAME` | unset | name the store certificate must carry; the dialled host when unset |
+| `SEAGULL_MIGRATOR_WAIT` | `1m` | how long `store-migrator` asks the store to answer before it gives up; up to an hour, and `0s` asks once |
 
 Every ClickHouse connection uses verified TLS by default. The local Compose
 topology disables it explicitly because its ClickHouse listener is confined to
@@ -672,6 +673,7 @@ logged as `alert_key_part_unspoken`, and every one is counted in
 | `SEAGULL_ALERT_STORE_MAX_CONNECTIONS` | `8` | connections one process will hold |
 | `SEAGULL_ALERT_STORE_TIMEOUT` | `30s` | budget for one statement |
 | `SEAGULL_ALERT_STORE_CONNECT_TIMEOUT` | `10s` | budget to dial |
+| `SEAGULL_MIGRATOR_WAIT` | `1m` | how long `control-migrator` asks the store to answer before it gives up; up to an hour, and `0s` asks once |
 
 `control-migrator` applies the schema and exits, as `store-migrator` does for
 ClickHouse. The variables keep the `SEAGULL_ALERT_STORE_` prefix they were named

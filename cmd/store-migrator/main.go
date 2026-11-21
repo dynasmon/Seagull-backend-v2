@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/clickhouse"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/buildinfo"
@@ -44,6 +45,12 @@ func migrate(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = migrator.Close() }()
+
+	// A store answers its own loopback before the address its dependents dial
+	// while its image initialises it, so it is asked for a bounded time first.
+	if err := run.Until(ctx, settings.wait, time.Second, migrator.Ping); err != nil {
+		return err
+	}
 
 	// No deadline: a migration takes as long as it takes, and a signal still stops
 	// it. Each migration is reported as it is recorded, so partial progress shows

@@ -127,7 +127,7 @@ services:
     volumes:
       - clickhouse:/var/lib/clickhouse
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://$$(hostname):8123/ping || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -169,7 +169,7 @@ services:
     volumes:
       - postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${SEAGULL_ALERT_STORE_USER:-seagull} -d ${SEAGULL_ALERT_STORE_DATABASE:-seagull}"]
+      test: ["CMD-SHELL", "pg_isready -h \"$$(hostname)\" -U ${SEAGULL_ALERT_STORE_USER:-seagull} -d ${SEAGULL_ALERT_STORE_DATABASE:-seagull}"]
       interval: 5s
       timeout: 5s
       retries: 20

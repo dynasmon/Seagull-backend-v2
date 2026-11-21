@@ -652,6 +652,15 @@ Stop everything and drop its state with `make down`. If a port is taken, publish
 elsewhere with `SEAGULL_GATEWAY_PUBLISH`, `SEAGULL_QUERY_API_PUBLISH`,
 `SEAGULL_CONTROL_API_PUBLISH` or `SEAGULL_CONTROL_API_RENEWAL_PUBLISH`.
 
+Redpanda runs on data written by its own feature release or the one before it,
+and refuses anything older, so the backbone image never skips a release:
+`deploy/redpanda-upgrade-path` lists every release a development volume may have
+been written by, with the logical version it runs, and a test holds
+`deploy/compose.yaml` to its last line. A volume an older release wrote, as every
+stack started before 2026-11-02 was written by v24.2, stops Redpanda with
+`Attempted to upgrade from incompatible logical version`; `make upgrade-backbone`
+walks it up the list, keeping its data, and `make up` starts the stack again.
+
 ## Agent compatibility
 
 A platform serves the newest agent release and the one before it: it accepts the

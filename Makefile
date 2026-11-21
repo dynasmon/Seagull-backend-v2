@@ -18,7 +18,7 @@ TEST_ALERT_STORE ?= 127.0.0.1:15432
 
 .PHONY: help fmt fmt-check vet mod-check lint test test-race test-integration \
         test-load test-alerts record-agent-answers record-starting-rules bench build images scan-images \
-        scan-infrastructure vulncheck gosec verify-tag check-protection dev-pki up \
+        scan-infrastructure vulncheck gosec verify-tag check-protection dev-pki rotate-dev-pki up \
         down logs clean verify
 
 help:
@@ -39,7 +39,8 @@ help:
 	@echo "images              build the container image of every component"
 	@echo "scan-images         refuse a built image holding a fixable high or critical vulnerability"
 	@echo "scan-infrastructure report what is known of the images this project runs and builds on"
-	@echo "dev-pki             mint development certificates into $(PKI)"
+	@echo "dev-pki             mint development certificates into $(PKI), keeping what still serves"
+	@echo "rotate-dev-pki      mint new development authorities, which every enrolled agent stops trusting"
 	@echo "up                  start the local stack"
 	@echo "down                stop the local stack and drop its volumes"
 	@echo "vulncheck           refuse a known vulnerability in any package this module links"
@@ -163,6 +164,9 @@ check-protection:
 
 dev-pki:
 	$(GO) run ./tools/devpki -directory $(PKI)
+
+rotate-dev-pki:
+	$(GO) run ./tools/devpki -directory $(PKI) -rotate
 
 up: dev-pki
 	SEAGULL_RUNTIME_USER="$$(id -u):$$(id -g)" $(COMPOSE) up -d --build

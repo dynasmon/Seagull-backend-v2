@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -198,6 +199,68 @@ func TestTheMatcherReadsTheNewestVersionOfEachAdvisoryAsItWasRead(t *testing.T) 
 }
 
 func equalNames(a, b []string) bool { return strings.Join(a, ",") == strings.Join(b, ",") }
+
+// Ubuntu's kernel alone is named by more than ten thousand advisories and a
+// host holds thousands of packages, so what the matcher reads cannot be bounded
+// by how large a query ClickHouse parses, which stopped every asset on 2026-11-20.
+func TestTheMatcherReadsAsManyAdvisoriesAndPackagesAsAHostHolds(t *testing.T) {
+	address := storeAddress(t)
+	advisories := migratedAdvisoryStore(t, address)
+	store := migratedInventoryStore(t, address)
+	reader := matchingReaderOf(t, address)
+	owner, agentID, suffix := tenant(t), agentIdentifier(t), owned(t)
+	kernel := "kernel-" + suffix
+
+	modified := time.Date(2026, time.January, 5, 6, 0, 0, 0, time.UTC)
+	var records []*vulnerabilityv1.Record
+	for index := range 3000 {
+		records = append(records, advised(almaAdvisory(fmt.Sprintf("ALSA-%s-%04d", suffix, index), kernel, modified, 1, "0:6.8.0-90.el9")))
+	}
+	hold(t, advisories, records...)
+	fold(t, store, owner, fixtures.PackageScan{RecordID: "inv-packages-01", AgentID: agentID, At: modified, Packages: []fixtures.Installed{
+		{Name: kernel, Version: "0:6.8.0-31.el9", Architecture: "x86_64", Manager: "rpm"},
+	}})
+	held := []string{kernel}
+	for index := range 20000 {
+		held = append(held, fmt.Sprintf("package-%s-%05d", suffix, index))
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	intelligence, err := reader.Read(ctx, "AlmaLinux:9", []string{kernel})
+	if err != nil {
+		t.Fatalf("read the advisories of a package three thousand advisories name: %v", err)
+	}
+	if len(intelligence.Advisories) != len(records) {
+		t.Fatalf("read %d advisories of %s, and %d name it", len(intelligence.Advisories), kernel, len(records))
+	}
+	for _, read := range intelligence.Advisories {
+		if !equalNames(read.Aliases, []string{"CVE-2026-1111"}) || !equalNames(read.Upstream, []string{"CVE-2026-2222"}) || len(read.Severities) != 1 {
+			t.Fatalf("advisory %s was read without its names or severities: %v %v %v", read.ID, read.Aliases, read.Upstream, read.Severities)
+		}
+	}
+
+	among, err := reader.Read(ctx, "AlmaLinux:9", held)
+	if err != nil {
+		t.Fatalf("read the advisories of %d packages: %v", len(held), err)
+	}
+	if len(among.Advisories) != len(records) {
+		t.Errorf("read %d advisories among %d packages, and %d name one of them", len(among.Advisories), len(held), len(records))
+	}
+	holders, err := reader.Holders(ctx, held)
+	if err != nil {
+		t.Fatalf("read the holders of %d packages: %v", len(held), err)
+	}
+	var mine []matching.Asset
+	for _, holder := range holders {
+		if holder.TenantID == owner {
+			mine = append(mine, holder)
+		}
+	}
+	if len(mine) != 1 || mine[0].AgentID != agentID {
+		t.Errorf("the holders of %d packages within the tenant are %v", len(held), mine)
+	}
+}
 
 func TestTheMatcherReadsTheNewestDecisionOfEveryFindingOfAnAsset(t *testing.T) {
 	address := storeAddress(t)

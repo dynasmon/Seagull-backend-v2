@@ -1,13 +1,13 @@
 package clickhouse
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -23,7 +23,11 @@ import (
 // What the vulnerability matcher reads, over a connection of its own that a
 // deployment gives a credential able to read and nothing more. It holds no
 // insert statement, so nothing it decides reaches a store except through the
-// findings stream and the writer that owns that store.
+// findings stream and the writer that owns that store. A list it reads by is a
+// parameter the server parses as a value, never text its SQL parser bounds by
+// max_query_size, so the packages of a host or the names of an advisory limit
+// nothing; a query given parameters is bound by the server alone and names each
+// value it compares in braces.
 type MatchingReader struct {
 	connection driver.Conn
 	database   string
@@ -154,9 +158,8 @@ func (r *MatchingReader) Holders(ctx context.Context, packages []string) ([]matc
 	if len(packages) == 0 {
 		return nil, nil
 	}
-	rows, err := r.connection.Query(ctx,
-		"SELECT DISTINCT tenant_id, agent_id FROM "+holderTable+" WHERE package IN ("+placeholders(len(packages))+") ORDER BY tenant_id, agent_id",
-		strings2any(packages)...)
+	rows, err := r.connection.Query(listing(ctx, clickhouse.Parameters{"packages": arrayOf(packages)}),
+		"SELECT DISTINCT tenant_id, agent_id FROM "+holderTable+" WHERE package IN {packages:Array(String)} ORDER BY tenant_id, agent_id")
 	if err != nil {
 		return nil, fmt.Errorf("read the holders of %d packages: %w", len(packages), err)
 	}
@@ -188,19 +191,24 @@ func (r *MatchingReader) Read(ctx context.Context, ecosystem string, packages []
 		return intelligence, nil
 	}
 
-	named := strings2any(packages)
-	arguments := append(append([]any{ecosystem}, named...), append([]any{ecosystem}, named...)...)
-	rows, err := r.connection.Query(ctx, "SELECT entry.source, entry.advisory_id, entry.modified, entry.normalization, entry.package,"+
+	asked := listing(ctx, clickhouse.Parameters{"ecosystem": ecosystem, "packages": arrayOf(packages)})
+	rows, err := r.connection.Query(asked, "SELECT entry.source, entry.advisory_id, entry.modified, entry.normalization, entry.package,"+
 		" entry.range_types, entry.event_ranges, entry.event_kinds, entry.event_versions, entry.versions,"+
-		" entry.severity_types, entry.severity_scores, entry.severity_assessors"+
+		" entry.severity_types, entry.severity_scores, entry.severity_assessors,"+
+		" version.named_aliases, version.named_upstream, version.rated_types, version.rated_scores, version.rated_assessors"+
 		" FROM "+affectedTable+" AS entry FINAL"+
-		" INNER JOIN (SELECT source, advisory_id, max((modified, normalization)) AS newest FROM "+advisoryTable+
+		" INNER JOIN (SELECT source, advisory_id, max((modified, normalization)) AS newest,"+
+		" argMax(aliases, (modified, normalization, fetched_at)) AS named_aliases,"+
+		" argMax(upstream, (modified, normalization, fetched_at)) AS named_upstream,"+
+		" argMax(severity_types, (modified, normalization, fetched_at)) AS rated_types,"+
+		" argMax(severity_scores, (modified, normalization, fetched_at)) AS rated_scores,"+
+		" argMax(severity_assessors, (modified, normalization, fetched_at)) AS rated_assessors FROM "+advisoryTable+
 		" WHERE (source, advisory_id) IN (SELECT source, advisory_id FROM "+affectedTable+
-		" WHERE ecosystem = ? AND package IN ("+placeholders(len(packages))+")) GROUP BY source, advisory_id) AS version"+
+		" WHERE ecosystem = {ecosystem:String} AND package IN {packages:Array(String)}) GROUP BY source, advisory_id) AS version"+
 		" ON entry.source = version.source AND entry.advisory_id = version.advisory_id"+
-		" WHERE entry.ecosystem = ? AND entry.package IN ("+placeholders(len(packages))+")"+
+		" WHERE entry.ecosystem = {ecosystem:String} AND entry.package IN {packages:Array(String)}"+
 		" AND (entry.modified, entry.normalization) = version.newest AND entry.withdrawn = toDateTime64(0, 3, 'UTC')"+
-		" ORDER BY entry.source, entry.advisory_id, entry.entry", arguments...)
+		" ORDER BY entry.source, entry.advisory_id, entry.entry")
 	if err != nil {
 		return finding.Intelligence{}, fmt.Errorf("read the advisories of %s: %w", ecosystem, err)
 	}
@@ -208,14 +216,16 @@ func (r *MatchingReader) Read(ctx context.Context, ecosystem string, packages []
 	var order [][2]string
 	for rows.Next() {
 		var (
-			advisory                            finding.Advisory
-			name                                string
-			rangeTypes, kinds, versions, listed []string
-			eventRanges                         []uint32
-			types, scores, assessors            []string
+			advisory                                 finding.Advisory
+			name                                     string
+			rangeTypes, kinds, versions, listed      []string
+			eventRanges                              []uint32
+			types, scores, assessors                 []string
+			aliases, upstream, rated, rating, raters []string
 		)
 		if err := rows.Scan(&advisory.Source, &advisory.ID, &advisory.Modified, &advisory.Normalization, &name,
-			&rangeTypes, &eventRanges, &kinds, &versions, &listed, &types, &scores, &assessors); err != nil {
+			&rangeTypes, &eventRanges, &kinds, &versions, &listed, &types, &scores, &assessors,
+			&aliases, &upstream, &rated, &rating, &raters); err != nil {
 			_ = rows.Close()
 			return finding.Intelligence{}, fmt.Errorf("read an advisory of %s: %w", ecosystem, err)
 		}
@@ -227,6 +237,7 @@ func (r *MatchingReader) Read(ctx context.Context, ecosystem string, packages []
 		key := [2]string{advisory.Source, advisory.ID}
 		if byName[key] == nil {
 			advisory.Modified = advisory.Modified.UTC()
+			advisory.Aliases, advisory.Upstream, advisory.Severities = aliases, upstream, severitiesOf(rated, rating, raters)
 			byName[key] = &advisory
 			order = append(order, key)
 		}
@@ -235,42 +246,10 @@ func (r *MatchingReader) Read(ctx context.Context, ecosystem string, packages []
 	if err := closed(rows); err != nil {
 		return finding.Intelligence{}, fmt.Errorf("read the advisories of %s: %w", ecosystem, err)
 	}
-	if err := r.names(ctx, byName); err != nil {
-		return finding.Intelligence{}, err
-	}
 	for _, key := range order {
 		intelligence.Advisories = append(intelligence.Advisories, *byName[key])
 	}
 	return intelligence, nil
-}
-
-func (r *MatchingReader) names(ctx context.Context, advisories map[[2]string]*finding.Advisory) error {
-	if len(advisories) == 0 {
-		return nil
-	}
-	var tuples []string
-	var arguments []any
-	for _, advisory := range advisories {
-		tuples = append(tuples, "(?, ?, "+versionPlaceholder+", ?)")
-		arguments = append(arguments, advisory.Source, advisory.ID, advisory.Modified.UnixNano(), advisory.Normalization)
-	}
-	rows, err := r.connection.Query(ctx, "SELECT source, advisory_id, aliases, upstream, severity_types, severity_scores, severity_assessors FROM "+
-		advisoryTable+" FINAL WHERE (source, advisory_id, modified, normalization) IN ("+strings.Join(tuples, ", ")+")", arguments...)
-	if err != nil {
-		return fmt.Errorf("read the names of %d advisories: %w", len(advisories), err)
-	}
-	for rows.Next() {
-		var source, id string
-		var aliases, upstream, types, scores, assessors []string
-		if err := rows.Scan(&source, &id, &aliases, &upstream, &types, &scores, &assessors); err != nil {
-			_ = rows.Close()
-			return fmt.Errorf("read the names of an advisory: %w", err)
-		}
-		if advisory := advisories[[2]string{source, id}]; advisory != nil {
-			advisory.Aliases, advisory.Upstream, advisory.Severities = aliases, upstream, severitiesOf(types, scores, assessors)
-		}
-	}
-	return closed(rows)
 }
 
 // A feed read by more than one source is as fresh as the stalest of them, and
@@ -414,13 +393,26 @@ func severitiesOf(types, scores, assessors []string) []*vulnerabilityv1.Severity
 	return severities
 }
 
-func strings2any(values []string) []any {
-	arguments := make([]any, 0, len(values))
-	for _, value := range slices.SortedFunc(slices.Values(values), cmp.Compare[string]) {
-		arguments = append(arguments, value)
-	}
-	return arguments
+func listing(ctx context.Context, parameters clickhouse.Parameters) context.Context {
+	return clickhouse.Context(ctx, clickhouse.WithParameters(parameters))
 }
+
+func arrayOf(values []string) string {
+	var spelled strings.Builder
+	spelled.WriteByte('[')
+	for index, value := range slices.Sorted(slices.Values(values)) {
+		if index > 0 {
+			spelled.WriteByte(',')
+		}
+		spelled.WriteByte('\'')
+		spelled.WriteString(quoted.Replace(value))
+		spelled.WriteByte('\'')
+	}
+	spelled.WriteByte(']')
+	return spelled.String()
+}
+
+var quoted = strings.NewReplacer(`\`, `\\`, `'`, `\'`)
 
 func latest(a, b time.Time) time.Time {
 	if b.After(a) {

@@ -133,6 +133,17 @@ func (r *registeredAgents) apply(held *agentv1.Agent, asked agent.Move) (*agentv
 	return moved, nil
 }
 
+func (r *registeredAgents) State(_ context.Context, id string) (agent.State, error) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	held, known := r.held[id]
+	if !known {
+		return "", agent.ErrUnknown
+	}
+	state, _ := agent.FromWire(held.GetState())
+	return state, nil
+}
+
 func (r *registeredAgents) Certificates(_ context.Context, id string, tenants []string) (*agentv1.CertificateHistory, error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()

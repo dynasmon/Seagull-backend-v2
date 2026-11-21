@@ -717,6 +717,9 @@ detection away from somebody's triage.
 | `SEAGULL_CONTROL_API_AGENT_UPDATE_INTERVAL` | `30s` | how often one agent may ask whether to update or for a package |
 | `SEAGULL_CONTROL_API_AGENT_UPDATE_BURST` | `4` | such requests one agent may make at once above that |
 | `SEAGULL_CONTROL_API_TRACKED_UPDATE_AGENTS` | `8192` | agents whose requests about updates are counted at once |
+| `SEAGULL_CONTROL_API_AGENT_DESCRIPTOR_INTERVAL` | `30s` | how often one agent may ask the agent listener what it serves; only a registered agent the registry still admits is answered |
+| `SEAGULL_CONTROL_API_AGENT_DESCRIPTOR_BURST` | `4` | such requests one agent may make at once above that |
+| `SEAGULL_CONTROL_API_TRACKED_DESCRIBED_AGENTS` | `8192` | agents whose requests for the descriptor are counted at once |
 | `SEAGULL_CONTROL_API_AGENT_ROLLOUT_INTERVAL` | `30s` | how often the control plane reads how far every rollout in force went, and opens a wave or pauses one on what it read; between 5 seconds and 10 minutes. Read only where an update root is configured |
 | `SEAGULL_CONTROL_API_FLEET_INTERVAL` | `30s` | how often the control plane counts the agents the registry admits by liveness; between 5 seconds and 10 minutes, and a reading that takes longer is abandoned |
 

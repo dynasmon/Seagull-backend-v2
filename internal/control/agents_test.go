@@ -66,6 +66,18 @@ func (s *stubAgents) Register(_ context.Context, asked *agentv1.Registration, ac
 	return registered, nil
 }
 
+func (s *stubAgents) State(_ context.Context, id string) (agent.State, error) {
+	if s.unreached != nil {
+		return "", s.unreached
+	}
+	held, known := s.held[id]
+	if !known {
+		return "", agent.ErrUnknown
+	}
+	state, _ := agent.FromWire(held.GetState())
+	return state, nil
+}
+
 func (s *stubAgents) Agent(_ context.Context, id string, tenants []string) (*agentv1.Agent, error) {
 	if s.unreached != nil {
 		return nil, s.unreached

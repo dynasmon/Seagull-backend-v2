@@ -221,6 +221,8 @@ func controlAPI(ctx context.Context) error {
 		UpdateRoot: updateRoot,
 		UpdateLimiter: ratelimit.NewLimiter(
 			settings.updatePullsPerSecond, settings.updatePullBurst, settings.trackedUpdateAgents),
+		DescriptorLimiter: ratelimit.NewLimiter(
+			settings.descriptionsPerSecond, settings.descriptionBurst, settings.trackedDescribed),
 		Rollouts:        raised.AgentRollouts(),
 		Dispositions:    raised.Dispositions(),
 		Metrics:         instruments,

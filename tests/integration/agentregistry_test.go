@@ -280,3 +280,27 @@ func TestTheRegistryPagesByIdentifierWithinTheScope(t *testing.T) {
 		t.Fatalf("an invented cursor was accepted: %v", err)
 	}
 }
+
+func TestTheRegistryTellsAnAgentListenerWhereAnAgentStands(t *testing.T) {
+	address := alertStoreAddress(t)
+	registry := migratedAlertStore(t, address).Agents()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	agentID, at := agentIdentifier(t), time.Now().UTC()
+	if _, err := registry.State(ctx, agentID); !errors.Is(err, agent.ErrUnknown) {
+		t.Fatalf("an agent never registered stands as %v", err)
+	}
+	if _, err := registry.Register(ctx, &agentv1.Registration{AgentId: agentID, TenantId: "default"}, "it-operator", at); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if state, err := registry.State(ctx, agentID); err != nil || state != agent.Pending {
+		t.Fatalf("a registered agent stands as %q (%v)", state, err)
+	}
+	if _, err := registry.Move(ctx, agentID, []string{"default"}, agent.Move{To: agent.Revoked, Note: "the key leaked", Actor: "it-operator", At: at.Add(time.Minute)}); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if state, err := registry.State(ctx, agentID); err != nil || state != agent.Revoked || state.Admits() {
+		t.Fatalf("a revoked agent stands as %q (%v)", state, err)
+	}
+}

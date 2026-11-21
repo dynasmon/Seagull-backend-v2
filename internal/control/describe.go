@@ -1,9 +1,11 @@
 package control
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agent"
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentpolicy"
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentupdate"
@@ -36,10 +38,30 @@ func (s *Server) agentDescriptor() (*platformv1.Descriptor, string, error) {
 	return described, tag, nil
 }
 
+// It stands behind the registry and a limiter, as the gateway's descriptor and
+// every other route of this listener do, so a certificate the authority signed
+// for an agent nobody registered, or one revoked since, learns nothing here.
 func (s *Server) describeToAgents(described *platformv1.Descriptor, tag string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := agentidentity.FromConnection(r.TLS); err != nil {
+		presented, err := agentidentity.FromConnection(r.TLS)
+		if err != nil {
 			Refuse(w, http.StatusUnauthorized, CodeNoCertificate, err.Error())
+			return
+		}
+		if s.descriptions != nil && !s.descriptions.Allow(presented.AgentID) {
+			Refuse(w, http.StatusTooManyRequests, CodeRateLimited, "this agent is asking what the listener serves too often")
+			return
+		}
+		state, err := s.agents.State(r.Context(), presented.AgentID)
+		switch {
+		case errors.Is(err, agent.ErrUnknown):
+			Refuse(w, http.StatusNotFound, CodeUnknownAgent, "no agent is registered under the identity this connection proved")
+			return
+		case err != nil:
+			s.unavailable(w, CodeAgentsUnavailable, err)
+			return
+		case !state.Admits():
+			Refuse(w, http.StatusForbidden, CodeNotAdmitted, "the platform no longer listens to this agent")
 			return
 		}
 		w.Header().Set("ETag", tag)

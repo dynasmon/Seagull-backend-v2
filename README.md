@@ -280,9 +280,11 @@ of reading as clean. **Nothing is concluded from what a feed did not say**: an
 attempt that failed changes nothing and says how old the platform's copy is, an
 advisory a feed stops listing is kept, and one is withdrawn only when its source
 withdraws it. Every version is kept, so what was concluded from one stays
-explicable. Debian, Ubuntu, Alpine, Rocky Linux and AlmaLinux are read; matching
-is not built yet.
-[ADR 28](docs/decisions/0028-vulnerability-intelligence-is-read-from-its-source.md).
+explicable. Debian, Ubuntu, Alpine, Rocky Linux and AlmaLinux are read, and
+`vulnerability-matcher` compares what they say with the packages every asset
+holds, deciding one finding per package and CVE.
+[ADR 28](docs/decisions/0028-vulnerability-intelligence-is-read-from-its-source.md),
+[ADR 49](docs/decisions/0049-a-finding-is-decided-by-one-reader-from-the-stores-their-owners-filled.md).
 
 ### Storage and failure semantics
 
@@ -791,10 +793,8 @@ A release tag is signed, and a tag no signer of `main` signed fails
 | [Configuration reference](docs/configuration.md) | Every setting, the acknowledgement contract, the topology, the store. |
 | [Seagull-contracts](https://github.com/dynasmon/Seagull-contracts) | The messages agents, the platform and the portal exchange. |
 
-Vulnerability matching and response actions are not implemented — advisories are
-read and kept, and nothing compares them with an asset yet — no collector sends
-inventory yet — `tools/devprobe -inventory` is the only producer — and
-Sigma import covers one class of event. A rollout reaches a tenant or a list of
+Response actions are not implemented, and Sigma import covers one class of
+event. A rollout reaches a tenant or a list of
 agents, never a group, since the registry has none. Detection is stateless unless
 a rule asks otherwise: a rule that counts or orders its events reads a bounded window of the
 backbone in event time, which is what keeps both replayable.

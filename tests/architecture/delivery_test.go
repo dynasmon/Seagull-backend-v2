@@ -230,3 +230,29 @@ func TestTheEngineAndTheControlPlaneAreGivenOneRuleTree(t *testing.T) {
 		t.Errorf("the engine starts on %q and the control plane records %q", mounted["analysis-engine"], mounted["control-api"])
 	}
 }
+
+// A host that restarts brings the stack back by itself, so recovering from a
+// reboot never runs make up, which minted the development material again until
+// 2026-11-20; a migrator runs once and stays stopped.
+func TestEveryProcessOfTheStackComesBackAfterTheHostRestarts(t *testing.T) {
+	var compose struct {
+		Services map[string]struct {
+			Restart string `yaml:"restart"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(read(t, "deploy", "compose.yaml"), &compose); err != nil {
+		t.Fatalf("compose.yaml: %v", err)
+	}
+	if len(compose.Services) < 10 {
+		t.Fatalf("compose.yaml declares %d services, fewer than the platform runs", len(compose.Services))
+	}
+	for name, service := range compose.Services {
+		wanted := "unless-stopped"
+		if strings.HasSuffix(name, "-migrator") {
+			wanted = "no"
+		}
+		if service.Restart != wanted {
+			t.Errorf("%s restarts %q, and it has to restart %q", name, service.Restart, wanted)
+		}
+	}
+}

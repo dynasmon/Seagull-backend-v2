@@ -171,6 +171,7 @@ rotate-dev-pki:
 	$(GO) run ./tools/devpki -directory $(PKI) -hosts $(HOSTS) -rotate
 
 up: dev-pki
+	@mkdir -p .local/signing
 	SEAGULL_RUNTIME_USER="$$(id -u):$$(id -g)" $(COMPOSE) up -d --build
 
 upgrade-backbone:

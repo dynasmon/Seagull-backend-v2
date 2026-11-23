@@ -131,17 +131,29 @@ func controlAPI(ctx context.Context) error {
 	}
 	defer admissions.Close()
 
+	decisions, err := broker.NewAgentFindings(broker.Config{
+		Brokers:         settings.brokers,
+		Topic:           settings.topology.AgentFindings.Name,
+		MaxMessageBytes: settings.topology.AgentFindings.MaxMessageBytes,
+		ClientID:        serviceName,
+		Security:        settings.security,
+	})
+	if err != nil {
+		return err
+	}
+	defer decisions.Close()
+
 	agentCtx, cancelAgents := context.WithTimeout(ctx, settings.startTimeout)
 	defer cancelAgents()
-	drift, err := admissions.VerifyTopics(agentCtx, settings.topology.Agents)
+	drift, err := admissions.VerifyTopics(agentCtx, settings.topology.Agents, settings.topology.AgentFindings)
 	if err != nil {
 		return err
 	}
 	for _, entry := range drift {
 		platform.Logger().Warn("backbone_topology_drift", slog.String("drift", entry))
 	}
-	broker.LogDurability(ctx, platform.Logger(), settings.topology.Rulesets, settings.topology.Agents)
-	broker.ObserveDurability(platform.Metrics(), settings.topology.Rulesets, settings.topology.Agents)
+	broker.LogDurability(ctx, platform.Logger(), settings.topology.Rulesets, settings.topology.Agents, settings.topology.AgentFindings)
+	broker.ObserveDurability(platform.Metrics(), settings.topology.Rulesets, settings.topology.Agents, settings.topology.AgentFindings)
 
 	seen, err := clickhouse.NewLiveness(settings.telemetry, settings.livenessHorizon, settings.livenessBackdating)
 	if err != nil {
@@ -168,6 +180,18 @@ func controlAPI(ctx context.Context) error {
 		Logger:     platform.Logger(),
 		Every:      settings.announceEvery,
 		Batch:      settings.announceBatch,
+	})
+	if err != nil {
+		return err
+	}
+
+	carrier, err := control.NewFindingAnnouncer(control.FindingAnnouncerOptions{
+		Replacements: raised.Agents(),
+		Decisions:    decisions,
+		Metrics:      instruments,
+		Logger:       platform.Logger(),
+		Every:        settings.announceEvery,
+		Batch:        settings.announceBatch,
 	})
 	if err != nil {
 		return err
@@ -264,6 +288,7 @@ func controlAPI(ctx context.Context) error {
 		slog.Int("ruleset_activations", len(published.catalogue.Activations())),
 		slog.String("alert_store_database", settings.alerts.Database),
 		slog.String("agents_topic", settings.topology.Agents.Name),
+		slog.String("agent_findings_topic", settings.topology.AgentFindings.Name),
 		slog.Duration("liveness_horizon", settings.livenessHorizon),
 		slog.Duration("liveness_backdating", settings.livenessBackdating),
 		slog.Any("permissions_not_shown_to_callers", control.Unnamed()),
@@ -284,6 +309,7 @@ func controlAPI(ctx context.Context) error {
 	platform.Add(listener)
 	platform.Add(renewals)
 	platform.Add(announcer)
+	platform.Add(carrier)
 	platform.Add(sweeper{sessions: sessions, every: settings.sessionLife})
 	fleet, err := control.NewFleetReader(control.FleetReaderOptions{
 		Registry: raised.Agents(),

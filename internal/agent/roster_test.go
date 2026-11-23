@@ -5,8 +5,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agent"
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 )
 
@@ -260,5 +264,108 @@ func TestARosterThatReadTheWholeLogAgreesWithOneThatReadOnlyWhatCompactionKept(t
 		if tenant, admits := roster.Tenant("web-01"); !admits || tenant != "globex" {
 			t.Errorf("the %s gateway admits the agent %t into %q", name, admits, tenant)
 		}
+	}
+}
+
+func bound(revision uint64, fingerprint, replaced string) *agentv1.Admission {
+	record := admission("web-01", agent.Active, revision)
+	record.FingerprintSha256, record.IssuedAt = fingerprint, timestamppb.New(boundAt.Add(-time.Minute))
+	if replaced != "" {
+		record.ReplacedFingerprintSha256, record.ReplacedAt = replaced, timestamppb.New(boundAt)
+	}
+	return record
+}
+
+var boundAt = time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC)
+
+func TestTheRosterHoldsTheCertificateTheRegistryBindsAnAgentTo(t *testing.T) {
+	roster := agent.NewRoster()
+	if err := roster.Apply(bound(3, strings.Repeat("ab", 32), strings.Repeat("ef", 32))); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	held, known := roster.Binding("web-01")
+	want := agentidentity.Held{
+		Binding: agentidentity.Binding{
+			Fingerprint: strings.Repeat("ab", 32), IssuedAt: boundAt.Add(-time.Minute),
+			Replaced: strings.Repeat("ef", 32), ReplacedAt: boundAt,
+		},
+		Revision: 3,
+	}
+	if !known || held != want {
+		t.Fatalf("the roster holds %+v (%t), and the registry bound %+v", held, known, want)
+	}
+	if _, known := roster.Binding("db-07"); known {
+		t.Fatal("the roster holds a binding for an agent the log never named")
+	}
+}
+
+func TestARosterFollowingTheLogLearnsAReplacementWhenItAppliesIt(t *testing.T) {
+	roster := agent.NewRoster()
+	first, second := boundAt.Add(time.Second), boundAt.Add(time.Hour)
+
+	if err := roster.Learn(bound(3, strings.Repeat("ab", 32), strings.Repeat("ef", 32)), first); err != nil {
+		t.Fatalf("learn the renewal: %v", err)
+	}
+	if held, _ := roster.Binding("web-01"); !held.Learned.Equal(first) {
+		t.Fatalf("a renewal learned at %s is held as learned at %s", first, held.Learned)
+	}
+
+	disabled := bound(4, strings.Repeat("ab", 32), strings.Repeat("ef", 32))
+	disabled.State = agent.Disabled.Wire()
+	if err := roster.Learn(disabled, second); err != nil {
+		t.Fatalf("learn a move that binds nothing new: %v", err)
+	}
+	if held, _ := roster.Binding("web-01"); !held.Learned.Equal(first) {
+		t.Fatalf("a move that bound nothing new restarted the tolerance at %s", held.Learned)
+	}
+
+	if err := roster.Learn(bound(5, strings.Repeat("cd", 32), strings.Repeat("ab", 32)), second); err != nil {
+		t.Fatalf("learn the next renewal: %v", err)
+	}
+	if held, _ := roster.Binding("web-01"); !held.Learned.Equal(second) {
+		t.Fatalf("the next renewal, learned at %s, is held as learned at %s", second, held.Learned)
+	}
+}
+
+func TestARosterReadingTheLogBackLearnsNoReplacement(t *testing.T) {
+	roster := agent.NewRoster()
+	if err := roster.Learn(bound(3, strings.Repeat("ab", 32), strings.Repeat("ef", 32)), boundAt.Add(time.Hour)); err != nil {
+		t.Fatalf("learn: %v", err)
+	}
+	if err := roster.Apply(bound(4, strings.Repeat("cd", 32), strings.Repeat("ab", 32))); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if held, _ := roster.Binding("web-01"); !held.Learned.IsZero() {
+		t.Fatalf("a renewal read back is held as learned at %s", held.Learned)
+	}
+}
+
+func TestARecordWithoutTheCertificateNeverErasesOneOfItsRevision(t *testing.T) {
+	roster := agent.NewRoster()
+	for _, record := range []*agentv1.Admission{
+		admission("web-01", agent.Active, 3),
+		bound(3, strings.Repeat("ab", 32), ""),
+		admission("web-01", agent.Active, 3),
+	} {
+		if err := roster.Apply(record); err != nil {
+			t.Fatalf("apply revision 3: %v", err)
+		}
+	}
+	if held, _ := roster.Binding("web-01"); held.Binding.Fingerprint != strings.Repeat("ab", 32) || !admitted(roster, "web-01") {
+		t.Fatalf("a record of the same revision without the certificate left the roster holding %+v", held)
+	}
+}
+
+func TestOneRevisionBindingTwoCertificatesLeavesTheAgentRefused(t *testing.T) {
+	roster := agent.NewRoster()
+	if err := roster.Apply(bound(3, strings.Repeat("ab", 32), "")); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if err := roster.Apply(bound(3, strings.Repeat("cd", 32), "")); !errors.Is(err, agent.ErrConflict) {
+		t.Fatalf("one revision binding two certificates was applied: %v", err)
+	}
+	if admitted(roster, "web-01") {
+		t.Fatal("an agent whose revision binds two certificates is still admitted")
 	}
 }

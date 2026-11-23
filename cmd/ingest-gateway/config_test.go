@@ -102,3 +102,20 @@ func TestAGatewayAsksForAReportEveryIntervalItIsToldWithinTheContract(t *testing
 		}
 	}
 }
+
+func TestAGatewayToleratesAReplacedCertificateForAShortDeclaredWhile(t *testing.T) {
+	unset, err := load(environment(t, nil))
+	if err != nil || unset.replacedTolerance != time.Minute {
+		t.Errorf("a gateway configured with nothing tolerates a replaced certificate for %s (%v)", unset.replacedTolerance, err)
+	}
+	told, err := load(environment(t, map[string]string{"SEAGULL_GATEWAY_REPLACED_CERTIFICATE_TOLERANCE": "2m"}))
+	if err != nil || told.replacedTolerance != 2*time.Minute {
+		t.Errorf("a gateway told 2m tolerates a replaced certificate for %s (%v)", told.replacedTolerance, err)
+	}
+	for _, outside := range []string{"4s", "11m"} {
+		if _, err := load(environment(t, map[string]string{"SEAGULL_GATEWAY_REPLACED_CERTIFICATE_TOLERANCE": outside})); err == nil ||
+			!strings.Contains(err.Error(), "SEAGULL_GATEWAY_REPLACED_CERTIFICATE_TOLERANCE") {
+			t.Errorf("a tolerance of %s was answered %v", outside, err)
+		}
+	}
+}

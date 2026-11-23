@@ -43,8 +43,10 @@ type admission struct {
 }
 
 type held struct {
-	newest  *agentv1.Heard
-	silence *agentv1.Finding
+	newest   *agentv1.Heard
+	silence  *agentv1.Finding
+	places   []*place
+	episodes []*episode
 }
 
 type Judge struct {
@@ -117,6 +119,9 @@ func (j *Judge) Run(ctx context.Context) error {
 		{"findings", j.findings, j.recall},
 		{"status", j.status, j.replayed},
 	} {
+		if replayed.name == "status" {
+			j.restore()
+		}
 		if err := replayed.log.Replay(ctx, replayed.deliver); err != nil {
 			return fmt.Errorf("read the %s log whole: %w", replayed.name, err)
 		}
@@ -178,6 +183,7 @@ func (j *Judge) Sweep(ctx context.Context) {
 	j.observe(listens, current, serving, behind, err)
 
 	for agentID, one := range j.agents {
+		j.settle(one, now)
 		if one.silence != nil {
 			if now.Sub(one.silence.GetDecidedAt().AsTime()) >= j.again {
 				one.silence = agentfinding.Again(one.silence, now)
@@ -246,6 +252,11 @@ func (j *Judge) observe(listens, current bool, serving int, behind int64, err er
 		if one.silence != nil {
 			open[agentfinding.KindName(one.silence.GetKind())]++
 		}
+		for _, found := range one.episodes {
+			if found.open() {
+				open[agentfinding.KindName(found.finding.GetKind())]++
+			}
+		}
 	}
 	for _, kind := range agentfinding.Kinds() {
 		j.metrics.open.WithLabelValues(agentfinding.KindName(kind)).Set(float64(open[agentfinding.KindName(kind)]))
@@ -286,8 +297,11 @@ func (j *Judge) admit(_ context.Context, records []Record) error {
 			changed = decided.GetChangedAt().AsTime()
 		}
 		j.admitted[decided.GetAgentId()] = admission{tenant: decided.GetTenantId(), admits: known && state.Admits(), changed: changed}
-		if one := j.agents[decided.GetAgentId()]; one != nil && one.silence != nil && !(known && state.Admits()) {
-			j.close(one, agentv1.Finding_CLOSURE_NOT_ADMITTED, changed, now)
+		if one := j.agents[decided.GetAgentId()]; one != nil && !(known && state.Admits()) {
+			if one.silence != nil {
+				j.close(one, agentv1.Finding_CLOSURE_NOT_ADMITTED, changed, now)
+			}
+			j.dismiss(one, changed, now)
 		}
 	}
 	return nil
@@ -317,7 +331,7 @@ func (j *Judge) recall(_ context.Context, records []Record) error {
 			j.metrics.refused.WithLabelValues("findings").Inc()
 			continue
 		}
-		if decided.GetKind() != agentv1.Finding_KIND_SILENCE {
+		if decided.GetKind() == agentv1.Finding_KIND_REPLACED_CERTIFICATE {
 			continue
 		}
 		if known, held := j.recalled[decided.GetFindingId()]; held && known.GetDecidedAt().AsTime().After(decided.GetDecidedAt().AsTime()) {
@@ -357,10 +371,11 @@ func (j *Judge) read(_ context.Context, records []Record, live bool) error {
 			j.agents[agentID] = one
 		}
 		heard := agentfinding.HeardOf(&report)
-		if live && one.silence != nil && !same(heard, one.silence.GetReports()[0]) {
+		if live && one.silence != nil && !agentfinding.SameReport(heard, one.silence.GetReports()[0]) {
 			j.close(one, agentv1.Finding_CLOSURE_HEARD, heard.GetIngestTime().AsTime(), now, heard)
 		}
 		one.newest = heard
+		j.locate(one, agentID, &report, heard, live, now)
 	}
 	return nil
 }
@@ -386,7 +401,7 @@ func (j *Judge) reconcile() {
 		switch {
 		case !known.admits:
 			j.decide(agentfinding.Closed(recalled, agentv1.Finding_CLOSURE_NOT_ADMITTED, whenever(known.changed, now), now))
-		case one.newest != nil && !same(one.newest, recalled.GetReports()[0]):
+		case one.newest != nil && !agentfinding.SameReport(one.newest, recalled.GetReports()[0]):
 			j.decide(agentfinding.Closed(recalled, agentv1.Finding_CLOSURE_HEARD, one.newest.GetIngestTime().AsTime(), now, one.newest))
 		default:
 			one.silence = recalled
@@ -407,9 +422,4 @@ func whenever(at, now time.Time) time.Time {
 		return now
 	}
 	return at
-}
-
-func same(a, b *agentv1.Heard) bool {
-	return a.GetInstallationId() == b.GetInstallationId() && a.GetBootId() == b.GetBootId() &&
-		a.GetSequence() == b.GetSequence() && a.GetReportedAt().AsTime().Equal(b.GetReportedAt().AsTime())
 }

@@ -71,6 +71,7 @@ type Topology struct {
 	AgentFindings           Topic
 	AgentFindingsQuarantine Topic
 	Gateways                Topic
+	Refusals                Topic
 }
 
 // Refused records and detections are both kept far longer than admitted events:
@@ -295,6 +296,17 @@ func LoadTopology(parser *config.Parser) Topology {
 			Durability:      durability,
 			MaxMessageBytes: defaultCarriage,
 		},
+		Refusals: Topic{
+			Name:            parser.String("SEAGULL_BACKBONE_REFUSALS_TOPIC", "security.agents.refusals"),
+			Partitions:      int32(parser.Int("SEAGULL_BACKBONE_REFUSALS_PARTITIONS", 3, 1, 1_000)),
+			Replicas:        replicas,
+			Retention:       parser.Duration("SEAGULL_BACKBONE_REFUSALS_RETENTION", 7*24*time.Hour, 2*24*time.Hour, 365*24*time.Hour),
+			Cleanup:         cleanupDelete,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			Durability:      durability,
+			MaxMessageBytes: defaultCarriage,
+		},
 	}
 }
 
@@ -309,7 +321,7 @@ func (t Topology) Topics() []Topic {
 		t.Assessments, t.AssessmentsQuarantine,
 		t.Findings, t.FindingsQuarantine,
 		t.AgentFindings, t.AgentFindingsQuarantine,
-		t.Gateways,
+		t.Gateways, t.Refusals,
 	}
 }
 

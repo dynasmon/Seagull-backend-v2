@@ -604,3 +604,34 @@ func TestFindingsAreAStreamOfTheirOwnThatKeepsEveryDecision(t *testing.T) {
 		}
 	}
 }
+
+func TestTheGatewaysRefusalsAreAStreamOfTheirOwnKeptLongerThanAJudgeIsAway(t *testing.T) {
+	refusals := declared(t, map[string]string{}).Refusals
+	if refusals.Name != "security.agents.refusals" || refusals.Partitions != 3 || refusals.Cleanup != cleanupDelete ||
+		refusals.Retention != 7*24*time.Hour {
+		t.Errorf("the refusals topic is %+v", refusals)
+	}
+
+	topology := declared(t, map[string]string{
+		"SEAGULL_BACKBONE_REFUSALS_TOPIC":      "tenant.refusals",
+		"SEAGULL_BACKBONE_REFUSALS_PARTITIONS": "6",
+		"SEAGULL_BACKBONE_REFUSALS_RETENTION":  "72h",
+	})
+	if refusals := topology.Refusals; refusals.Name != "tenant.refusals" || refusals.Partitions != 6 || refusals.Retention != 72*time.Hour {
+		t.Errorf("the refusals topic read back as %+v", refusals)
+	}
+	if err := topology.Refusals.Validate(); err != nil {
+		t.Errorf("the shipped refusals topic is refused: %v", err)
+	}
+	if !slices.ContainsFunc(topology.Topics(), func(applied Topic) bool { return applied.Name == topology.Refusals.Name }) {
+		t.Error("the refusals topic is not in the topology the migrator applies, so the gateways and the judge would refuse to serve")
+	}
+
+	parser := config.New(func(key string) (string, bool) {
+		return "24h", key == "SEAGULL_BACKBONE_REFUSALS_RETENTION"
+	})
+	LoadTopology(parser)
+	if parser.Err() == nil {
+		t.Error("refusals kept for a day were accepted, and a judge away a weekend would lose them")
+	}
+}

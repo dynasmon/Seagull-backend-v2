@@ -14,6 +14,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	"github.com/dynasmon/Seagull-backend-v2/internal/ingest"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/httpx"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
@@ -37,8 +38,27 @@ func (current) Stale() bool { return false }
 
 type admitsOne string
 
-func (a admitsOne) Tenant(agentID string) (string, bool) { return "acme", agentID == string(a) }
-func (a admitsOne) Knows(agentID string) bool            { return agentID == string(a) }
+func (a admitsOne) Tenant(agentID string) (string, bool)      { return "acme", agentID == string(a) }
+func (a admitsOne) Knows(agentID string) bool                 { return agentID == string(a) }
+func (a admitsOne) Binding(string) (agentidentity.Held, bool) { return agentidentity.Held{}, false }
+
+type unheard struct{}
+
+func (unheard) PublishRefusals(context.Context, []*agentv1.Refusal) error { return nil }
+
+func judging(t *testing.T, settings configuration, registry *metrics.Registry) *ingest.Certificates {
+	t.Helper()
+	refusals, err := ingest.NewRefusals(ingest.RefusalsOptions{Gateway: settings.admissionRules.Gateway, Publisher: unheard{},
+		Every: time.Second, Most: 1, Registry: registry, Logger: slog.New(slog.DiscardHandler)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificates, err := ingest.NewCertificates(ingest.CertificatesOptions{Tolerance: settings.replacedTolerance, Refusals: refusals, Registry: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return certificates
+}
 
 func TestTheDescriptorServesTheLimitsTheGatewayIsConfiguredWith(t *testing.T) {
 	settings, err := load(environment(t, map[string]string{
@@ -59,8 +79,9 @@ func TestTheDescriptorServesTheLimitsTheGatewayIsConfiguredWith(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	registry := metrics.New("ingest-gateway")
 	served, err := routes(settings, sinks{events: discarded{}, inventory: discarded{}, status: discarded{}, assessments: discarded{}},
-		admitsOne("web-01"), current{}, metrics.New("ingest-gateway"), slog.New(slog.DiscardHandler))
+		admitsOne("web-01"), current{}, judging(t, settings, registry), registry, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}

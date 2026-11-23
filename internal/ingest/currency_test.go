@@ -150,7 +150,7 @@ func TestAGatewayWhoseRosterIsStaleAdmitsNothingAndKeepsEveryBatchSendable(t *te
 	}
 	backbone := &recordingBackbone{}
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{Admitter: newAdmitter(t, backbone), Roster: describedRoster, Currency: stale{},
-		Capacity: capacity, Metrics: ingest.NewMetrics(registry), MaxBodyBytes: describedBody, PublishTimeout: time.Second})
+		Certificates: judging(t), Capacity: capacity, Metrics: ingest.NewMetrics(registry), MaxBodyBytes: describedBody, PublishTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

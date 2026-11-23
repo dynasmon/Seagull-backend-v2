@@ -2,12 +2,17 @@ package e2e_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"net/http"
 	"testing"
 	"time"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agent"
 	"github.com/dynasmon/Seagull-backend-v2/internal/control"
@@ -60,8 +65,51 @@ func TestTheAnswersAnAgentReadsAreTheOnesRecorded(t *testing.T) {
 	book := newAnswerBook(t)
 	streamAnswers(t, book)
 	boundedStreamAnswers(t, book)
+	certificateStreamAnswers(t, book)
 	agentListenerAnswers(t, book)
 	book.settle(t)
+}
+
+// What a gateway answers a certificate other than the one its roster binds the
+// agent to: the one a renewal replaced, past the tolerance, and one issued after
+// it, which the roster has not heard of yet and the agent sends again.
+func certificateStreamAnswers(t *testing.T, book *answerBook) {
+	gateway := startGateway(t, gatewayOptions{})
+	issued := func() (*http.Client, *x509.Certificate) {
+		material, err := gateway.authority.IssueClient("web-05", time.Hour)
+		if err != nil {
+			t.Fatalf("issue a client certificate: %v", err)
+		}
+		block, _ := pem.Decode(material.CertificatePEM)
+		leaf, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return gateway.clientWith(t, material, gateway.authority.Material().CertificatePEM), leaf
+	}
+	replacedClient, replaced := issued()
+	_, inForce := issued()
+	unheardClient, _ := issued()
+	fingerprint := func(leaf *x509.Certificate) string {
+		digest := sha256.Sum256(leaf.Raw)
+		return hex.EncodeToString(digest[:])
+	}
+	if err := gateway.roster.Apply(&agentv1.Admission{AgentId: "web-05", TenantId: "acme", State: agent.Active.Wire(), Revision: 2,
+		FingerprintSha256: fingerprint(inForce), IssuedAt: timestamppb.New(inForce.NotBefore),
+		ReplacedFingerprintSha256: fingerprint(replaced), ReplacedAt: timestamppb.New(time.Now().Add(-time.Hour))}); err != nil {
+		t.Fatal(err)
+	}
+
+	accepted := encoded(t, fixtures.Batch("batch-certificate", fixtures.SSHAuthentication{EventID: "e0000000-0000-4000-8000-000000000301"}.Event()))
+	for _, asked := range []struct {
+		name   string
+		client *http.Client
+	}{{"events-certificate-replaced", replacedClient}, {"events-roster-behind", unheardClient}} {
+		book.ask(t, asking{name: asked.name, listener: "gateway", client: asked.client, method: http.MethodPost, url: gateway.url(),
+			body: accepted, contentType: ingest.ContentType, reply: acknowledged})
+	}
+	book.ask(t, asking{name: "gateway-descriptor-certificate-replaced", listener: "gateway", client: replacedClient, method: http.MethodGet,
+		url: "https://" + gateway.address + ingest.DescriptorPath, reply: described})
 }
 
 func streamAnswers(t *testing.T, book *answerBook) {

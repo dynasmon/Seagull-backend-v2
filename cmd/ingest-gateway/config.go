@@ -16,6 +16,11 @@ import (
 const (
 	serviceName = "ingest-gateway"
 	rateSetting = "SEAGULL_GATEWAY_RATE_PER_SECOND"
+
+	// The refusals a gateway holds before it publishes them, one record per
+	// agent: as many agents as the rate limiter tracks by default.
+	refusalsEvery = time.Second
+	refusalsHeld  = 10_000
 )
 
 type configuration struct {
@@ -52,6 +57,8 @@ type configuration struct {
 	rosterCheck   time.Duration
 	rosterStale   time.Duration
 	beaconEvery   time.Duration
+
+	replacedTolerance time.Duration
 }
 
 func load(parser *config.Parser) (configuration, error) {
@@ -86,6 +93,8 @@ func load(parser *config.Parser) (configuration, error) {
 		rosterCheck:   parser.Duration("SEAGULL_GATEWAY_ROSTER_CHECK_INTERVAL", 5*time.Second, time.Second, time.Minute),
 		rosterStale:   parser.Duration("SEAGULL_GATEWAY_ROSTER_STALE_AFTER", 30*time.Second, 2*time.Second, 10*time.Minute),
 		beaconEvery:   parser.Duration("SEAGULL_GATEWAY_BEACON_INTERVAL", 5*time.Second, listening.MinEvery, listening.MaxEvery),
+
+		replacedTolerance: parser.Duration("SEAGULL_GATEWAY_REPLACED_CERTIFICATE_TOLERANCE", time.Minute, 5*time.Second, 10*time.Minute),
 	}
 
 	rate, limited := parser.Limit(rateSetting, 200, 1, 1_000_000)

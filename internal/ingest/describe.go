@@ -31,12 +31,13 @@ const latestSecond = 253402300799
 // be described as it is enforced. It stands behind the same certificate,
 // registry and limiter as the streams, and decides nothing they decide.
 type describer struct {
-	roster    Roster
-	currency  Current
-	limiter   *ratelimit.Limiter
-	described *platformv1.Descriptor
-	tag       string
-	now       func() time.Time
+	roster       Roster
+	currency     Current
+	certificates *Certificates
+	limiter      *ratelimit.Limiter
+	described    *platformv1.Descriptor
+	tag          string
+	now          func() time.Time
 }
 
 func newDescriber(served []*Handler) (*describer, error) {
@@ -55,7 +56,8 @@ func newDescriber(served []*Handler) (*describer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &describer{roster: served[0].roster, currency: served[0].currency, limiter: served[0].limiter, described: described, tag: tag, now: time.Now}, nil
+	return &describer{roster: served[0].roster, currency: served[0].currency, certificates: served[0].certificates, limiter: served[0].limiter,
+		described: described, tag: tag, now: time.Now}, nil
 }
 
 func (d *describer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -68,9 +70,13 @@ func (d *describer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		refuseStale(w)
 		return
 	}
-	if _, admitted := d.roster.Tenant(identity.AgentID); !admitted {
+	tenant, admitted := d.roster.Tenant(identity.AgentID)
+	if !admitted {
 		code, detail := unadmitted(d.roster, identity.AgentID)
 		refuse(w, http.StatusForbidden, code, detail, "", -1)
+		return
+	}
+	if _, admits := d.certificates.admits(w, d.roster, identity, tenant, DescriptorRoute); !admits {
 		return
 	}
 	if !d.limiter.Allow(identity.AgentID) {

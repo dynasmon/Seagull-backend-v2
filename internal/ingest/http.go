@@ -39,11 +39,13 @@ const (
 )
 
 // Which tenant an agent's telemetry belongs to, if the platform admits it at
-// all. The gateway is told the answer rather than looking it up: the registry is
-// a control-plane store and the ingest path reads no store per batch.
+// all, and on which certificate. The gateway is told the answer rather than
+// looking it up: the registry is a control-plane store and the ingest path reads
+// no store per batch.
 type Roster interface {
 	Tenant(agentID string) (string, bool)
 	Knows(agentID string) bool
+	Binding(agentID string) (agentidentity.Held, bool)
 }
 
 type Current interface {
@@ -54,6 +56,7 @@ type HandlerOptions struct {
 	Admitter       *Admitter
 	Roster         Roster
 	Currency       Current
+	Certificates   *Certificates
 	Limiter        *ratelimit.Limiter
 	Capacity       *Capacity
 	Metrics        *Metrics
@@ -65,6 +68,7 @@ type InventoryHandlerOptions struct {
 	Admitter       *InventoryAdmitter
 	Roster         Roster
 	Currency       Current
+	Certificates   *Certificates
 	Limiter        *ratelimit.Limiter
 	Capacity       *Capacity
 	Metrics        *InventoryMetrics
@@ -76,6 +80,7 @@ type StatusHandlerOptions struct {
 	Admitter       *StatusAdmitter
 	Roster         Roster
 	Currency       Current
+	Certificates   *Certificates
 	Limiter        *ratelimit.Limiter
 	Capacity       *Capacity
 	Metrics        *StatusMetrics
@@ -87,6 +92,7 @@ type AssessmentHandlerOptions struct {
 	Admitter       *AssessmentAdmitter
 	Roster         Roster
 	Currency       Current
+	Certificates   *Certificates
 	Limiter        *ratelimit.Limiter
 	Capacity       *Capacity
 	Metrics        *AssessmentMetrics
@@ -97,6 +103,7 @@ type AssessmentHandlerOptions struct {
 type gate struct {
 	roster         Roster
 	currency       Current
+	certificates   *Certificates
 	limiter        *ratelimit.Limiter
 	capacity       *Capacity
 	maxBodyBytes   int64
@@ -105,6 +112,7 @@ type gate struct {
 
 type Handler struct {
 	stream  stream
+	route   string
 	weigher *weigher
 	gate
 }
@@ -119,6 +127,7 @@ func NewHandler(options HandlerOptions) (*Handler, error) {
 	return newHandler(eventStream{admitter: options.Admitter, metrics: options.Metrics}, gate{
 		roster:         options.Roster,
 		currency:       options.Currency,
+		certificates:   options.Certificates,
 		limiter:        options.Limiter,
 		capacity:       options.Capacity,
 		maxBodyBytes:   options.MaxBodyBytes,
@@ -136,6 +145,7 @@ func NewInventoryHandler(options InventoryHandlerOptions) (*Handler, error) {
 	return newHandler(inventoryStream{admitter: options.Admitter, metrics: options.Metrics}, gate{
 		roster:         options.Roster,
 		currency:       options.Currency,
+		certificates:   options.Certificates,
 		limiter:        options.Limiter,
 		capacity:       options.Capacity,
 		maxBodyBytes:   options.MaxBodyBytes,
@@ -153,6 +163,7 @@ func NewStatusHandler(options StatusHandlerOptions) (*Handler, error) {
 	return newHandler(statusStream{admitter: options.Admitter, metrics: options.Metrics}, gate{
 		roster:         options.Roster,
 		currency:       options.Currency,
+		certificates:   options.Certificates,
 		limiter:        options.Limiter,
 		capacity:       options.Capacity,
 		maxBodyBytes:   options.MaxBodyBytes,
@@ -170,6 +181,7 @@ func NewAssessmentHandler(options AssessmentHandlerOptions) (*Handler, error) {
 	return newHandler(assessmentStream{admitter: options.Admitter, metrics: options.Metrics}, gate{
 		roster:         options.Roster,
 		currency:       options.Currency,
+		certificates:   options.Certificates,
 		limiter:        options.Limiter,
 		capacity:       options.Capacity,
 		maxBodyBytes:   options.MaxBodyBytes,
@@ -183,6 +195,9 @@ func newHandler(admitting stream, standing gate) (*Handler, error) {
 	}
 	if standing.currency == nil {
 		return nil, errors.New("the ingest handler needs to know whether what it knows of the agents is current")
+	}
+	if standing.certificates == nil {
+		return nil, errors.New("the ingest handler needs to judge the certificate an agent presents")
 	}
 	if standing.maxBodyBytes <= 0 {
 		return nil, errors.New("the ingest handler needs a positive body ceiling")
@@ -201,7 +216,7 @@ func newHandler(admitting stream, standing gate) (*Handler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("the %s route: %w", admitting.name(), err)
 	}
-	return &Handler{stream: admitting, weigher: scale, gate: standing}, nil
+	return &Handler{stream: admitting, route: admitting.describe().GetRoute(), weigher: scale, gate: standing}, nil
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -226,6 +241,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tenant, admitted := h.roster.Tenant(identity.AgentID)
 	if !admitted {
 		h.refuseUnadmitted(w, identity.AgentID)
+		return
+	}
+	if code, admits := h.certificates.admits(w, h.roster, identity, tenant, h.route); !admits {
+		h.stream.rejected(code)
 		return
 	}
 
@@ -277,6 +296,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	carried, err := h.stream.admit(publishCtx, identity, tenant, payload)
+	h.certificates.answering(w, h.roster, identity)
 	if err != nil {
 		h.refuseAdmission(ctx, w, carried, err)
 		return

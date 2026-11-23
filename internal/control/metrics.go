@@ -49,6 +49,7 @@ type Metrics struct {
 	findings    *prometheus.GaugeVec
 	carried     *prometheus.CounterVec
 	uncarried   prometheus.Gauge
+	presented   *prometheus.CounterVec
 }
 
 func NewMetrics(registry *metrics.Registry) *Metrics {
@@ -257,6 +258,15 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "agent_findings_outstanding",
 			Help:      "Decisions the control plane made about agents that the findings log has not taken yet.",
 		}),
+		presented: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "agent_certificates_total",
+			Help:      "Requests to the agent listener presented with a certificate other than the one in force: served inside the tolerance, or refused as replaced.",
+		}, []string{"standing"}),
+	}
+	for _, standing := range []string{"tolerated", "replaced"} {
+		instruments.presented.WithLabelValues(standing)
 	}
 
 	registry.MustRegister(
@@ -270,7 +280,7 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 		instruments.authorized, instruments.offered, instruments.downloaded,
 		instruments.inForce, instruments.readings, instruments.gated,
 		instruments.disposals, instruments.fleet, instruments.fleetReads, instruments.findings,
-		instruments.carried, instruments.uncarried,
+		instruments.carried, instruments.uncarried, instruments.presented,
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: "control",
@@ -378,6 +388,12 @@ func (m *Metrics) agentMoved(outcome string) {
 func (m *Metrics) certificateIssued(outcome string) {
 	if m != nil {
 		m.signed.WithLabelValues(outcome).Inc()
+	}
+}
+
+func (m *Metrics) certificatePresented(standing string) {
+	if m != nil {
+		m.presented.WithLabelValues(standing).Inc()
 	}
 }
 

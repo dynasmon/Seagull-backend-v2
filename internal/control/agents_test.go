@@ -29,6 +29,8 @@ type stubAgents struct {
 	asked        map[string]agent.Asked
 	announced    map[string]uint64
 	replaced     map[string]int
+	replacements map[string]agent.Replacement
+	older        map[string]bool
 	unreached    error
 	clock        time.Time
 }
@@ -43,12 +45,14 @@ func newStubAgents() *stubAgents {
 		panic(err)
 	}
 	return &stubAgents{
-		held:      map[string]*agentv1.Agent{registered.GetAgentId(): registered},
-		trail:     map[string][]*agentv1.Transition{registered.GetAgentId(): {line}},
-		asked:     map[string]agent.Asked{},
-		announced: map[string]uint64{},
-		replaced:  map[string]int{},
-		clock:     time.Date(2026, 9, 6, 10, 0, 0, 0, time.UTC),
+		held:         map[string]*agentv1.Agent{registered.GetAgentId(): registered},
+		trail:        map[string][]*agentv1.Transition{registered.GetAgentId(): {line}},
+		asked:        map[string]agent.Asked{},
+		announced:    map[string]uint64{},
+		replaced:     map[string]int{},
+		replacements: map[string]agent.Replacement{},
+		older:        map[string]bool{},
+		clock:        time.Date(2026, 9, 6, 10, 0, 0, 0, time.UTC),
 	}
 }
 
@@ -154,11 +158,15 @@ func (s *stubAgents) Renewable(_ context.Context, id string, asked agent.Move) e
 }
 
 func (s *stubAgents) apply(held *agentv1.Agent, asked agent.Move) (*agentv1.Agent, error) {
+	replacing := agent.Replacing(held, asked)
 	moved, line, err := agent.Apply(held, asked)
 	if err != nil {
 		return nil, err
 	}
 	id := moved.GetAgentId()
+	if asked.Identity != nil {
+		s.replacements[id] = replacing
+	}
 	s.held[id] = moved
 	s.trail[id] = append(s.trail[id], line)
 	if signed := agent.Certificate(moved, asked); signed != nil {
@@ -185,14 +193,39 @@ func (s *stubAgents) Outstanding(_ context.Context, _ int) ([]*agentv1.Admission
 	var waiting []*agentv1.Admission
 	for _, held := range s.held {
 		if s.announced[held.GetAgentId()] < held.GetRevision() {
-			waiting = append(waiting, agent.Admission(held))
+			waiting = append(waiting, agent.Admission(held, s.replacements[held.GetAgentId()]))
 		}
 	}
 	return waiting, nil
 }
 
+func (s *stubAgents) Unwritten(_ context.Context, _ int) ([]*agentv1.Admission, error) {
+	if s.unreached != nil {
+		return nil, s.unreached
+	}
+	var older []*agentv1.Admission
+	for id := range s.older {
+		if held := s.held[id]; held != nil && s.announced[id] >= held.GetRevision() {
+			older = append(older, agent.Admission(held, s.replacements[id]))
+		}
+	}
+	return older, nil
+}
+
+func (s *stubAgents) Admission(_ context.Context, id string) (*agentv1.Admission, error) {
+	if s.unreached != nil {
+		return nil, s.unreached
+	}
+	held, known := s.held[id]
+	if !known {
+		return nil, agent.ErrUnknown
+	}
+	return agent.Admission(held, s.replacements[id]), nil
+}
+
 func (s *stubAgents) Announced(_ context.Context, agentID string, revision uint64) error {
-	s.announced[agentID] = revision
+	s.announced[agentID] = max(s.announced[agentID], revision)
+	delete(s.older, agentID)
 	return nil
 }
 

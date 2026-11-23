@@ -24,6 +24,7 @@ type registeredAgents struct {
 	certificates map[string][]*agentv1.CertificateRecord
 	asked        map[string]agent.Asked
 	announced    map[string]uint64
+	replacements map[string]agent.Replacement
 }
 
 func newRegisteredAgents() *registeredAgents {
@@ -33,6 +34,7 @@ func newRegisteredAgents() *registeredAgents {
 		certificates: map[string][]*agentv1.CertificateRecord{},
 		asked:        map[string]agent.Asked{},
 		announced:    map[string]uint64{},
+		replacements: map[string]agent.Replacement{},
 	}
 }
 
@@ -132,11 +134,15 @@ func (r *registeredAgents) Renewable(_ context.Context, id string, asked agent.M
 }
 
 func (r *registeredAgents) apply(held *agentv1.Agent, asked agent.Move) (*agentv1.Agent, error) {
+	replacing := agent.Replacing(held, asked)
 	moved, line, err := agent.Apply(held, asked)
 	if err != nil {
 		return nil, err
 	}
 	id := moved.GetAgentId()
+	if asked.Identity != nil {
+		r.replacements[id] = replacing
+	}
 	r.held[id] = moved
 	r.trail[id] = append(r.trail[id], line)
 	if signed := agent.Certificate(moved, asked); signed != nil {
@@ -174,16 +180,30 @@ func (r *registeredAgents) Outstanding(_ context.Context, _ int) ([]*agentv1.Adm
 	var waiting []*agentv1.Admission
 	for id, held := range r.held {
 		if r.announced[id] < held.GetRevision() {
-			waiting = append(waiting, agent.Admission(held))
+			waiting = append(waiting, agent.Admission(held, r.replacements[id]))
 		}
 	}
 	return waiting, nil
 }
 
+func (r *registeredAgents) Unwritten(context.Context, int) ([]*agentv1.Admission, error) {
+	return nil, nil
+}
+
+func (r *registeredAgents) Admission(_ context.Context, id string) (*agentv1.Admission, error) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	held, known := r.held[id]
+	if !known {
+		return nil, agent.ErrUnknown
+	}
+	return agent.Admission(held, r.replacements[id]), nil
+}
+
 func (r *registeredAgents) Announced(_ context.Context, agentID string, revision uint64) error {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
-	r.announced[agentID] = revision
+	r.announced[agentID] = max(r.announced[agentID], revision)
 	return nil
 }
 

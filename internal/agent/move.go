@@ -8,6 +8,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 )
 
@@ -162,14 +163,53 @@ func Renewing(current *agentv1.Agent, move Move) error {
 	return nil
 }
 
-// What the data plane is told, which is less than what was decided: the state
-// and the revision it was decided at, and neither the reason nor the operator.
-func Admission(moved *agentv1.Agent) *agentv1.Admission {
-	return &agentv1.Admission{
-		AgentId:   moved.GetAgentId(),
-		TenantId:  moved.GetTenantId(),
-		State:     moved.GetState(),
-		Revision:  moved.GetRevision(),
-		ChangedAt: moved.GetChangedAt(),
+type Replacement struct {
+	Fingerprint string
+	At          time.Time
+}
+
+func Replacing(current *agentv1.Agent, move Move) Replacement {
+	switch {
+	case move.Identity == nil:
+		return Replacement{}
+	case move.Renewal:
+		return Replacement{Fingerprint: move.PresentedFingerprint, At: move.At}
+	case current.GetIdentity().GetFingerprintSha256() != "":
+		return Replacement{Fingerprint: current.GetIdentity().GetFingerprintSha256(), At: move.At}
 	}
+	return Replacement{}
+}
+
+// What the data plane is told, which is less than what was decided: the state
+// and the revision it was decided at, and of a certificate only its
+// fingerprint, never the reason, the operator or what the certificate names.
+func Admission(moved *agentv1.Agent, replaced Replacement) *agentv1.Admission {
+	told := &agentv1.Admission{
+		AgentId:           moved.GetAgentId(),
+		TenantId:          moved.GetTenantId(),
+		State:             moved.GetState(),
+		Revision:          moved.GetRevision(),
+		ChangedAt:         moved.GetChangedAt(),
+		FingerprintSha256: moved.GetIdentity().GetFingerprintSha256(),
+		IssuedAt:          moved.GetIdentity().GetIssuedAt(),
+	}
+	if told.FingerprintSha256 != "" && replaced.Fingerprint != "" {
+		told.ReplacedFingerprintSha256, told.ReplacedAt = replaced.Fingerprint, timestamppb.New(replaced.At.UTC())
+	}
+	return told
+}
+
+func BindingOf(record *agentv1.Admission) agentidentity.Binding {
+	binding := agentidentity.Binding{Fingerprint: record.GetFingerprintSha256()}
+	if binding.Fingerprint == "" {
+		return binding
+	}
+	if issued := record.GetIssuedAt(); issued.IsValid() {
+		binding.IssuedAt = issued.AsTime()
+	}
+	binding.Replaced = record.GetReplacedFingerprintSha256()
+	if replaced := record.GetReplacedAt(); binding.Replaced != "" && replaced.IsValid() {
+		binding.ReplacedAt = replaced.AsTime()
+	}
+	return binding
 }

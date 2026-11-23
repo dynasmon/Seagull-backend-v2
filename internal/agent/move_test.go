@@ -225,12 +225,19 @@ func TestWhatTheDataPlaneIsToldIsLessThanWhatWasDecided(t *testing.T) {
 		t.Fatalf("revoke: %v", err)
 	}
 
-	told := agent.Admission(held)
+	replacedAt := moved.Add(-time.Minute)
+	told := agent.Admission(held, agent.Replacement{Fingerprint: strings.Repeat("ef", 32), At: replacedAt})
 	if told.GetAgentId() != held.GetAgentId() || told.GetTenantId() != held.GetTenantId() {
 		t.Fatalf("the admission record does not name the agent: %v", told)
 	}
 	if told.GetState() != held.GetState() || told.GetRevision() != held.GetRevision() {
 		t.Fatalf("the admission record does not carry what was decided: %v", told)
+	}
+	if told.GetFingerprintSha256() != strings.Repeat("ab", 32) || !told.GetIssuedAt().AsTime().Equal(registered) {
+		t.Fatalf("the admission record does not say which certificate is in force: %v", told)
+	}
+	if told.GetReplacedFingerprintSha256() != strings.Repeat("ef", 32) || !told.GetReplacedAt().AsTime().Equal(replacedAt) {
+		t.Fatalf("the admission record does not say which certificate the one in force replaced: %v", told)
 	}
 
 	fields := told.ProtoReflect().Descriptor().Fields()
@@ -241,5 +248,46 @@ func TestWhatTheDataPlaneIsToldIsLessThanWhatWasDecided(t *testing.T) {
 		default:
 			t.Errorf("the data plane is told %q about an agent", name)
 		}
+	}
+}
+
+func TestAnAgentWithNoCertificateBoundIsToldAsBindingNone(t *testing.T) {
+	told := agent.Admission(pending(t), agent.Replacement{})
+	if told.GetFingerprintSha256() != "" || told.GetIssuedAt() != nil || told.GetReplacedFingerprintSha256() != "" || told.GetReplacedAt() != nil {
+		t.Fatalf("an agent nothing is bound to is told as bound: %v", told)
+	}
+}
+
+func TestABindingReplacesTheCertificateTheAgentHolds(t *testing.T) {
+	presented, inForce := strings.Repeat("ef", 32), strings.Repeat("ab", 32)
+	for name, c := range map[string]struct {
+		held *agentv1.Agent
+		move agent.Move
+		want agent.Replacement
+	}{
+		"the first certificate bound to a pending agent": {
+			pending(t), agent.Move{Identity: identity(), Actor: "operator@acme", At: moved}, agent.Replacement{},
+		},
+		"a certificate an operator bound in place of the one in force": {
+			active(t), agent.Move{Identity: identity(), Actor: "operator@acme", At: moved},
+			agent.Replacement{Fingerprint: inForce, At: moved},
+		},
+		"a renewal presented with the certificate in force": {
+			active(t), agent.Move{Identity: identity(), Actor: "web-01", At: moved, Renewal: true, PresentedFingerprint: inForce},
+			agent.Replacement{Fingerprint: inForce, At: moved},
+		},
+		"a renewal asked again with the certificate its lost answer replaced": {
+			active(t), agent.Move{Identity: identity(), Actor: "web-01", At: moved, Renewal: true, PresentedFingerprint: presented},
+			agent.Replacement{Fingerprint: presented, At: moved},
+		},
+		"a move that binds nothing": {
+			active(t), agent.Move{To: agent.Disabled, Note: "maintenance", Actor: "operator@acme", At: moved}, agent.Replacement{},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := agent.Replacing(c.held, c.move); got != c.want {
+				t.Fatalf("the binding replaced %+v, want %+v", got, c.want)
+			}
+		})
 	}
 }

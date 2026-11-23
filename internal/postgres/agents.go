@@ -31,6 +31,11 @@ const agentColumns = `agent_id, schema_version, tenant_id, state,
 var insertAgent = `INSERT INTO agents (` + agentColumns + `)
 VALUES (` + placeholdersFor(agentColumns) + `)`
 
+const admissionFormat = 1
+
+const admissionColumns = `agent_id, tenant_id, state, revision, changed_at,
+	identity_fingerprint, identity_issued_at, replaced_fingerprint, replaced_at`
+
 const insertAgentTransition = `INSERT INTO agent_transitions
 	(agent_id, revision, from_state, to_state, actor, at, note)
 VALUES ($1,$2,$3,$4,$5,$6,$7)
@@ -73,13 +78,40 @@ func (a *Agents) Outstanding(ctx context.Context, limit int) ([]*agentv1.Admissi
 		limit = DefaultPageSize
 	}
 	rows, err := a.store.pool.Query(ctx,
-		`SELECT agent_id, tenant_id, state, revision, changed_at
-		 FROM agents WHERE published_revision < revision
+		"SELECT "+admissionColumns+` FROM agents WHERE published_revision < revision
 		 ORDER BY changed_at LIMIT $1`, min(limit, MaxPageSize))
 	if err != nil {
 		return nil, fmt.Errorf("read the agents the data plane has not been told about: %w", err)
 	}
 	return pgx.CollectRows(rows, restoreAdmission)
+}
+
+func (a *Agents) Unwritten(ctx context.Context, limit int) ([]*agentv1.Admission, error) {
+	if limit <= 0 {
+		limit = DefaultPageSize
+	}
+	rows, err := a.store.pool.Query(ctx,
+		"SELECT "+admissionColumns+` FROM agents WHERE published_format < $1 AND published_revision >= revision
+		 ORDER BY agent_id LIMIT $2`, admissionFormat, min(limit, MaxPageSize))
+	if err != nil {
+		return nil, fmt.Errorf("read the agents whose record the data plane holds in an older shape: %w", err)
+	}
+	return pgx.CollectRows(rows, restoreAdmission)
+}
+
+func (a *Agents) Admission(ctx context.Context, id string) (*agentv1.Admission, error) {
+	rows, err := a.store.pool.Query(ctx, "SELECT "+admissionColumns+" FROM agents WHERE agent_id = $1", id)
+	if err != nil {
+		return nil, fmt.Errorf("read what the data plane is told of agent %s: %w", id, err)
+	}
+	told, err := pgx.CollectRows(rows, restoreAdmission)
+	switch {
+	case err != nil:
+		return nil, fmt.Errorf("read what the data plane is told of agent %s: %w", id, err)
+	case len(told) == 0:
+		return nil, agent.ErrUnknown
+	}
+	return told[0], nil
 }
 
 func (a *Agents) Admitted(ctx context.Context) (map[string]string, error) {
@@ -123,8 +155,8 @@ func (a *Agents) State(ctx context.Context, id string) (agent.State, error) {
 
 func (a *Agents) Announced(ctx context.Context, agentID string, revision uint64) error {
 	if _, err := a.store.pool.Exec(ctx,
-		`UPDATE agents SET published_revision = $2
-		 WHERE agent_id = $1 AND published_revision < $2`, agentID, int64(revision),
+		`UPDATE agents SET published_revision = GREATEST(published_revision, $2), published_format = $3
+		 WHERE agent_id = $1 AND (published_revision < $2 OR published_format < $3)`, agentID, int64(revision), admissionFormat,
 	); err != nil {
 		return fmt.Errorf("record that agent %s was announced: %w", agentID, err)
 	}
@@ -270,15 +302,24 @@ func (a *Agents) move(ctx context.Context, id string, asked agent.Move, query st
 		return nil, err
 	}
 
+	replaced := agent.Replacing(held[0], asked)
+	var replacedAt *time.Time
+	if replaced.Fingerprint != "" {
+		at := replaced.At.UTC()
+		replacedAt = &at
+	}
 	if _, err := transaction.Exec(ctx,
 		`UPDATE agents SET state = $2, changed_by = $3, changed_at = $4, revision = $5,
 			identity_subject = $6, identity_serial = $7, identity_fingerprint = $8,
-			identity_issued_at = $9, identity_expires_at = $10
+			identity_issued_at = $9, identity_expires_at = $10,
+			replaced_fingerprint = CASE WHEN $11 THEN $12 ELSE replaced_fingerprint END,
+			replaced_at = CASE WHEN $11 THEN $13 ELSE replaced_at END
 		 WHERE agent_id = $1`,
 		moved.GetAgentId(),
 		agentState(moved.GetState()), moved.GetChangedBy(), moved.GetChangedAt().AsTime(), int64(moved.GetRevision()),
 		moved.GetIdentity().GetSubject(), moved.GetIdentity().GetSerial(), moved.GetIdentity().GetFingerprintSha256(),
 		optional(moved.GetIdentity().GetIssuedAt()), optional(moved.GetIdentity().GetExpiresAt()),
+		asked.Identity != nil, replaced.Fingerprint, replacedAt,
 	); err != nil {
 		if duplicate(err) {
 			return nil, fmt.Errorf("%w: that certificate is bound to another agent", agent.ErrMalformedIdentity)
@@ -364,18 +405,27 @@ func restoreAgent(row pgx.CollectableRow) (*agentv1.Agent, error) {
 
 func restoreAdmission(row pgx.CollectableRow) (*agentv1.Admission, error) {
 	var (
-		record    agentv1.Admission
-		named     string
-		revision  int64
-		changedAt time.Time
+		decided              agentv1.Agent
+		named, fingerprintOf string
+		revision             int64
+		changedAt            time.Time
+		issuedAt, replacedAt *time.Time
+		replaced             agent.Replacement
 	)
-	if err := row.Scan(&record.AgentId, &record.TenantId, &named, &revision, &changedAt); err != nil {
+	if err := row.Scan(&decided.AgentId, &decided.TenantId, &named, &revision, &changedAt,
+		&fingerprintOf, &issuedAt, &replaced.Fingerprint, &replacedAt); err != nil {
 		return nil, err
 	}
-	record.State = agent.State(named).Wire()
-	record.Revision = uint64(revision)
-	record.ChangedAt = timestamppb.New(changedAt.UTC())
-	return &record, nil
+	decided.State = agent.State(named).Wire()
+	decided.Revision = uint64(revision)
+	decided.ChangedAt = timestamppb.New(changedAt.UTC())
+	if fingerprintOf != "" {
+		decided.Identity = &agentv1.Identity{FingerprintSha256: fingerprintOf, IssuedAt: instant(issuedAt)}
+	}
+	if replacedAt != nil {
+		replaced.At = replacedAt.UTC()
+	}
+	return agent.Admission(&decided, replaced), nil
 }
 
 func restoreAgentTransition(row pgx.CollectableRow) (*agentv1.Transition, error) {

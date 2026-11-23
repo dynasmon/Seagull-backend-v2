@@ -162,3 +162,33 @@ func TestAReplacedCertificateIsPublishedAsAFindingOfTheRenewalRouteThatNeverName
 		t.Errorf("%v decisions are counted published", counted)
 	}
 }
+
+func TestAFindingOfTheAgentListenerSaysTheRouteTheReplacedCertificateWasLastRefusedOn(t *testing.T) {
+	now := time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
+	kept := &stubReplacements{waiting: []agentfinding.Replaced{
+		{TenantID: "default", AgentID: "web-01", InForce: strings.Repeat("ab", 32), Route: "GET " + control.PolicyPath,
+			OpenedAt: now.Add(-time.Hour), LastObservedAt: now, Observations: 2, DecidedAt: now, Revision: 2},
+		{TenantID: "default", AgentID: "web-02", InForce: strings.Repeat("cd", 32),
+			OpenedAt: now.Add(-time.Hour), LastObservedAt: now, Observations: 1, DecidedAt: now, Revision: 1},
+	}}
+	told := &stubFindingDecisions{}
+	announcer, err := control.NewFindingAnnouncer(control.FindingAnnouncerOptions{
+		Replacements: kept, Decisions: told, Metrics: control.NewMetrics(metrics.New("control-api-finding-routes")),
+		Logger: slog.New(slog.DiscardHandler), Every: time.Second, Batch: 10, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	announcer.Sweep(context.Background())
+	routes := map[string]string{}
+	for _, decided := range told.published {
+		if decided.GetUse().GetListener() != agentv1.Finding_Use_LISTENER_CONTROL {
+			t.Errorf("a finding of the agent listener says it was used on %s", decided.GetUse().GetListener())
+		}
+		routes[decided.GetAgentId()] = decided.GetUse().GetRoute()
+	}
+	if routes["web-01"] != "GET "+control.PolicyPath || routes["web-02"] != "POST "+control.RenewalPath {
+		t.Fatalf("the findings say the replaced certificates were used on %v", routes)
+	}
+}

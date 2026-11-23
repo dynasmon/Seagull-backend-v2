@@ -42,6 +42,7 @@ type ServerOptions struct {
 	RenewalAddress    string
 	RenewalTLS        *tls.Config
 	RenewalLimiter    *ratelimit.Limiter
+	ReplacedTolerance time.Duration
 	Policies          AgentPolicies
 	PolicySigners     func() (*agentpolicy.Signers, error)
 	PolicyLimiter     *ratelimit.Limiter
@@ -81,6 +82,7 @@ type Server struct {
 	trustBundle     func() ([]byte, error)
 	certificateLife time.Duration
 	renewals        *ratelimit.Limiter
+	tolerance       time.Duration
 
 	policies      AgentPolicies
 	policySigners func() (*agentpolicy.Signers, error)
@@ -160,6 +162,12 @@ func newServer(options ServerOptions) (*Server, error) {
 	if options.Now == nil {
 		options.Now = time.Now
 	}
+	switch {
+	case options.ReplacedTolerance < 0:
+		return nil, errors.New("the control listener tolerates the certificate a renewal replaced for no negative while")
+	case options.ReplacedTolerance == 0:
+		options.ReplacedTolerance = DefaultReplacedTolerance
+	}
 
 	return &Server{
 		sessions:   options.Sessions,
@@ -181,6 +189,7 @@ func newServer(options ServerOptions) (*Server, error) {
 		trustBundle:     options.TrustBundle,
 		certificateLife: options.CertificateLife,
 		renewals:        options.RenewalLimiter,
+		tolerance:       options.ReplacedTolerance,
 
 		policies:      options.Policies,
 		policySigners: options.PolicySigners,

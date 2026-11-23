@@ -16,6 +16,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentfinding"
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/fleetjudge"
 	"github.com/dynasmon/Seagull-backend-v2/internal/listening"
@@ -277,5 +279,49 @@ func TestNoSilenceIsFoundWhileNoGatewayAdmitsEvenThoughTheBackboneIsUp(t *testin
 	j.at(20*time.Minute, false)
 	if decided := j.decisions(); len(decided) != 0 {
 		t.Fatalf("a platform whose gateways admitted nothing found %v", decided)
+	}
+}
+
+func TestAGatewaysRefusalsOfAReplacedCertificateAreOneFindingUntilAnotherIsBound(t *testing.T) {
+	j := judging(t)
+	j.silentAt = j.clock.now()
+	j.report(1, j.silentAt)
+	j.start()
+
+	inForce, next := agentFingerprint(t), agentFingerprint(t)
+	admit := func(revision uint64, fingerprint string, changed time.Time) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := j.agents.Publish(ctx, &agentv1.Admission{AgentId: j.agentID, TenantId: "default", State: agentv1.State_STATE_ACTIVE,
+			Revision: revision, ChangedAt: timestamppb.New(changed), FingerprintSha256: fingerprint, IssuedAt: timestamppb.New(changed)}); err != nil {
+			j.t.Fatalf("bind a certificate: %v", err)
+		}
+		j.caughtUp("agents")
+	}
+	admit(3, inForce, j.silentAt)
+
+	refused := agentidentity.Refused(j.agentID, "default", agentidentity.Held{Binding: agentidentity.Binding{Fingerprint: inForce}, Revision: 3},
+		"POST /v1/events", "gateway-integration", j.silentAt.Add(time.Second))
+	refused.Refusals = 3
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := j.refusals.PublishRefusals(ctx, []*agentv1.Refusal{refused}); err != nil {
+		t.Fatalf("publish the refusals: %v", err)
+	}
+	j.caughtUp("refusals")
+	j.at(time.Minute, true)
+	decided := j.decisions()
+	if len(decided) != 1 || decided[0].GetKind() != agentv1.Finding_KIND_REPLACED_CERTIFICATE || decided[0].GetState() != agentv1.Finding_STATE_OPEN ||
+		decided[0].GetObservations() != 3 || decided[0].GetUse().GetListener() != agentv1.Finding_Use_LISTENER_GATEWAY ||
+		decided[0].GetFindingId() != agentfinding.RefusingID("default", j.agentID, inForce) {
+		t.Fatalf("the backbone holds %v, want one open finding of the gateway's refusals", decided)
+	}
+
+	admit(4, next, j.silentAt.Add(2*time.Minute))
+	j.at(3*time.Minute, true)
+	decided = j.decisions()
+	if len(decided) != 2 || decided[1].GetFindingId() != decided[0].GetFindingId() || decided[1].GetClosure() != agentv1.Finding_CLOSURE_REBOUND ||
+		!decided[1].GetClosedAt().AsTime().Equal(j.silentAt.Add(2*time.Minute)) {
+		t.Fatalf("binding another certificate left the backbone holding %v", decided)
 	}
 }

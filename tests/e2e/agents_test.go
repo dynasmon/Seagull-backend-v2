@@ -118,6 +118,19 @@ func (r *registeredAgents) Renew(_ context.Context, id string, asked agent.Move)
 	return r.apply(held, asked)
 }
 
+func (r *registeredAgents) Renewable(_ context.Context, id string, asked agent.Move) error {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	held, known := r.held[id]
+	if !known {
+		return agent.ErrUnknown
+	}
+	asked.Renewal = true
+	asked.Bound = r.asked[id]
+	return agent.Renewing(held, asked)
+}
+
 func (r *registeredAgents) apply(held *agentv1.Agent, asked agent.Move) (*agentv1.Agent, error) {
 	moved, line, err := agent.Apply(held, asked)
 	if err != nil {

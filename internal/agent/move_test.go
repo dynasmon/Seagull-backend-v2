@@ -236,7 +236,8 @@ func TestWhatTheDataPlaneIsToldIsLessThanWhatWasDecided(t *testing.T) {
 	fields := told.ProtoReflect().Descriptor().Fields()
 	for index := range fields.Len() {
 		switch name := string(fields.Get(index).Name()); name {
-		case "agent_id", "tenant_id", "state", "revision", "changed_at":
+		case "agent_id", "tenant_id", "state", "revision", "changed_at",
+			"fingerprint_sha256", "issued_at", "replaced_fingerprint_sha256", "replaced_at":
 		default:
 			t.Errorf("the data plane is told %q about an agent", name)
 		}

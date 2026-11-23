@@ -977,6 +977,62 @@
       "if_none_match": true,
       "status": 304,
       "tagged": true
+    },
+    {
+      "name": "policy-certificate-replaced",
+      "listener": "agent",
+      "method": "GET",
+      "path": "/v1/agents/policy",
+      "status": 403,
+      "content_type": "application/x-protobuf",
+      "reply": "policy-certificate-replaced.reply.pb",
+      "message": "seagull.control.v1.Refusal",
+      "summary": {
+        "code": "agent_certificate_replaced",
+        "detail": "\u003cdetail\u003e"
+      }
+    },
+    {
+      "name": "update-certificate-replaced",
+      "listener": "agent",
+      "method": "GET",
+      "path": "/v1/agents/update",
+      "status": 403,
+      "content_type": "application/x-protobuf",
+      "reply": "update-certificate-replaced.reply.pb",
+      "message": "seagull.control.v1.Refusal",
+      "summary": {
+        "code": "agent_certificate_replaced",
+        "detail": "\u003cdetail\u003e"
+      }
+    },
+    {
+      "name": "package-certificate-replaced",
+      "listener": "agent",
+      "method": "GET",
+      "path": "/v1/agents/update/packages/abababababababababababababababababababababababababababababababab",
+      "status": 403,
+      "content_type": "application/x-protobuf",
+      "reply": "package-certificate-replaced.reply.pb",
+      "message": "seagull.control.v1.Refusal",
+      "summary": {
+        "code": "agent_certificate_replaced",
+        "detail": "\u003cdetail\u003e"
+      }
+    },
+    {
+      "name": "agent-descriptor-certificate-replaced",
+      "listener": "agent",
+      "method": "GET",
+      "path": "/v1/descriptor",
+      "status": 403,
+      "content_type": "application/x-protobuf",
+      "reply": "agent-descriptor-certificate-replaced.reply.pb",
+      "message": "seagull.control.v1.Refusal",
+      "summary": {
+        "code": "agent_certificate_replaced",
+        "detail": "\u003cdetail\u003e"
+      }
     }
   ]
 }

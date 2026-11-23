@@ -20,15 +20,17 @@ const (
 	WHERE agent_id = $1 AND closed_at IS NULL AND in_force <> $4`
 
 	observeReplaced = `INSERT INTO agent_replaced_certificates
-		(agent_id, in_force, opened_at, last_observed_at, observations, decided_at, revision)
-	VALUES ($1, $2, $3, $3, 1, $3, 1)
+		(agent_id, in_force, opened_at, last_observed_at, observations, decided_at, revision, use_route)
+	VALUES ($1, $2, $3, $3, 1, $3, 1, $4)
 	ON CONFLICT (agent_id, in_force) DO UPDATE SET
 		last_observed_at = GREATEST(agent_replaced_certificates.last_observed_at, EXCLUDED.last_observed_at),
 		observations     = agent_replaced_certificates.observations + 1,
 		closure          = '',
 		closed_at        = NULL,
 		decided_at       = GREATEST(agent_replaced_certificates.decided_at, EXCLUDED.decided_at),
-		revision         = agent_replaced_certificates.revision + 1`
+		revision         = agent_replaced_certificates.revision + 1,
+		use_route        = CASE WHEN EXCLUDED.last_observed_at >= agent_replaced_certificates.last_observed_at
+		                        THEN EXCLUDED.use_route ELSE agent_replaced_certificates.use_route END`
 )
 
 // Asked before a renewal is signed, under the row lock binding would take, so a
@@ -61,21 +63,54 @@ func (a *Agents) Renewable(ctx context.Context, id string, asked agent.Move) err
 	if !errors.Is(refused, agent.ErrCertificateReplaced) {
 		return refused
 	}
-	return replacedCommitted(ctx, transaction, held[0], asked.At, refused)
+	if err := replacedCommitted(ctx, transaction, held[0], asked.At, ""); err != nil {
+		return err
+	}
+	return refused
 }
 
-func replacedCommitted(ctx context.Context, transaction pgx.Tx, current *agentv1.Agent, at time.Time, refused error) error {
+// A certificate the agent listener refused on a route other than renewal, as
+// not the one in force, recorded as a refused renewal is: under the agent's row
+// lock, in the episode of the certificate in force. A refusal decided under a
+// binding that has since moved, or of an agent no longer admitted, records
+// nothing, since the episode it would belong to is over.
+func (a *Agents) ReplacedUsed(ctx context.Context, id, inForce, route string, at time.Time) error {
+	transaction, err := a.store.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin recording the replaced certificate agent %s presented: %w", id, err)
+	}
+	defer func() { _ = transaction.Rollback(ctx) }()
+
+	rows, err := transaction.Query(ctx, "SELECT "+agentColumns+" FROM agents WHERE agent_id = $1 FOR UPDATE", id)
+	if err != nil {
+		return fmt.Errorf("read agent %s: %w", id, err)
+	}
+	held, err := pgx.CollectRows(rows, restoreAgent)
+	switch {
+	case err != nil:
+		return fmt.Errorf("read agent %s: %w", id, err)
+	case len(held) == 0:
+		return agent.ErrUnknown
+	}
+	state, known := agent.FromWire(held[0].GetState())
+	if !known || !state.Admits() || held[0].GetIdentity().GetFingerprintSha256() != inForce || inForce == "" {
+		return nil
+	}
+	return replacedCommitted(ctx, transaction, held[0], at, route)
+}
+
+func replacedCommitted(ctx context.Context, transaction pgx.Tx, current *agentv1.Agent, at time.Time, route string) error {
 	inForce := current.GetIdentity().GetFingerprintSha256()
 	if _, err := transaction.Exec(ctx, endReplaced, current.GetAgentId(), agentfinding.ClosureName(agentv1.Finding_CLOSURE_REBOUND), at.UTC(), inForce); err != nil {
 		return fmt.Errorf("end the replaced certificates of agent %s: %w", current.GetAgentId(), err)
 	}
-	if _, err := transaction.Exec(ctx, observeReplaced, current.GetAgentId(), inForce, at.UTC()); err != nil {
+	if _, err := transaction.Exec(ctx, observeReplaced, current.GetAgentId(), inForce, at.UTC(), route); err != nil {
 		return fmt.Errorf("record the replaced certificate agent %s presented: %w", current.GetAgentId(), err)
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return fmt.Errorf("commit the replaced certificate agent %s presented: %w", current.GetAgentId(), err)
 	}
-	return refused
+	return nil
 }
 
 func replacedEnded(ctx context.Context, transaction pgx.Tx, before, after *agentv1.Agent, at time.Time) error {
@@ -96,7 +131,7 @@ func (a *Agents) Unpublished(ctx context.Context, limit int) ([]agentfinding.Rep
 	}
 	rows, err := a.store.pool.Query(ctx,
 		`SELECT r.agent_id, a.tenant_id, r.in_force, r.opened_at, r.last_observed_at, r.observations,
-			r.closure, r.closed_at, r.decided_at, r.revision
+			r.closure, r.closed_at, r.decided_at, r.revision, r.use_route
 		 FROM agent_replaced_certificates r JOIN agents a ON a.agent_id = r.agent_id
 		 WHERE r.published_revision < r.revision
 		 ORDER BY r.decided_at, r.agent_id LIMIT $1`, min(limit, MaxPageSize))
@@ -136,7 +171,7 @@ func restoreReplaced(row pgx.CollectableRow) (agentfinding.Replaced, error) {
 		revision int64
 	)
 	if err := row.Scan(&used.AgentID, &used.TenantID, &used.InForce, &used.OpenedAt, &used.LastObservedAt, &count,
-		&closure, &closedAt, &used.DecidedAt, &revision); err != nil {
+		&closure, &closedAt, &used.DecidedAt, &revision, &used.Route); err != nil {
 		return agentfinding.Replaced{}, err
 	}
 	used.Observations, used.Revision = uint64(count), uint64(revision)

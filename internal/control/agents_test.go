@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agent"
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentstatus"
 	"github.com/dynasmon/Seagull-backend-v2/internal/control"
 	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
@@ -31,8 +32,14 @@ type stubAgents struct {
 	replaced     map[string]int
 	replacements map[string]agent.Replacement
 	older        map[string]bool
+	used         []usedCertificate
 	unreached    error
 	clock        time.Time
+}
+
+type usedCertificate struct {
+	agentID, inForce, route string
+	at                      time.Time
 }
 
 func newStubAgents() *stubAgents {
@@ -221,6 +228,23 @@ func (s *stubAgents) Admission(_ context.Context, id string) (*agentv1.Admission
 		return nil, agent.ErrUnknown
 	}
 	return agent.Admission(held, s.replacements[id]), nil
+}
+
+func (s *stubAgents) Binding(ctx context.Context, id string) (agent.State, agentidentity.Binding, error) {
+	told, err := s.Admission(ctx, id)
+	if err != nil {
+		return "", agentidentity.Binding{}, err
+	}
+	state, _ := agent.FromWire(told.GetState())
+	return state, agent.BindingOf(told), nil
+}
+
+func (s *stubAgents) ReplacedUsed(_ context.Context, id, inForce, route string, at time.Time) error {
+	if s.unreached != nil {
+		return s.unreached
+	}
+	s.used = append(s.used, usedCertificate{agentID: id, inForce: inForce, route: route, at: at})
+	return nil
 }
 
 func (s *stubAgents) Announced(_ context.Context, agentID string, revision uint64) error {

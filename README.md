@@ -409,14 +409,19 @@ at, and a report is still judged against the interval it announces; every thirty
 seconds `control-api` counts the agents the registry admits by liveness, into one
 series per liveness, never one per agent
 ([ADR 54](docs/decisions/0054-a-gateway-asks-how-often-to-report-and-the-fleet-is-counted-as-it-is-read.md)).
-What the platform finds about an agent from how it reports is a record of its
-own, decided by `fleet-judge` while every gateway says on `security.gateways`
-whether it admits, and kept by `agent-finding-writer` in `agent_findings`: reading one agent carries
+What the platform finds about an agent from how it reports and presents itself
+is a record of its own. `fleet-judge` decides a silence while every gateway says
+on `security.gateways` whether it admits, and tells the runs it hears apart to
+find an installation copied to a second place or two installations sharing one
+identity; `control-api` asks the registry before it signs a renewal, and decides a
+renewal presented with a certificate a renewal had replaced. `agent-finding-writer`
+keeps them in `agent_findings`: reading one agent carries
 its open findings, `POST /v1/agents/findings/search` lists them within the
 tenants a caller holds, and the open findings are counted by kind beside the
 fleet. A finding changes nothing by itself; no agent is disabled, revoked or
 refused for one
-([ADR 56](docs/decisions/0056-a-finding-about-an-agent-is-a-record-of-its-own-judged-only-while-the-platform-listens.md)).
+([ADR 56](docs/decisions/0056-a-finding-about-an-agent-is-a-record-of-its-own-judged-only-while-the-platform-listens.md),
+[ADR 57](docs/decisions/0057-a-place-is-a-run-and-a-renewal-is-refused-before-it-is-signed.md)).
 
 What an agent found when it ran the checks of its policy travels on a fourth,
 and every assessment is kept, because the ones before the newest are what a
@@ -495,14 +500,14 @@ Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 | `alert-writer` | Opens the work a detection at or above a severity floor becomes: an alert for a finding about one event, folded on a declared key, or an incident for a story several events told. It inserts and never updates. |
 | `inventory-projector` | Folds what a collector saw into what an asset currently has, under a group and a quarantine of its own. An item the newest full scan stops naming is no longer current, and nothing is deleted to say so. |
 | `status-projector` | Keeps the newest report each agent sent of itself, one row per agent, under a group and a quarantine of its own, so a status store outage costs how fresh liveness is and never telemetry. |
-| `fleet-judge` | Decides what agents' reports, and their absence, say about them: an agent the registry admits that stopped reporting is a silence, judged only while the judge confirmed it reads the end of the status log and a gateway said it admits, so an outage of the backbone, the gateways or the judge never reads as a silent fleet. It reads its logs whole and writes nothing but decisions. |
+| `fleet-judge` | Decides what agents' reports, and their absence, say about them: an agent the registry admits that stopped reporting is a silence, judged only while the judge confirmed it reads the end of the status log and a gateway said it admits, so an outage of the backbone, the gateways or the judge never reads as a silent fleet. A run reporting a sequence another run of its installation already holds is a copy, and two installations reporting in turn share one identity, held within a bound per agent whatever the holder of its key sends. It reads its logs whole and writes nothing but decisions. |
 | `agent-finding-writer` | Keeps what the platform found about its agents — a silence, an installation or an identity reporting from two places, a replaced certificate in use — one row per finding as its newest decision, under a group and a quarantine of its own, so a store outage costs how current the findings are and never a decision. |
 | `assessment-projector` | Keeps every assessment agents made of their hosts, one row per assessment, under a group and a quarantine of its own, so an assessment store outage costs how fresh a posture is and never telemetry. |
 | `advisory-importer` | Follows the vulnerability feeds a deployment names, translates each changed record into an advisory carrying its provenance, and publishes it with the freshness of the feed. The one process that reaches the internet; it holds no store and names no asset. |
 | `advisory-writer` | Keeps every version of every advisory and every attempt to follow a feed, under a group and a quarantine of its own. |
 | `vulnerability-matcher` | Decides which packages of each asset are vulnerable from the inventory and advisory stores, read-only, and publishes the decisions to `security.findings`. It reads both streams alone in one loop, waits for each store's owner before reading it, and holds no internet access and no credential that writes. |
 | `finding-writer` | Keeps what the vulnerability matcher decided, one row per episode of a finding and one per evaluation of an asset, under a group and a quarantine of its own, so a findings store outage costs how current findings are and never a decision. |
-| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry with how recently each agent reported and its posture, the fleet counted by liveness, the authority that signs an agent's certificate, the signed policies agents are handed, the signed catalog of releases agents may install with their packages, and what people decide about vulnerabilities instead of fixing them. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates and asking for their policy and their updates on a second one. |
+| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry with how recently each agent reported and its posture, the fleet counted by liveness, the authority that signs an agent's certificate, the signed policies agents are handed, the signed catalog of releases agents may install with their packages, a renewal presented with a certificate a renewal had replaced, refused before anything is signed and published as a finding, and what people decide about vulnerabilities instead of fixing them. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates and asking for their policy and their updates on a second one. |
 | `query-api` | The read plane, and the only reader of the analytical store. |
 | `backbone-migrator`, `store-migrator`, `control-migrator` | Apply the topic topology, the analytical schema and the relational schema, then exit. Nothing migrates on the way to serving traffic. |
 

@@ -61,6 +61,7 @@ exposing metrics and readiness is always a visible decision.
 | `SEAGULL_GATEWAY_ROSTER_CHECK_INTERVAL` | `5s` | how often the gateway confirms it holds every decision the agent log holds |
 | `SEAGULL_GATEWAY_ROSTER_STALE_AFTER` | `30s` | how long it may go unconfirmed before it answers every batch `503 roster_stale`; at least two check intervals |
 | `SEAGULL_GATEWAY_BEACON_INTERVAL` | `5s` | how often it says on `security.gateways` that it serves, and whether it admits (not while its roster is stale); `1s` to `1m`. Its last beacon, as it stops, says it no longer admits ([ADR 56](decisions/0056-a-finding-about-an-agent-is-a-record-of-its-own-judged-only-while-the-platform-listens.md)) |
+| `SEAGULL_GATEWAY_REPLACED_CERTIFICATE_TOLERANCE` | `1m` | how long after it learns of a renewal it still admits the certificate the renewal replaced, so a request in flight and a connection busy at that instant finish; `5s` to `10m` ([ADR 58](decisions/0058-a-listener-admits-an-agent-only-on-the-certificate-in-force.md)) |
 | `SEAGULL_EVENT_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock an event may be |
 | `SEAGULL_EVENT_MAX_AGE` | `168h` | how old an event may be and still be admitted |
 | `SEAGULL_INVENTORY_MAX_CLOCK_SKEW` | `5m` | how far ahead of the platform clock a scan may be |
@@ -79,6 +80,22 @@ The status stream's description also names the interval the gateway asks agents
 to report at. A report is still judged against the interval it announces, so an
 agent that keeps another one within the bounds is admitted and is not taken for
 one gone quiet ([ADR 54](decisions/0054-a-gateway-asks-how-often-to-report-and-the-fleet-is-counted-as-it-is-read.md)).
+
+An agent is admitted only on the certificate its admission record names, and on
+the one that certificate replaced for the tolerance above; any other is refused
+`403 agent_certificate_replaced`. A certificate valid from no earlier than the one
+in force is one the gateway has not heard of yet, because the agent renewed while
+the record was on its way, and is answered `503 roster_behind` with `Retry-After`,
+so the agent sends again. Every answer to a certificate other than the one in force
+closes its connection. A record without a fingerprint, written by a platform older
+than the field, admits any certificate of the agent, as before. What it refused it
+gathers per agent and publishes every second on `security.agents.refusals`, for the
+fleet judge:
+
+```text
+seagull_ingest_certificates_total{standing="tolerated|unheard|replaced"}
+seagull_ingest_refusals_total{outcome="published|dropped"}
+```
 
 The batch ceiling is measured, not chosen. No event in a batch is published until
 every event in it has been decoded and validated, so a larger batch is a larger
@@ -164,6 +181,9 @@ capacity does not count, so a host is sized for it beside this setting. See
 | `SEAGULL_BACKBONE_AGENT_FINDINGS_QUARANTINE_PARTITIONS` | `1` | |
 | `SEAGULL_BACKBONE_AGENT_FINDINGS_QUARANTINE_RETENTION` | `720h` | |
 | `SEAGULL_BACKBONE_GATEWAYS_TOPIC` | `security.gateways` | the newest beacon of every gateway |
+| `SEAGULL_BACKBONE_REFUSALS_TOPIC` | `security.agents.refusals` | what every gateway refused of an agent's certificate, for the fleet judge |
+| `SEAGULL_BACKBONE_REFUSALS_PARTITIONS` | `3` | how far per-agent ordering spreads |
+| `SEAGULL_BACKBONE_REFUSALS_RETENTION` | `168h` | at least `48h`: the judge reads it whole whenever it starts, so it is kept longer than a judge is away |
 | `SEAGULL_BACKBONE_QUARANTINE_PARTITIONS` | `3` | |
 | `SEAGULL_BACKBONE_QUARANTINE_RETENTION` | `720h` | |
 | `SEAGULL_BACKBONE_DURABILITY` | `production` | `production` refuses a topic that keeps fewer than 3 replicas or acknowledges a write fewer than 2 hold; `development`, which the development Compose file sets beside one replica, admits one broker and is reported as a warning |
@@ -475,11 +495,12 @@ retried until the batch is durable; a report is never skipped to make progress.
 | `SEAGULL_FLEET_JUDGE_LOG_RECORDS` | `1000` | records per poll of each log it reads |
 | `SEAGULL_FLEET_JUDGE_START_TIMEOUT` | `30s` | budget to verify its topics before it reads them |
 
-It reads `security.agents.status`, `security.agents`, `security.gateways` and its
-own decisions on `security.agents.findings` whole, as a gateway reads the agent
-log, and writes nothing but decisions. It judges an agent's silence only while it
-confirmed it reads the end of the status log and a gateway said it admits, and
-only once that has lasted five of the agent's intervals without a break: an
+It reads `security.agents.status`, `security.agents`, `security.gateways`,
+`security.agents.refusals` and its own decisions on `security.agents.findings`
+whole, as a gateway reads the agent log, and writes nothing but decisions. It
+judges an agent's silence only while it confirmed it reads the end of the status
+log and a gateway said it admits, and only once that has lasted five of the
+agent's intervals without a break: an
 outage of the backbone, of the gateways or of the judge itself never reads as a
 silent fleet. Every replica judges every agent and names the same findings, so a
 second replica doubles decisions the store collapses. It holds a few hundred bytes
@@ -500,6 +521,18 @@ agent holds four open findings of its kind is counted and not opened:
 
 ```text
 seagull_fleetjudge_findings_not_opened_total{kind="copied_installation|shared_identity"}
+```
+
+The refusals of a replaced certificate the gateways publish are its too: those of
+one agent while one certificate is in force are one `replaced_certificate`
+finding, named by that certificate and the gateway listener, decided again a
+minute after new refusals, closed as `REBOUND` when the admission log binds
+another certificate and as `NOT_ADMITTED` when the agent is no longer admitted. A
+refusal under a certificate since replaced, or older than the admission in force,
+opens nothing; see [ADR 58](decisions/0058-a-listener-admits-an-agent-only-on-the-certificate-in-force.md):
+
+```text
+seagull_fleetjudge_refusals_total{outcome="counted|outdated"}
 ```
 
 ### agent-finding-writer
@@ -791,6 +824,7 @@ detection away from somebody's triage.
 | `SEAGULL_CONTROL_API_TRACKED_DESCRIBED_AGENTS` | `8192` | agents whose requests for the descriptor are counted at once |
 | `SEAGULL_CONTROL_API_AGENT_ROLLOUT_INTERVAL` | `30s` | how often the control plane reads how far every rollout in force went, and opens a wave or pauses one on what it read; between 5 seconds and 10 minutes. Read only where an update root is configured |
 | `SEAGULL_CONTROL_API_FLEET_INTERVAL` | `30s` | how often the control plane counts the agents the registry admits by liveness; between 5 seconds and 10 minutes, and a reading that takes longer is abandoned |
+| `SEAGULL_CONTROL_API_REPLACED_CERTIFICATE_TOLERANCE` | `1m` | how long after the registry bound a renewal the agent listener still serves the certificate it replaced; `5s` to `10m` ([ADR 58](decisions/0058-a-listener-admits-an-agent-only-on-the-certificate-in-force.md)) |
 
 The control plane authenticates a caller by certificate, so it has no plaintext
 mode and no mode without a caller authority: without one there is nobody to be
@@ -844,6 +878,21 @@ every day; see
 seagull_control_agent_certificates_renewed_total{outcome="renewed|replaced|refused|rate_limited|unidentified"}
 seagull_control_agent_findings_published_total{outcome="published|refused|unrecorded"}
 seagull_control_agent_findings_outstanding
+```
+
+The agent listener serves the policy, the update offer, a package and its
+descriptor only on the certificate the registry binds the agent to, or on the one
+it replaced for the tolerance above. Any other is refused
+`403 agent_certificate_replaced`, counted, and kept in the same episode as a
+refused renewal, with the route it was last refused on, which the finding's `use`
+names. An agent the registry no longer admits is still told so first. Every
+admission it publishes names the certificate in force and the one it replaced, by
+fingerprint, renewals and issuances included, and every sweep it also writes
+again, a batch at a time, the agents whose record the log holds from before the
+fields existed, which are not counted as outstanding:
+
+```text
+seagull_control_agent_certificates_total{standing="tolerated|replaced"}
 ```
 
 It holds the agent policies operators publish and never signs one: the signers
@@ -929,7 +978,7 @@ before its body is read.
 
 ## The backbone topology
 
-Nineteen topics, declared once in `internal/broker` and applied by
+Twenty topics, declared once in `internal/broker` and applied by
 `backbone-migrator`:
 
 | Topic | Partitions | Retention | Largest batch | Why |
@@ -953,6 +1002,7 @@ Nineteen topics, declared once in `internal/broker` and applied by
 | `security.agents.findings` | 3 | 30 days | 1 MiB | every decision about what the platform found about an agent, keyed by the agent, written by the fleet judge and by the control plane, each for its own kinds; not compacted, because the judge reads its own decisions back to learn which findings it left open |
 | `security.agents.findings.quarantine` | 1 | 30 days | 1 MiB + 64 KiB | decisions the agent finding writer could not store |
 | `security.gateways` | 1 | compacted, kept | 1 MiB | the newest beacon of every gateway, keyed by it: whether it admits what agents send, which is how the fleet judge tells a silent agent from a platform that stopped listening |
+| `security.agents.refusals` | 3 | 7 days | 1 MiB | what the gateways refused of a certificate a renewal had replaced, gathered per agent and keyed by it, for the fleet judge to make findings of; not compacted, because every record is a count the judge adds |
 
 **Partitions and replication are refused, never converged.** Records are keyed
 by `agent_id`, so growing the partition count moves an agent to a different

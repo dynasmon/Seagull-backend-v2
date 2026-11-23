@@ -31,6 +31,7 @@ type Agents interface {
 	History(ctx context.Context, id string, tenants []string) (*agentv1.History, error)
 	Move(ctx context.Context, id string, tenants []string, asked agent.Move) (*agentv1.Agent, error)
 	Renew(ctx context.Context, id string, asked agent.Move) (*agentv1.Agent, error)
+	Renewable(ctx context.Context, id string, asked agent.Move) error
 	State(ctx context.Context, id string) (agent.State, error)
 	Certificates(ctx context.Context, id string, tenants []string) (*agentv1.CertificateHistory, error)
 	Outstanding(ctx context.Context, limit int) ([]*agentv1.Admission, error)

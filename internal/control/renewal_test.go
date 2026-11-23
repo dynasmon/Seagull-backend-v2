@@ -209,3 +209,32 @@ func TestAnAgentRenewingTooOftenIsSlowedDown(t *testing.T) {
 		t.Fatalf("a second renewal answered %d: %s", second.Code, second.Body)
 	}
 }
+
+func TestARenewalTellsTheDataPlaneAtOnceWhichCertificateItReplaced(t *testing.T) {
+	held := newStubAgents()
+	active(t, held, "web-01")
+	told := &stubAdmissions{}
+	signing, bundle := testAuthority(t)
+	handler, err := control.NewRenewalHandler(control.ServerOptions{
+		Agents: held, Admissions: told, Policies: newStubPolicies(held), Authority: signing, TrustBundle: bundle, CertificateLife: time.Hour,
+		Metrics: control.NewMetrics(metrics.New("control-api-renewal-told")), Logger: slog.New(slog.DiscardHandler),
+		Instrumentation: httpx.NewInstrumentation(metrics.New("control-api-renewal-told-routes")),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	presented := held.held["web-01"].GetIdentity().GetFingerprintSha256()
+
+	renewed := call(t, handler, http.MethodPost, control.RenewalPath, "web-01", "", &agentv1.RenewalRequest{CsrPem: signingRequest(t, "web-01")})
+	if renewed.Code != http.StatusCreated {
+		t.Fatalf("the renewal was answered %d: %s", renewed.Code, renewed.Body)
+	}
+	if len(told.published) != 1 {
+		t.Fatalf("a renewal told the data plane %d records", len(told.published))
+	}
+	record := told.published[0]
+	if record.GetFingerprintSha256() != held.held["web-01"].GetIdentity().GetFingerprintSha256() ||
+		record.GetReplacedFingerprintSha256() != presented || record.GetRevision() != held.held["web-01"].GetRevision() {
+		t.Fatalf("the renewal was told to the data plane as %v", record)
+	}
+}

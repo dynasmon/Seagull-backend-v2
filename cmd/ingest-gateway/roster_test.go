@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agent"
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
@@ -131,4 +134,28 @@ func active(t *testing.T, agentID string, revision uint64) broker.Record {
 func admitted(held roster, agentID string) bool {
 	_, admits := held.held.Tenant(agentID)
 	return admits
+}
+
+func TestAGatewayStartsTheToleranceOfAReplacedCertificateWhenItHearsTheRenewal(t *testing.T) {
+	heard := time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
+	renewal := admissionRecord(t, "web-01", &agentv1.Admission{AgentId: "web-01", TenantId: "acme", State: agent.Active.Wire(), Revision: 5,
+		FingerprintSha256: strings.Repeat("ab", 32), ReplacedFingerprintSha256: strings.Repeat("ef", 32),
+		ReplacedAt: timestamppb.New(heard.Add(-time.Hour))})
+	logger := slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
+
+	followed := roster{held: agent.NewRoster()}
+	if err := followed.following(logger, func() time.Time { return heard })(context.Background(), []broker.Record{renewal}); err != nil {
+		t.Fatalf("follow a renewal: %v", err)
+	}
+	if held, _ := followed.held.Binding("web-01"); !held.Learned.Equal(heard) {
+		t.Fatalf("a renewal heard at %s is held as learned at %s", heard, held.Learned)
+	}
+
+	replayed := roster{held: agent.NewRoster()}
+	if err := replayed.applying(logger)(context.Background(), []broker.Record{renewal}); err != nil {
+		t.Fatalf("read a renewal back: %v", err)
+	}
+	if held, _ := replayed.held.Binding("web-01"); !held.Learned.IsZero() {
+		t.Fatalf("a renewal read back is held as learned at %s", held.Learned)
+	}
 }

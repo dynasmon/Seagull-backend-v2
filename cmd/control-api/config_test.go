@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 )
@@ -79,5 +80,22 @@ func TestAControlPlaneIsGivenTheRuleTreeItsEngineStartsOn(t *testing.T) {
 	}
 	if err != nil && !strings.Contains(err.Error(), `"/etc/seagull/rules"`) {
 		t.Errorf("a control plane told nothing did not look where the engine does: %v", err)
+	}
+}
+
+func TestTheAgentListenerToleratesAReplacedCertificateForAShortDeclaredWhile(t *testing.T) {
+	unset, err := load(environment(t, nil))
+	if err != nil || unset.replacedTolerance != time.Minute {
+		t.Errorf("a control plane configured with nothing tolerates a replaced certificate for %s (%v)", unset.replacedTolerance, err)
+	}
+	told, err := load(environment(t, map[string]string{"SEAGULL_CONTROL_API_REPLACED_CERTIFICATE_TOLERANCE": "3m"}))
+	if err != nil || told.replacedTolerance != 3*time.Minute {
+		t.Errorf("a control plane told 3m tolerates a replaced certificate for %s (%v)", told.replacedTolerance, err)
+	}
+	for _, outside := range []string{"4s", "11m"} {
+		if _, err := load(environment(t, map[string]string{"SEAGULL_CONTROL_API_REPLACED_CERTIFICATE_TOLERANCE": outside})); err == nil ||
+			!strings.Contains(err.Error(), "SEAGULL_CONTROL_API_REPLACED_CERTIFICATE_TOLERANCE") {
+			t.Errorf("a tolerance of %s was answered %v", outside, err)
+		}
 	}
 }

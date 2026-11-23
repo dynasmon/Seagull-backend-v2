@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,6 +68,7 @@ func TestTheAnswersAnAgentReadsAreTheOnesRecorded(t *testing.T) {
 	boundedStreamAnswers(t, book)
 	certificateStreamAnswers(t, book)
 	agentListenerAnswers(t, book)
+	replacedListenerAnswers(t, book)
 	book.settle(t)
 }
 
@@ -110,6 +112,32 @@ func certificateStreamAnswers(t *testing.T, book *answerBook) {
 	}
 	book.ask(t, asking{name: "gateway-descriptor-certificate-replaced", listener: "gateway", client: replacedClient, method: http.MethodGet,
 		url: "https://" + gateway.address + ingest.DescriptorPath, reply: described})
+}
+
+// What the agent listener answers a certificate a renewal replaced, once its
+// tolerance has passed, on every route it gates but renewal.
+func replacedListenerAnswers(t *testing.T, book *answerBook) {
+	plane := startControlPlane(t, nil, time.Nanosecond)
+	operator := plane.caller(t, "e2e-admin")
+	token := plane.open(t, operator).GetToken()
+	plane.register(t, operator, token, "e2e-agent-73")
+	key, requestPEM := keyAndRequest(t, "e2e-agent-73")
+	replaced := plane.agentClient(t, key, plane.issue(t, operator, token, "e2e-agent-73", requestPEM))
+	_, renewing := keyAndRequest(t, "e2e-agent-73")
+	if response, body := plane.renew(t, replaced, renewing); response.StatusCode != http.StatusCreated {
+		t.Fatalf("the renewal was answered %d: %s", response.StatusCode, body)
+	}
+
+	listener := "https://" + plane.renewalAddress
+	for _, asked := range []struct{ name, path string }{
+		{"policy-certificate-replaced", control.PolicyPath},
+		{"update-certificate-replaced", control.UpdatePath},
+		{"package-certificate-replaced", strings.Replace(control.UpdatePackagePath, "{sha256}", strings.Repeat("ab", 32), 1)},
+		{"agent-descriptor-certificate-replaced", control.DescriptorPath},
+	} {
+		book.ask(t, asking{name: asked.name, listener: "agent", client: replaced, method: http.MethodGet, url: listener + asked.path,
+			reply: controlled(&policyv1.SignedPolicy{})})
+	}
 }
 
 func streamAnswers(t *testing.T, book *answerBook) {

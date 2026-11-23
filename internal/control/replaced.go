@@ -26,8 +26,13 @@ type FindingDecisions interface {
 	Publish(ctx context.Context, decided []*agentv1.Finding) error
 }
 
-func renewalUse() *agentv1.Finding_Use {
-	return &agentv1.Finding_Use{Listener: agentv1.Finding_Use_LISTENER_CONTROL, Route: http.MethodPost + " " + RenewalPath}
+// An episode the registry kept before it recorded routes, or opened by a
+// renewal, was last refused on the renewal route.
+func listenerUse(route string) *agentv1.Finding_Use {
+	if route == "" {
+		route = http.MethodPost + " " + RenewalPath
+	}
+	return &agentv1.Finding_Use{Listener: agentv1.Finding_Use_LISTENER_CONTROL, Route: route}
 }
 
 // Hands the findings log what the registry decided about replaced certificates
@@ -107,7 +112,7 @@ func (a *FindingAnnouncer) Sweep(ctx context.Context) {
 	}
 	decided := make([]*agentv1.Finding, 0, len(waiting))
 	for _, used := range waiting {
-		decided = append(decided, used.Finding(renewalUse()))
+		decided = append(decided, used.Finding(listenerUse(used.Route)))
 	}
 	if err := a.decisions.Publish(ctx, decided); err != nil {
 		a.metrics.findingsCarried("refused", len(decided))

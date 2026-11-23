@@ -60,3 +60,4 @@ rediscovered by reading the code.
 - [54. A gateway asks an agent how often to report and imposes nothing by it, and the fleet is counted the way an agent is read](0054-a-gateway-asks-how-often-to-report-and-the-fleet-is-counted-as-it-is-read.md)
 - [55. An asset is assessed whole again when its feed turns fresh, rather than at its next inventory](0055-an-asset-is-assessed-again-when-its-feed-turns-fresh.md)
 - [56. A finding about an agent is a record of its own, judged only while the platform listens](0056-a-finding-about-an-agent-is-a-record-of-its-own-judged-only-while-the-platform-listens.md)
+- [57. A place is a run: a copy reports a sequence another run already holds, a shared identity is two installations heard in turn, and a renewal is refused before it is signed](0057-a-place-is-a-run-and-a-renewal-is-refused-before-it-is-signed.md)

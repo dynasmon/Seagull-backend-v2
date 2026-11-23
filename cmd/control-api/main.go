@@ -244,8 +244,9 @@ func controlAPI(ctx context.Context) error {
 		RenewalTLS:      renewalTransport,
 		RenewalLimiter: ratelimit.NewLimiter(
 			settings.renewalsPerSecond, settings.renewalBurst, settings.trackedRenewalAgent),
-		Policies:      raised.AgentPolicies(),
-		PolicySigners: signers,
+		ReplacedTolerance: settings.replacedTolerance,
+		Policies:          raised.AgentPolicies(),
+		PolicySigners:     signers,
 		PolicyLimiter: ratelimit.NewLimiter(
 			settings.policyPullsPerSecond, settings.policyPullBurst, settings.trackedPolicyAgents),
 		Updates:    raised.AgentUpdates(),

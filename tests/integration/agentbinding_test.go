@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -80,6 +81,10 @@ func TestTheRegistryTellsTheDataPlaneWhichCertificateAnAgentIsAdmittedOnOnPostgr
 		told.GetReplacedFingerprintSha256() != first.GetFingerprintSha256() || !told.GetReplacedAt().AsTime().Equal(at.Add(2*time.Minute)) {
 		t.Fatalf("a move that binds nothing changed the certificate told: %v", told)
 	}
+	state, binding, err := registry.Binding(ctx, agentID)
+	if err != nil || state != agent.Disabled || binding.Fingerprint != third.GetFingerprintSha256() || binding.Replaced != first.GetFingerprintSha256() {
+		t.Fatalf("the agent listener reads %s bound to %+v (%v)", state, binding, err)
+	}
 
 	fourth := certificateFor(t, agentID, at.Add(4*time.Minute))
 	if _, err := registry.Move(ctx, agentID, []string{"default"}, agent.Move{Identity: fourth, Actor: "it-admin", At: at.Add(4 * time.Minute)}); err != nil {
@@ -88,6 +93,9 @@ func TestTheRegistryTellsTheDataPlaneWhichCertificateAnAgentIsAdmittedOnOnPostgr
 	if told := toldOf(t, registry, agentID); told.GetFingerprintSha256() != fourth.GetFingerprintSha256() ||
 		told.GetReplacedFingerprintSha256() != third.GetFingerprintSha256() {
 		t.Fatalf("a certificate an operator bound was told as %v, and it replaced the one in force", told)
+	}
+	if _, _, err := registry.Binding(ctx, agentIdentifier(t)); !errors.Is(err, agent.ErrUnknown) {
+		t.Fatalf("an agent nobody registered is bound to something: %v", err)
 	}
 }
 
@@ -163,4 +171,51 @@ func unwritten(t *testing.T, registry *postgres.Agents, agentID string) *agentv1
 			}
 		}
 	}
+}
+
+// A refusal on a route of the agent listener other than renewal is one episode
+// with the renewal's refusals while one certificate is in force, and says the
+// route it was refused on last; a refusal decided under a binding that has since
+// moved records nothing.
+func TestAReplacedCertificateRefusedOnTheAgentListenerIsAnEpisodeOfTheCertificateInForceOnPostgresql(t *testing.T) {
+	registry := migratedAlertStore(t, alertStoreAddress(t)).Agents()
+	publishedAll(t, registry)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	at := time.Now().UTC().Truncate(time.Millisecond)
+	agentID, first, second := renewedOnce(t, registry, at)
+
+	if err := registry.ReplacedUsed(ctx, agentID, second.GetFingerprintSha256(), "GET /v1/agents/policy", at.Add(time.Minute)); err != nil {
+		t.Fatalf("record a refusal of the policy route: %v", err)
+	}
+	if err := registry.ReplacedUsed(ctx, agentID, second.GetFingerprintSha256(), "GET /v1/agents/update", at.Add(2*time.Minute)); err != nil {
+		t.Fatalf("record a refusal of the update route: %v", err)
+	}
+	if err := registry.ReplacedUsed(ctx, agentID, first.GetFingerprintSha256(), "GET /v1/descriptor", at.Add(3*time.Minute)); err != nil {
+		t.Fatalf("record a refusal decided under a binding that moved: %v", err)
+	}
+	mine := unpublishedOf(t, registry, agentID)
+	if len(mine) != 1 || mine[0].InForce != second.GetFingerprintSha256() || mine[0].Observations != 2 || mine[0].Route != "GET /v1/agents/update" ||
+		!mine[0].OpenedAt.Equal(at.Add(time.Minute)) || !mine[0].LastObservedAt.Equal(at.Add(2*time.Minute)) {
+		t.Fatalf("two refusals on the agent listener were kept as %+v", mine)
+	}
+
+	if err := registry.Renewable(ctx, agentID, agent.Move{Actor: agentID, At: at.Add(4 * time.Minute), PresentedFingerprint: first.GetFingerprintSha256()}); !errors.Is(err, agent.ErrCertificateReplaced) {
+		t.Fatalf("the replaced certificate asked to renew was answered %v", err)
+	}
+	if mine := unpublishedOf(t, registry, agentID); len(mine) != 1 || mine[0].Observations != 3 || mine[0].Route != "" {
+		t.Fatalf("a renewal refused in the same episode left it %+v", mine)
+	}
+
+	if _, err := registry.Move(ctx, agentID, []string{"default"}, agent.Move{To: agent.Disabled, Note: "copied", Actor: "it-admin", At: at.Add(5 * time.Minute)}); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	publishedAll(t, registry)
+	if err := registry.ReplacedUsed(ctx, agentID, second.GetFingerprintSha256(), "GET /v1/agents/policy", at.Add(6*time.Minute)); err != nil {
+		t.Fatalf("record a refusal of an agent no longer admitted: %v", err)
+	}
+	if mine := unpublishedOf(t, registry, agentID); len(mine) != 0 {
+		t.Fatalf("a refusal of an agent no longer admitted reopened its episode: %+v", mine)
+	}
+	publishedAll(t, registry)
 }

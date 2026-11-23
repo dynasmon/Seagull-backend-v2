@@ -46,6 +46,17 @@ func parseRequest(requestPEM []byte, subject string) (*x509.CertificateRequest, 
 	return asked, usable(asked.PublicKey)
 }
 
+// What a renewal asks with is named before anything is signed for it, as Sign
+// names it, so the registry can refuse it without the authority spending a
+// signature and a serial number on a certificate nobody receives.
+func Requested(requestPEM []byte, subject string) (string, error) {
+	asked, err := parseRequest(requestPEM, subject)
+	if err != nil {
+		return "", err
+	}
+	return requested(asked), nil
+}
+
 // A weak key signed once is trusted for the whole life of the certificate, so
 // the request is refused rather than upgraded.
 func usable(key any) error {

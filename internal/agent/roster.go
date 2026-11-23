@@ -3,7 +3,9 @@ package agent
 import (
 	"fmt"
 	"sync"
+	"time"
 
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 )
 
@@ -25,6 +27,8 @@ type decided struct {
 	admits   bool
 	tenant   string
 	revision uint64
+	binding  agentidentity.Binding
+	learned  time.Time
 }
 
 func NewRoster() *Roster { return &Roster{known: map[string]decided{}} }
@@ -34,7 +38,15 @@ func NewRoster() *Roster { return &Roster{known: map[string]decided{}} }
 // holding the earlier answer for ever. Two of them deciding one revision
 // differently leave it holding neither: the platform cannot say which decision
 // it made, and an agent it cannot decide about is one it stops admitting.
-func (r *Roster) Apply(record *agentv1.Admission) error {
+//
+// Apply is for a record read back before the roster serves: a replacement it
+// carries is not learned now, so its tolerance runs from when the registry
+// bound it. Learn is for a record followed while serving.
+func (r *Roster) Apply(record *agentv1.Admission) error { return r.apply(record, time.Time{}) }
+
+func (r *Roster) Learn(record *agentv1.Admission, at time.Time) error { return r.apply(record, at) }
+
+func (r *Roster) apply(record *agentv1.Admission, at time.Time) error {
 	if record.GetAgentId() == "" {
 		return fmt.Errorf("%w: the admission record names no agent", ErrMalformed)
 	}
@@ -45,27 +57,41 @@ func (r *Roster) Apply(record *agentv1.Admission) error {
 	if err := tenant(record.GetTenantId()); err != nil {
 		return err
 	}
+	binding := BindingOf(record)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	held, seen := r.known[record.GetAgentId()]
+	same := seen && record.GetRevision() == held.revision
 	switch {
 	case seen && record.GetRevision() < held.revision:
 		return nil
-	case seen && record.GetRevision() == held.revision && held.admits != state.Admits():
+	case same && held.admits != state.Admits():
 		r.known[record.GetAgentId()] = decided{revision: held.revision}
 		return fmt.Errorf("%w: revision %d of agent %q decides both ways",
 			ErrConflict, record.GetRevision(), record.GetAgentId())
-	case seen && record.GetRevision() == held.revision && held.tenant != record.GetTenantId():
+	case same && held.tenant != record.GetTenantId():
 		r.known[record.GetAgentId()] = decided{revision: held.revision}
 		return fmt.Errorf("%w: revision %d of agent %q places it in two tenants",
 			ErrConflict, record.GetRevision(), record.GetAgentId())
+	case same && held.binding.Fingerprint != "" && binding.Fingerprint == "":
+		return nil
+	case same && held.binding.Fingerprint != "" && held.binding != binding:
+		r.known[record.GetAgentId()] = decided{revision: held.revision}
+		return fmt.Errorf("%w: revision %d of agent %q binds two certificates",
+			ErrConflict, record.GetRevision(), record.GetAgentId())
+	}
+	learned := held.learned
+	if !seen || held.binding != binding {
+		learned = at
 	}
 	r.known[record.GetAgentId()] = decided{
 		admits:   state.Admits(),
 		tenant:   record.GetTenantId(),
 		revision: record.GetRevision(),
+		binding:  binding,
+		learned:  learned,
 	}
 	return nil
 }
@@ -102,6 +128,16 @@ func (r *Roster) Tenant(agentID string) (string, bool) {
 		return "", false
 	}
 	return held.tenant, true
+}
+
+func (r *Roster) Binding(agentID string) (agentidentity.Held, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	held, seen := r.known[agentID]
+	if !seen {
+		return agentidentity.Held{}, false
+	}
+	return agentidentity.Held{Binding: held.binding, Revision: held.revision, Learned: held.learned}, true
 }
 
 func (r *Roster) Knows(agentID string) bool {

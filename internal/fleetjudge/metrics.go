@@ -19,6 +19,7 @@ type Metrics struct {
 	refused     *prometheus.CounterVec
 	overflowed  prometheus.Counter
 	unopened    *prometheus.CounterVec
+	refusals    *prometheus.CounterVec
 }
 
 func NewMetrics(registry *metrics.Registry) *Metrics {
@@ -51,6 +52,10 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Namespace: metrics.Namespace, Subsystem: "fleetjudge", Name: "findings_not_opened_total",
 			Help: "Episodes not opened because their agent already held four open findings of their kind, all answered at once by the operator answering the agent.",
 		}, []string{"kind"}),
+		refusals: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace, Subsystem: "fleetjudge", Name: "refusals_total",
+			Help: "Refusals of a replaced certificate the gateways published, by whether they were evidence of the certificate in force or of an episode already over.",
+		}, []string{"outcome"}),
 	}
 	for _, kind := range agentfinding.Kinds() {
 		instruments.open.WithLabelValues(agentfinding.KindName(kind))
@@ -58,12 +63,15 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 	for _, kind := range []agentv1.Finding_Kind{agentv1.Finding_KIND_COPIED_INSTALLATION, agentv1.Finding_KIND_SHARED_IDENTITY} {
 		instruments.unopened.WithLabelValues(agentfinding.KindName(kind))
 	}
-	for _, log := range []string{"status", "admissions", "beacons", "findings"} {
+	for _, log := range []string{"status", "admissions", "beacons", "findings", "refusals"} {
 		instruments.refused.WithLabelValues(log)
+	}
+	for _, outcome := range []string{"counted", "outdated"} {
+		instruments.refusals.WithLabelValues(outcome)
 	}
 	registry.MustRegister(instruments.agents, instruments.listening, instruments.serving, instruments.behind,
 		instruments.open, instruments.unpublished, instruments.decisions, instruments.refused, instruments.overflowed,
-		instruments.unopened)
+		instruments.unopened, instruments.refusals)
 	return instruments
 }
 

@@ -1,5 +1,11 @@
 # 56. A finding about an agent is a record of its own, judged only while the platform listens
 
+> Amended by [ADR 57](0057-a-place-is-a-run-and-a-renewal-is-refused-before-it-is-signed.md):
+> the judge tells places apart by run, finds copies and shared identities among
+> them within a bound per agent, and `control-api` decides a replaced certificate
+> before it signs, keeps it in the registry and publishes it to the same log,
+> which it never reads back.
+
 ## Context
 
 [ADR 30](0030-an-agent-is-alive-while-its-reports-arrive.md) made an agent's

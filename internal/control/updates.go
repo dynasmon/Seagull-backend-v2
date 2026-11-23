@@ -258,6 +258,10 @@ func (s *Server) serveUpdate() http.Handler {
 			Refuse(w, http.StatusTooManyRequests, CodeRateLimited, "this agent is asking whether to update too often")
 			return
 		}
+		if !s.presents(w, r, presented, http.MethodGet+" "+UpdatePath) {
+			s.metrics.updateOffered("replaced")
+			return
+		}
 		if !s.takesUpdates() {
 			s.metrics.updateOffered("unconfigured")
 			Refuse(w, http.StatusNotFound, CodeUpdatesUnconfigured, "this platform hands out no update")
@@ -322,6 +326,10 @@ func (s *Server) servePackage() http.Handler {
 		if s.updatePulls != nil && !s.updatePulls.Allow(presented.AgentID) {
 			s.metrics.packageServed("rate_limited")
 			Refuse(w, http.StatusTooManyRequests, CodeRateLimited, "this agent is asking for packages too often")
+			return
+		}
+		if !s.presents(w, r, presented, http.MethodGet+" "+UpdatePackagePath) {
+			s.metrics.packageServed("replaced")
 			return
 		}
 		digest, err := hex.DecodeString(r.PathValue("sha256"))

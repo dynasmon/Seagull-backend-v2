@@ -6,6 +6,13 @@
 > and renews on its own from then on. Bootstrap tokens are still not built: an
 > agent that enrolls itself is BE-054, which the agent's AG-006 waits for.
 
+> Amended by [ADR 58](0058-a-listener-admits-an-agent-only-on-the-certificate-in-force.md):
+> a superseded certificate no longer works until it expires. The admission record
+> carries the fingerprint in force and the one it replaced, every listener admits
+> the replaced one only for a declared tolerance after it learns of the renewal,
+> and a renewal never fails closed: a listener behind it answers the new
+> certificate so the agent sends again.
+
 ## Context
 
 [ADR 2](0002-identity-comes-from-the-certificate.md) settled that an agent is

@@ -165,6 +165,18 @@ back. A decision the log was never told is republished every five seconds and
 raises an alert past a minute. See
 [ADR 46](docs/decisions/0046-a-revocation-is-enforced-within-the-bound-a-gateway-confirms-its-roster-by.md).
 
+The record also names the certificate the registry binds the agent to, by its
+fingerprint, and the one it replaced. A gateway and the control plane's agent
+listener admit an agent only on the certificate in force, and on the one a renewal
+replaced for a minute after they learn of the renewal, so a request in flight
+finishes; any other is refused `403 agent_certificate_replaced` and becomes a
+finding. A certificate newer than the one a gateway holds is answered
+`503 roster_behind`, so an agent that renewed while the record was on its way
+sends again and loses nothing, and every answer to a certificate other than the
+one in force closes its connection. A copy of an installation started after the
+original renewed delivers nothing. See
+[ADR 58](docs/decisions/0058-a-listener-admits-an-agent-only-on-the-certificate-in-force.md).
+
 The tenant an agent's telemetry belongs to travels on the same record. It is the
 one the agent was registered in by an operator holding that tenant, and the
 gateway stamps it on every event in place of whatever the agent wrote; no
@@ -413,15 +425,17 @@ What the platform finds about an agent from how it reports and presents itself
 is a record of its own. `fleet-judge` decides a silence while every gateway says
 on `security.gateways` whether it admits, and tells the runs it hears apart to
 find an installation copied to a second place or two installations sharing one
-identity; `control-api` asks the registry before it signs a renewal, and decides a
-renewal presented with a certificate a renewal had replaced. `agent-finding-writer`
+identity, and a gateway's refusals of a certificate a renewal had replaced;
+`control-api` asks the registry before it signs a renewal, and decides a renewal or
+a request of its agent listener presented with such a certificate. `agent-finding-writer`
 keeps them in `agent_findings`: reading one agent carries
 its open findings, `POST /v1/agents/findings/search` lists them within the
 tenants a caller holds, and the open findings are counted by kind beside the
 fleet. A finding changes nothing by itself; no agent is disabled, revoked or
 refused for one
 ([ADR 56](docs/decisions/0056-a-finding-about-an-agent-is-a-record-of-its-own-judged-only-while-the-platform-listens.md),
-[ADR 57](docs/decisions/0057-a-place-is-a-run-and-a-renewal-is-refused-before-it-is-signed.md)).
+[ADR 57](docs/decisions/0057-a-place-is-a-run-and-a-renewal-is-refused-before-it-is-signed.md),
+[ADR 58](docs/decisions/0058-a-listener-admits-an-agent-only-on-the-certificate-in-force.md)).
 
 What an agent found when it ran the checks of its policy travels on a fourth,
 and every assessment is kept, because the ones before the newest are what a
@@ -493,21 +507,21 @@ Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 
 | Process | Role |
 |---|---|
-| `ingest-gateway` | The only durable entry point for telemetry: identity, admission, validation, rate limiting. |
+| `ingest-gateway` | The only durable entry point for telemetry: identity, the certificate in force, admission, validation, rate limiting, and what it refused for the fleet judge. |
 | `analysis-engine` | Reads the event stream under its own group, routes and normalises, and decides events against the ruleset it is pinned to. |
 | `event-writer` | Makes admitted telemetry queryable, quarantining what it cannot store. |
 | `detection-writer` | Makes a detection queryable, on the same terms and as a consumer of its own. |
 | `alert-writer` | Opens the work a detection at or above a severity floor becomes: an alert for a finding about one event, folded on a declared key, or an incident for a story several events told. It inserts and never updates. |
 | `inventory-projector` | Folds what a collector saw into what an asset currently has, under a group and a quarantine of its own. An item the newest full scan stops naming is no longer current, and nothing is deleted to say so. |
 | `status-projector` | Keeps the newest report each agent sent of itself, one row per agent, under a group and a quarantine of its own, so a status store outage costs how fresh liveness is and never telemetry. |
-| `fleet-judge` | Decides what agents' reports, and their absence, say about them: an agent the registry admits that stopped reporting is a silence, judged only while the judge confirmed it reads the end of the status log and a gateway said it admits, so an outage of the backbone, the gateways or the judge never reads as a silent fleet. A run reporting a sequence another run of its installation already holds is a copy, and two installations reporting in turn share one identity, held within a bound per agent whatever the holder of its key sends. It reads its logs whole and writes nothing but decisions. |
+| `fleet-judge` | Decides what agents' reports, and their absence, say about them: an agent the registry admits that stopped reporting is a silence, judged only while the judge confirmed it reads the end of the status log and a gateway said it admits, so an outage of the backbone, the gateways or the judge never reads as a silent fleet. A run reporting a sequence another run of its installation already holds is a copy, and two installations reporting in turn share one identity, held within a bound per agent whatever the holder of its key sends. The gateways' refusals of a replaced certificate are one finding per agent while one certificate is in force. It reads its logs whole and writes nothing but decisions. |
 | `agent-finding-writer` | Keeps what the platform found about its agents — a silence, an installation or an identity reporting from two places, a replaced certificate in use — one row per finding as its newest decision, under a group and a quarantine of its own, so a store outage costs how current the findings are and never a decision. |
 | `assessment-projector` | Keeps every assessment agents made of their hosts, one row per assessment, under a group and a quarantine of its own, so an assessment store outage costs how fresh a posture is and never telemetry. |
 | `advisory-importer` | Follows the vulnerability feeds a deployment names, translates each changed record into an advisory carrying its provenance, and publishes it with the freshness of the feed. The one process that reaches the internet; it holds no store and names no asset. |
 | `advisory-writer` | Keeps every version of every advisory and every attempt to follow a feed, under a group and a quarantine of its own. |
 | `vulnerability-matcher` | Decides which packages of each asset are vulnerable from the inventory and advisory stores, read-only, and publishes the decisions to `security.findings`. It reads both streams alone in one loop, waits for each store's owner before reading it, and holds no internet access and no credential that writes. |
 | `finding-writer` | Keeps what the vulnerability matcher decided, one row per episode of a finding and one per evaluation of an asset, under a group and a quarantine of its own, so a findings store outage costs how current findings are and never a decision. |
-| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry with how recently each agent reported and its posture, the fleet counted by liveness, the authority that signs an agent's certificate, the signed policies agents are handed, the signed catalog of releases agents may install with their packages, a renewal presented with a certificate a renewal had replaced, refused before anything is signed and published as a finding, and what people decide about vulnerabilities instead of fixing them. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates and asking for their policy and their updates on a second one. |
+| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry with how recently each agent reported and its posture, the fleet counted by liveness, the authority that signs an agent's certificate, the signed policies agents are handed, the signed catalog of releases agents may install with their packages, a renewal presented with a certificate a renewal had replaced, refused before anything is signed and published as a finding, the agent listener served only on the certificate in force, and what people decide about vulnerabilities instead of fixing them. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates and asking for their policy and their updates on a second one. |
 | `query-api` | The read plane, and the only reader of the analytical store. |
 | `backbone-migrator`, `store-migrator`, `control-migrator` | Apply the topic topology, the analytical schema and the relational schema, then exit. Nothing migrates on the way to serving traffic. |
 
@@ -746,6 +760,7 @@ container without going through the environment. The settings that matter most:
 | `SEAGULL_CONTROL_API_POLICY` | The policy document the control plane is pinned to. |
 | `SEAGULL_CONTROL_API_AGENT_AUTHORITY_CERT`, `SEAGULL_CONTROL_API_AGENT_AUTHORITY_KEY` | The authority the control plane signs agent certificates with. Read once at startup; a plane that cannot read it does not serve. |
 | `SEAGULL_CONTROL_API_AGENT_TRUST_BUNDLE` | Every authority an agent is told to trust, read at each issuance and sent with the certificate. Widening it is how a certificate authority is rotated without visiting a machine; an authority that signs and is not in it is refused. |
+| `SEAGULL_GATEWAY_REPLACED_CERTIFICATE_TOLERANCE`, `SEAGULL_CONTROL_API_REPLACED_CERTIFICATE_TOLERANCE` | How long a listener still admits the certificate a renewal replaced once it learns of the renewal, a minute by default: long enough for a request in flight, short enough that a copy of an installation delivers nothing. |
 | `SEAGULL_CONTROL_API_AGENT_CERT_LIFETIME` | How long an issued agent certificate is valid. Short is the answer to a stolen key nobody has revoked, and renewal is what makes short affordable. |
 | `SEAGULL_CONTROL_API_RENEWAL_ADDRESS`, `SEAGULL_CONTROL_API_RENEWAL_TLS_CERT`, `SEAGULL_CONTROL_API_RENEWAL_TLS_KEY`, `SEAGULL_CONTROL_API_AGENT_CA` | The agent-facing listener an agent renews on and asks for its policy on, in the agent trust domain rather than the operator one. |
 | `SEAGULL_CONTROL_API_AGENT_POLICY_SIGNERS` | The public keys an agent policy must be signed under. Read at each publication; unset, the plane publishes no policy. |

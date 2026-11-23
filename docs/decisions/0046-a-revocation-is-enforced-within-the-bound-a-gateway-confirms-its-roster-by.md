@@ -1,5 +1,12 @@
 # 46. A revocation is enforced within the bound a gateway confirms its roster by, and a decision the log was never told is an alarm
 
+> Amended by [ADR 58](0058-a-listener-admits-an-agent-only-on-the-certificate-in-force.md):
+> the deferral below is reversed. A gateway refuses a certificate a renewal
+> replaced once its tolerance has passed, `403 agent_certificate_replaced`, and
+> closes every connection that presented anything but the certificate in force
+> once it answers it, which is the rule for connections opened before a renewal
+> and needed no change to the agent.
+
 ## Context
 
 [ADR 24](0024-an-agent-is-registered-by-the-control-plane-and-refused-by-the-gateway.md)

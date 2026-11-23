@@ -105,15 +105,15 @@ func Apply(current *agentv1.Agent, move Move) (*agentv1.Agent, *agentv1.Transiti
 	case binding && from.Final():
 		return nil, nil, fmt.Errorf("%w: an agent that is %s takes no further identity",
 			ErrMalformedIdentity, from)
-	case binding && move.Renewal && !from.Admits():
-		return nil, nil, fmt.Errorf("%w: an agent that is %s does not renew its own certificate",
-			ErrIllegalMove, from)
-	case binding && move.Renewal && move.PresentedFingerprint != current.GetIdentity().GetFingerprintSha256() && !move.asksAgain():
-		return nil, nil, ErrCertificateReplaced
 	case changing && !Legal(from, move.To):
 		return nil, nil, Illegal(from, move.To)
 	case changing && move.Note == "":
 		return nil, nil, fmt.Errorf("%w: becoming %s from %s needs a reason", ErrNeedsReason, move.To, from)
+	}
+	if binding && move.Renewal {
+		if err := Renewing(current, move); err != nil {
+			return nil, nil, err
+		}
 	}
 	if binding {
 		if err := Bindable(current.GetAgentId(), move.Identity, move.At); err != nil {
@@ -145,6 +145,21 @@ func Apply(current *agentv1.Agent, move Move) (*agentv1.Agent, *agentv1.Transiti
 		At:       at,
 		Note:     move.Note,
 	}, nil
+}
+
+func Renewing(current *agentv1.Agent, move Move) error {
+	from, known := FromWire(current.GetState())
+	switch {
+	case !known:
+		return fmt.Errorf("the stored agent is in no state this build knows: %s", current.GetState())
+	case from.Final():
+		return fmt.Errorf("%w: an agent that is %s takes no further identity", ErrMalformedIdentity, from)
+	case !from.Admits():
+		return fmt.Errorf("%w: an agent that is %s does not renew its own certificate", ErrIllegalMove, from)
+	case move.PresentedFingerprint != current.GetIdentity().GetFingerprintSha256() && !move.asksAgain():
+		return ErrCertificateReplaced
+	}
+	return nil
 }
 
 // What the data plane is told, which is less than what was decided: the state

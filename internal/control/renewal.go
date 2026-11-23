@@ -10,6 +10,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/agent"
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	"github.com/dynasmon/Seagull-backend-v2/internal/authz"
+	"github.com/dynasmon/Seagull-backend-v2/internal/pki"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/httpx"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 )
@@ -92,8 +93,26 @@ func (s *Server) renewCertificate() http.Handler {
 		if !readWithin(w, r, &asked, MaxCertificateBodyBytes) {
 			return
 		}
+		request, err := pki.Requested(asked.GetCsrPem(), presented.AgentID)
+		if err != nil {
+			s.metrics.certificateRenewed("refused")
+			s.refuseSigning(w, err)
+			return
+		}
 
-		signed, err := s.authority.Sign(presented.AgentID, asked.GetCsrPem(), s.certificateLife, s.now())
+		move := agent.Move{
+			Actor:                presented.AgentID,
+			At:                   s.now(),
+			Authority:            s.authority.Subject(),
+			PresentedFingerprint: hex.EncodeToString(fingerprint[:]),
+			Request:              request,
+		}
+		if err := s.agents.Renewable(r.Context(), presented.AgentID, move); err != nil {
+			s.refuseRenewal(w, presented.AgentID, err)
+			return
+		}
+
+		signed, err := s.authority.Sign(presented.AgentID, asked.GetCsrPem(), s.certificateLife, move.At)
 		if err != nil {
 			s.metrics.certificateRenewed("refused")
 			s.refuseSigning(w, err)
@@ -106,16 +125,9 @@ func (s *Server) renewCertificate() http.Handler {
 			return
 		}
 
-		if _, err := s.agents.Renew(r.Context(), presented.AgentID, agent.Move{
-			Identity:             signed.Identity,
-			Actor:                presented.AgentID,
-			At:                   s.now(),
-			Authority:            s.authority.Subject(),
-			PresentedFingerprint: hex.EncodeToString(fingerprint[:]),
-			Request:              signed.Request,
-		}); err != nil {
-			s.metrics.certificateRenewed("refused")
-			s.refuseAgent(w, err)
+		move.Identity = signed.Identity
+		if _, err := s.agents.Renew(r.Context(), presented.AgentID, move); err != nil {
+			s.refuseRenewal(w, presented.AgentID, err)
 			return
 		}
 		s.metrics.certificateRenewed("renewed")
@@ -126,4 +138,17 @@ func (s *Server) renewCertificate() http.Handler {
 
 		respond(w, http.StatusCreated, issued)
 	})
+}
+
+// A certificate a renewal had replaced is a finding about the agent the registry
+// recorded with the refusal, and is logged by the agent alone: the certificate
+// it presented is never written down here.
+func (s *Server) refuseRenewal(w http.ResponseWriter, agentID string, err error) {
+	if errors.Is(err, agent.ErrCertificateReplaced) {
+		s.metrics.certificateRenewed("replaced")
+		s.logger.Warn("agent_certificate_renewal_refused", slog.String("agent_id", agentID), slog.String("reason", "replaced"))
+	} else {
+		s.metrics.certificateRenewed("refused")
+	}
+	s.refuseAgent(w, err)
 }

@@ -263,6 +263,9 @@ func (a *Agents) move(ctx context.Context, id string, asked agent.Move, query st
 	}
 
 	moved, line, err := agent.Apply(held[0], asked)
+	if asked.Renewal && errors.Is(err, agent.ErrCertificateReplaced) {
+		return nil, replacedCommitted(ctx, transaction, held[0], asked.At, err)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -289,6 +292,9 @@ func (a *Agents) move(ctx context.Context, id string, asked agent.Move, query st
 		if err := recordCertificate(ctx, transaction, signed, agent.Answering(asked), asked.At); err != nil {
 			return nil, err
 		}
+	}
+	if err := replacedEnded(ctx, transaction, held[0], moved, asked.At); err != nil {
+		return nil, err
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit the move of agent %s: %w", id, err)

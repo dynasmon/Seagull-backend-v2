@@ -47,6 +47,8 @@ type Metrics struct {
 	fleet       *prometheus.GaugeVec
 	fleetReads  *prometheus.CounterVec
 	findings    *prometheus.GaugeVec
+	carried     *prometheus.CounterVec
+	uncarried   prometheus.Gauge
 }
 
 func NewMetrics(registry *metrics.Registry) *Metrics {
@@ -243,6 +245,18 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 			Name:      "fleet_findings_open",
 			Help:      "Findings about agents that are still open, by kind, as the platform last read the whole fleet.",
 		}, []string{"kind"}),
+		carried: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "agent_findings_published_total",
+			Help:      "Decisions the control plane made about agents and handed to the findings log, by what came of them.",
+		}, []string{"outcome"}),
+		uncarried: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "control",
+			Name:      "agent_findings_outstanding",
+			Help:      "Decisions the control plane made about agents that the findings log has not taken yet.",
+		}),
 	}
 
 	registry.MustRegister(
@@ -256,6 +270,7 @@ func NewMetrics(registry *metrics.Registry) *Metrics {
 		instruments.authorized, instruments.offered, instruments.downloaded,
 		instruments.inForce, instruments.readings, instruments.gated,
 		instruments.disposals, instruments.fleet, instruments.fleetReads, instruments.findings,
+		instruments.carried, instruments.uncarried,
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: "control",
@@ -375,6 +390,18 @@ func (m *Metrics) certificateRenewed(outcome string) {
 func (m *Metrics) agentAnnounced(outcome string) {
 	if m != nil {
 		m.announced.WithLabelValues(outcome).Inc()
+	}
+}
+
+func (m *Metrics) findingsCarried(outcome string, decisions int) {
+	if m != nil {
+		m.carried.WithLabelValues(outcome).Add(float64(decisions))
+	}
+}
+
+func (m *Metrics) findingsOutstanding(count int) {
+	if m != nil {
+		m.uncarried.Set(float64(count))
 	}
 }
 

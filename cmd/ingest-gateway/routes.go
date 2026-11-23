@@ -17,7 +17,8 @@ type sinks struct {
 
 // Every stream the gateway serves, built from its settings alone: what a stream
 // admits and what the descriptor says of it are the same numbers.
-func routes(settings configuration, into sinks, roster ingest.Roster, currency ingest.Current, registry *metrics.Registry, logger *slog.Logger) (ingest.ServerOptions, error) {
+func routes(settings configuration, into sinks, roster ingest.Roster, currency ingest.Current, certificates *ingest.Certificates,
+	registry *metrics.Registry, logger *slog.Logger) (ingest.ServerOptions, error) {
 	instruments := ingest.NewMetrics(registry)
 	admitter, err := ingest.NewAdmitter(into.events, settings.admissionRules, instruments)
 	if err != nil {
@@ -63,6 +64,7 @@ func routes(settings configuration, into sinks, roster ingest.Roster, currency i
 		Admitter:       admitter,
 		Roster:         roster,
 		Currency:       currency,
+		Certificates:   certificates,
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        instruments,
@@ -77,6 +79,7 @@ func routes(settings configuration, into sinks, roster ingest.Roster, currency i
 		Admitter:       inventoryAdmitter,
 		Roster:         roster,
 		Currency:       currency,
+		Certificates:   certificates,
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        inventoryInstruments,
@@ -91,6 +94,7 @@ func routes(settings configuration, into sinks, roster ingest.Roster, currency i
 		Admitter:       statusAdmitter,
 		Roster:         roster,
 		Currency:       currency,
+		Certificates:   certificates,
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        statusInstruments,
@@ -105,6 +109,7 @@ func routes(settings configuration, into sinks, roster ingest.Roster, currency i
 		Admitter:       assessmentAdmitter,
 		Roster:         roster,
 		Currency:       currency,
+		Certificates:   certificates,
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        assessmentInstruments,

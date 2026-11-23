@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,8 +35,14 @@ import (
 )
 
 type heldRoster struct {
-	tenants map[string]string
-	known   map[string]bool
+	tenants  map[string]string
+	known    map[string]bool
+	bindings map[string]agentidentity.Held
+}
+
+func (r heldRoster) Binding(agentID string) (agentidentity.Held, bool) {
+	held, known := r.bindings[agentID]
+	return held, known
 }
 
 func (r heldRoster) Tenant(agentID string) (string, bool) {
@@ -65,13 +72,33 @@ const describedBody = 2 << 20
 
 func describing(t *testing.T, limiter *ratelimit.Limiter) http.Handler {
 	t.Helper()
+	return routing(t, describedRoster, limiter, judging(t), &recordingBackbone{})
+}
+
+func judging(t *testing.T) *ingest.Certificates {
+	t.Helper()
+	registry := metrics.New("certificates")
+	refusals, err := ingest.NewRefusals(ingest.RefusalsOptions{Gateway: "gateway-a", Publisher: &refusalsSent{}, Every: time.Second,
+		Most: 16, Registry: registry, Logger: slog.New(slog.DiscardHandler)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificates, err := ingest.NewCertificates(ingest.CertificatesOptions{Tolerance: time.Minute, Refusals: refusals, Registry: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return certificates
+}
+
+func routing(t *testing.T, roster heldRoster, limiter *ratelimit.Limiter, certificates *ingest.Certificates, backbone ingest.Backbone) http.Handler {
+	t.Helper()
 	registry := metrics.New("test")
 	capacity, err := ingest.NewCapacity(64<<20, 16)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	events, err := ingest.NewAdmitter(&recordingBackbone{}, eventRules, ingest.NewMetrics(registry))
+	events, err := ingest.NewAdmitter(backbone, eventRules, ingest.NewMetrics(registry))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,23 +115,23 @@ func describing(t *testing.T, limiter *ratelimit.Limiter) http.Handler {
 		t.Fatal(err)
 	}
 
-	eventHandler, err := ingest.NewHandler(ingest.HandlerOptions{Admitter: events, Roster: describedRoster, Currency: current{}, Limiter: limiter,
-		Capacity: capacity, Metrics: ingest.NewMetrics(metrics.New("events")), MaxBodyBytes: describedBody, PublishTimeout: time.Second})
+	eventHandler, err := ingest.NewHandler(ingest.HandlerOptions{Admitter: events, Roster: roster, Currency: current{}, Limiter: limiter,
+		Certificates: certificates, Capacity: capacity, Metrics: ingest.NewMetrics(metrics.New("events")), MaxBodyBytes: describedBody, PublishTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
-	inventoryHandler, err := ingest.NewInventoryHandler(ingest.InventoryHandlerOptions{Admitter: assets, Roster: describedRoster, Currency: current{}, Limiter: limiter,
-		Capacity: capacity, Metrics: ingest.NewInventoryMetrics(metrics.New("inventory")), MaxBodyBytes: describedBody, PublishTimeout: time.Second})
+	inventoryHandler, err := ingest.NewInventoryHandler(ingest.InventoryHandlerOptions{Admitter: assets, Roster: roster, Currency: current{}, Limiter: limiter,
+		Certificates: certificates, Capacity: capacity, Metrics: ingest.NewInventoryMetrics(metrics.New("inventory")), MaxBodyBytes: describedBody, PublishTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
-	statusHandler, err := ingest.NewStatusHandler(ingest.StatusHandlerOptions{Admitter: reports, Roster: describedRoster, Currency: current{}, Limiter: limiter,
-		Capacity: capacity, Metrics: ingest.NewStatusMetrics(metrics.New("status")), MaxBodyBytes: describedBody, PublishTimeout: time.Second})
+	statusHandler, err := ingest.NewStatusHandler(ingest.StatusHandlerOptions{Admitter: reports, Roster: roster, Currency: current{}, Limiter: limiter,
+		Certificates: certificates, Capacity: capacity, Metrics: ingest.NewStatusMetrics(metrics.New("status")), MaxBodyBytes: describedBody, PublishTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
-	assessmentHandler, err := ingest.NewAssessmentHandler(ingest.AssessmentHandlerOptions{Admitter: findings, Roster: describedRoster, Currency: current{}, Limiter: limiter,
-		Capacity: capacity, Metrics: ingest.NewAssessmentMetrics(metrics.New("assessments")), MaxBodyBytes: describedBody, PublishTimeout: time.Second})
+	assessmentHandler, err := ingest.NewAssessmentHandler(ingest.AssessmentHandlerOptions{Admitter: findings, Roster: roster, Currency: current{}, Limiter: limiter,
+		Certificates: certificates, Capacity: capacity, Metrics: ingest.NewAssessmentMetrics(metrics.New("assessments")), MaxBodyBytes: describedBody, PublishTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

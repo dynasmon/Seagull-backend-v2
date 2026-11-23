@@ -238,11 +238,22 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		t.Fatalf("bound what the gateway holds at once: %v", err)
 	}
 
+	refused, err := ingest.NewRefusals(ingest.RefusalsOptions{Gateway: "gateway-load", Publisher: unheardRefusals{}, Every: time.Second,
+		Most: 64, Registry: platform.Metrics(), Logger: platform.Logger()})
+	if err != nil {
+		t.Fatalf("build the refusals: %v", err)
+	}
+	certificates, err := ingest.NewCertificates(ingest.CertificatesOptions{Tolerance: time.Minute, Refusals: refused, Registry: platform.Metrics()})
+	if err != nil {
+		t.Fatalf("build the certificate judge: %v", err)
+	}
+
 	roster := agent.NewRoster()
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{
 		Admitter:       admitter,
 		Roster:         roster,
 		Currency:       current{},
+		Certificates:   certificates,
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        instruments,
@@ -562,3 +573,7 @@ func realBackbone(t *testing.T, addresses []string, topic string) *broker.Publis
 	t.Cleanup(publisher.Close)
 	return publisher
 }
+
+type unheardRefusals struct{}
+
+func (unheardRefusals) PublishRefusals(context.Context, []*agentv1.Refusal) error { return nil }

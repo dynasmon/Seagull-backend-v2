@@ -87,12 +87,32 @@ type current struct{}
 
 func (current) Stale() bool { return false }
 
+type heardRefusals struct {
+	mutex   sync.Mutex
+	records []*agentv1.Refusal
+}
+
+func (h *heardRefusals) PublishRefusals(_ context.Context, refused []*agentv1.Refusal) error {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	h.records = append(h.records, refused...)
+	return nil
+}
+
+func (h *heardRefusals) heard() []*agentv1.Refusal {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	return append([]*agentv1.Refusal(nil), h.records...)
+}
+
 type gateway struct {
 	address    string
 	opsAddress string
 	authority  *devpki.Authority
 	backbone   *backbone
 	roster     *agent.Roster
+	refused    *ingest.Refusals
+	refusals   *heardRefusals
 	stopped    chan error
 	stop       context.CancelFunc
 }
@@ -110,6 +130,8 @@ type gatewayOptions struct {
 	backbone            *backbone
 	roster              *agent.Roster
 	currency            ingest.Current
+	tolerance           time.Duration
+	alsoTrust           *devpki.Authority
 }
 
 func startGateway(t *testing.T, options gatewayOptions) *gateway {
@@ -145,6 +167,9 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	if options.currency == nil {
 		options.currency = current{}
 	}
+	if options.tolerance == 0 {
+		options.tolerance = time.Minute
+	}
 
 	authority, err := devpki.NewAuthority("Seagull Test CA", time.Hour)
 	if err != nil {
@@ -161,7 +186,11 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 	authorityFile := filepath.Join(directory, "agent-ca.pem")
 	write(t, certificateFile, server.CertificatePEM)
 	write(t, keyFile, server.PrivateKeyPEM)
-	write(t, authorityFile, authority.Material().CertificatePEM)
+	trusted := authority.Material().CertificatePEM
+	if options.alsoTrust != nil {
+		trusted = append(append([]byte(nil), trusted...), options.alsoTrust.Material().CertificatePEM...)
+	}
+	write(t, authorityFile, trusted)
 
 	material, err := tlsx.NewMaterial(certificateFile, keyFile, authorityFile)
 	if err != nil {
@@ -205,10 +234,23 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		t.Fatalf("bound what the gateway holds at once: %v", err)
 	}
 
+	heard := &heardRefusals{}
+	refused, err := ingest.NewRefusals(ingest.RefusalsOptions{Gateway: "gateway-test", Publisher: heard, Every: time.Second, Most: 64,
+		Registry: platform.Metrics(), Logger: platform.Logger()})
+	if err != nil {
+		t.Fatalf("build the refusals: %v", err)
+	}
+	certificates, err := ingest.NewCertificates(ingest.CertificatesOptions{Tolerance: options.tolerance, Refusals: refused,
+		Registry: platform.Metrics()})
+	if err != nil {
+		t.Fatalf("build the certificate judge: %v", err)
+	}
+
 	handler, err := ingest.NewHandler(ingest.HandlerOptions{
 		Admitter:       admitter,
 		Roster:         options.roster,
 		Currency:       options.currency,
+		Certificates:   certificates,
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        instruments,
@@ -233,6 +275,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		Admitter:       collector,
 		Roster:         options.roster,
 		Currency:       options.currency,
+		Certificates:   certificates,
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        assets,
@@ -258,6 +301,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		Admitter:       reporter,
 		Roster:         options.roster,
 		Currency:       options.currency,
+		Certificates:   certificates,
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        reported,
@@ -282,6 +326,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		Admitter:       assessor,
 		Roster:         options.roster,
 		Currency:       options.currency,
+		Certificates:   certificates,
 		Limiter:        limiter,
 		Capacity:       capacity,
 		Metrics:        assessed,
@@ -310,6 +355,7 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		t.Fatalf("build server: %v", err)
 	}
 	platform.Add(listener)
+	platform.Add(refused)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	running := &gateway{
@@ -318,6 +364,8 @@ func startGateway(t *testing.T, options gatewayOptions) *gateway {
 		authority:  authority,
 		backbone:   options.backbone,
 		roster:     options.roster,
+		refused:    refused,
+		refusals:   heard,
 		stopped:    make(chan error, 1),
 		stop:       cancel,
 	}

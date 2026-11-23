@@ -110,7 +110,7 @@ func gateway(ctx context.Context) error {
 	defer cancel()
 	drift, err := publisher.VerifyTopics(topologyCtx,
 		settings.topology.Events, settings.topology.Inventory, settings.topology.Status, settings.topology.Assessments,
-		settings.topology.Gateways)
+		settings.topology.Gateways, settings.topology.Refusals)
 	if err != nil {
 		return err
 	}
@@ -140,8 +140,39 @@ func gateway(ctx context.Context) error {
 	}
 	currency.Confirm(ctx)
 
+	refused, err := broker.NewRefusals(broker.Config{
+		Brokers:         settings.brokers,
+		Topic:           settings.topology.Refusals.Name,
+		MaxMessageBytes: settings.topology.Refusals.MaxMessageBytes,
+		ClientID:        settings.admissionRules.Gateway,
+		Security:        settings.security,
+	})
+	if err != nil {
+		return err
+	}
+	defer refused.Close()
+	refusals, err := ingest.NewRefusals(ingest.RefusalsOptions{
+		Gateway:   settings.admissionRules.Gateway,
+		Publisher: refused,
+		Every:     refusalsEvery,
+		Most:      refusalsHeld,
+		Registry:  platform.Metrics(),
+		Logger:    platform.Logger(),
+	})
+	if err != nil {
+		return err
+	}
+	certificates, err := ingest.NewCertificates(ingest.CertificatesOptions{
+		Tolerance: settings.replacedTolerance,
+		Refusals:  refusals,
+		Registry:  platform.Metrics(),
+	})
+	if err != nil {
+		return err
+	}
+
 	served, err := routes(settings, sinks{events: publisher, inventory: assets, status: reports, assessments: findings},
-		admitted.held, currency, platform.Metrics(), platform.Logger())
+		admitted.held, currency, certificates, platform.Metrics(), platform.Logger())
 	if err != nil {
 		return err
 	}
@@ -184,6 +215,7 @@ func gateway(ctx context.Context) error {
 	platform.Add(currency)
 	platform.Add(listener)
 	platform.Add(beacon)
+	platform.Add(refusals)
 
 	return platform.Run(ctx)
 }

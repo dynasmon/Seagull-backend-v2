@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agent"
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	"github.com/dynasmon/Seagull-backend-v2/internal/control"
 	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
@@ -25,6 +26,7 @@ type registeredAgents struct {
 	asked        map[string]agent.Asked
 	announced    map[string]uint64
 	replacements map[string]agent.Replacement
+	used         map[string]int
 }
 
 func newRegisteredAgents() *registeredAgents {
@@ -35,6 +37,7 @@ func newRegisteredAgents() *registeredAgents {
 		asked:        map[string]agent.Asked{},
 		announced:    map[string]uint64{},
 		replacements: map[string]agent.Replacement{},
+		used:         map[string]int{},
 	}
 }
 
@@ -198,6 +201,22 @@ func (r *registeredAgents) Admission(_ context.Context, id string) (*agentv1.Adm
 		return nil, agent.ErrUnknown
 	}
 	return agent.Admission(held, r.replacements[id]), nil
+}
+
+func (r *registeredAgents) Binding(ctx context.Context, id string) (agent.State, agentidentity.Binding, error) {
+	told, err := r.Admission(ctx, id)
+	if err != nil {
+		return "", agentidentity.Binding{}, err
+	}
+	state, _ := agent.FromWire(told.GetState())
+	return state, agent.BindingOf(told), nil
+}
+
+func (r *registeredAgents) ReplacedUsed(_ context.Context, id, _, _ string, _ time.Time) error {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	r.used[id]++
+	return nil
 }
 
 func (r *registeredAgents) Announced(_ context.Context, agentID string, revision uint64) error {

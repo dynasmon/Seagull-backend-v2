@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agent"
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	"github.com/dynasmon/Seagull-backend-v2/internal/authz"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 )
@@ -38,6 +39,8 @@ type Agents interface {
 	Unwritten(ctx context.Context, limit int) ([]*agentv1.Admission, error)
 	Admission(ctx context.Context, id string) (*agentv1.Admission, error)
 	Announced(ctx context.Context, agentID string, revision uint64) error
+	Binding(ctx context.Context, id string) (agent.State, agentidentity.Binding, error)
+	ReplacedUsed(ctx context.Context, id, inForce, route string, at time.Time) error
 }
 
 // A tenant is not a field a caller fills in: registering an agent into an estate

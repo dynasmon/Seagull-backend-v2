@@ -614,6 +614,56 @@
       }
     },
     {
+      "name": "events-certificate-replaced",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-certificate-replaced.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 403,
+      "content_type": "application/x-protobuf",
+      "reply": "events-certificate-replaced.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "agent_certificate_replaced",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
+      "name": "events-roster-behind",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-roster-behind.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 503,
+      "content_type": "application/x-protobuf",
+      "retry_after": true,
+      "reply": "events-roster-behind.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "roster_behind",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
+      "name": "gateway-descriptor-certificate-replaced",
+      "listener": "gateway",
+      "method": "GET",
+      "path": "/v1/descriptor",
+      "status": 403,
+      "content_type": "application/x-protobuf",
+      "reply": "gateway-descriptor-certificate-replaced.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "agent_certificate_replaced",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
       "name": "issuance-accepted",
       "listener": "operator",
       "method": "POST",

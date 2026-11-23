@@ -37,7 +37,7 @@ services:
   # caller, holds no capability and joins neither the backbone nor the stores.
   # It reads a saved archive rather than the Docker socket, which would be root.
   grype:
-    image: anchore/grype:v0.121.2-nonroot@sha256:1a0788d4ebdfcc19e4d6378041ac26877ca6c444f85a4dba31438c81b671db6e
+    image: anchore/grype:v0.121.3-nonroot@sha256:33559478ce73255cf4457a8343add3693788be2b40dd471c3dac2713f1c80c1d
     profiles: [scan]
     user: ${SEAGULL_RUNTIME_USER:-65532:65532}
     read_only: true

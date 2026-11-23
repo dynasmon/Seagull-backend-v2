@@ -64,3 +64,38 @@ func TestHowLongTheOldestDecisionNoGatewayWasToldHasWaitedIsReported(t *testing.
 		t.Fatalf("%v decisions are reported outstanding after %d were published", outstanding, len(told.published))
 	}
 }
+
+// The data plane already holds the decision, without the certificate in force:
+// it is written again, and no alarm says a decision went unpublished.
+func TestARecordTheLogHoldsInAnOlderShapeIsWrittenAgainAndIsNotOutstanding(t *testing.T) {
+	held := newStubAgents()
+	active(t, held, "web-01")
+	held.announced["web-01"] = held.held["web-01"].GetRevision()
+	held.older["web-01"] = true
+	told := &stubAdmissions{unreached: errors.New("the backbone is unreachable")}
+	registry := metrics.New("test")
+	announcer, err := control.NewAnnouncer(control.AnnouncerOptions{Agents: held, Admissions: told, Metrics: control.NewMetrics(registry),
+		Logger: slog.New(slog.DiscardHandler), Every: time.Second, Batch: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	announcer.Sweep(context.Background())
+	if outstanding := gauged(t, registry, "seagull_control_agent_admissions_outstanding"); outstanding != 0 {
+		t.Fatalf("a record held in an older shape is reported as %v decisions outstanding", outstanding)
+	}
+	if waited := gauged(t, registry, "seagull_control_agent_admissions_oldest_outstanding_seconds"); waited != 0 {
+		t.Fatalf("a record held in an older shape is reported as a decision waiting %vs", waited)
+	}
+
+	told.unreached = nil
+	announcer.Sweep(context.Background())
+	if len(told.published) != 1 || told.published[0].GetFingerprintSha256() != held.held["web-01"].GetIdentity().GetFingerprintSha256() ||
+		told.published[0].GetRevision() != held.held["web-01"].GetRevision() {
+		t.Fatalf("the record was written again as %v", told.published)
+	}
+	announcer.Sweep(context.Background())
+	if len(told.published) != 1 {
+		t.Fatalf("a record written again in the shape this build writes was written again %d times", len(told.published)-1)
+	}
+}

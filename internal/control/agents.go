@@ -35,6 +35,8 @@ type Agents interface {
 	State(ctx context.Context, id string) (agent.State, error)
 	Certificates(ctx context.Context, id string, tenants []string) (*agentv1.CertificateHistory, error)
 	Outstanding(ctx context.Context, limit int) ([]*agentv1.Admission, error)
+	Unwritten(ctx context.Context, limit int) ([]*agentv1.Admission, error)
+	Admission(ctx context.Context, id string) (*agentv1.Admission, error)
 	Announced(ctx context.Context, agentID string, revision uint64) error
 }
 
@@ -70,7 +72,7 @@ func (s *Server) registerAgent() http.Handler {
 			return
 		}
 		s.metrics.agentMoved(agentState(registered))
-		s.announce(r.Context(), registered)
+		s.announce(r.Context(), registered.GetAgentId())
 
 		respond(w, http.StatusCreated, registered)
 	})
@@ -188,7 +190,7 @@ func (s *Server) moveAgent(w http.ResponseWriter, r *http.Request, asked agent.M
 		return
 	}
 	s.metrics.agentMoved(agentState(moved))
-	s.announce(r.Context(), moved)
+	s.announce(r.Context(), moved.GetAgentId())
 
 	respond(w, http.StatusOK, moved)
 }

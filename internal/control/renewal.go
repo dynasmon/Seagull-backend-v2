@@ -135,6 +135,7 @@ func (s *Server) renewCertificate() http.Handler {
 			slog.String("agent_id", presented.AgentID),
 			slog.String("serial", signed.Identity.GetSerial()),
 			slog.String("authority", s.authority.Subject()))
+		s.announce(r.Context(), presented.AgentID)
 
 		respond(w, http.StatusCreated, issued)
 	})

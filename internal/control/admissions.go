@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/dynasmon/Seagull-backend-v2/internal/agent"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 )
 
@@ -34,11 +33,18 @@ func carry(ctx context.Context, agents Agents, admissions Admissions, instrument
 	return nil
 }
 
-func (s *Server) announce(ctx context.Context, moved *agentv1.Agent) {
-	if err := carry(ctx, s.agents, s.admissions, s.metrics, agent.Admission(moved)); err != nil {
+func (s *Server) announce(ctx context.Context, agentID string) {
+	if s.admissions == nil {
+		return
+	}
+	told, err := s.agents.Admission(ctx, agentID)
+	if err == nil {
+		err = carry(ctx, s.agents, s.admissions, s.metrics, told)
+	}
+	if err != nil {
 		s.logger.Warn("agent_admission_not_published",
-			slog.String("agent_id", moved.GetAgentId()),
-			slog.Uint64("revision", moved.GetRevision()),
+			slog.String("agent_id", agentID),
+			slog.Uint64("revision", told.GetRevision()),
 			slog.String("error", err.Error()),
 		)
 	}
@@ -128,6 +134,29 @@ func (a *Announcer) Sweep(ctx context.Context) {
 		}
 	}
 	a.metrics.agentsOutstanding(0, time.Time{})
+	a.rewrite(ctx)
+}
+
+// A record the log holds in a shape older than this build writes is written
+// again, a batch at every sweep: the decision already reached the data plane,
+// so it is not outstanding, and a gateway reads the same revision again with
+// the certificate in force.
+func (a *Announcer) rewrite(ctx context.Context) {
+	older, err := a.agents.Unwritten(ctx, a.batch)
+	if err != nil {
+		a.logger.Warn("agent_admissions_unreadable", slog.String("error", err.Error()))
+		return
+	}
+	for _, record := range older {
+		if err := carry(ctx, a.agents, a.admissions, a.metrics, record); err != nil {
+			a.logger.Warn("agent_admission_not_rewritten",
+				slog.String("agent_id", record.GetAgentId()),
+				slog.Uint64("revision", record.GetRevision()),
+				slog.String("error", err.Error()),
+			)
+			return
+		}
+	}
 }
 
 func oldestOf(outstanding []*agentv1.Admission) time.Time {

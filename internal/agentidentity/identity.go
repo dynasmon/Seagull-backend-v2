@@ -16,7 +16,8 @@ var (
 )
 
 type Identity struct {
-	AgentID string
+	AgentID     string
+	Certificate Certificate
 }
 
 // The agent identity is taken from the verified certificate and never from a
@@ -37,7 +38,7 @@ func FromCertificate(certificate *x509.Certificate) (Identity, error) {
 	if !agentIDPattern.MatchString(name) {
 		return Identity{}, fmt.Errorf("%w: common name %q", ErrMalformedIdentity, name)
 	}
-	return Identity{AgentID: name}, nil
+	return Identity{AgentID: name, Certificate: certificateOf(certificate)}, nil
 }
 
 func Valid(agentID string) bool { return agentIDPattern.MatchString(agentID) }

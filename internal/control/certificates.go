@@ -60,6 +60,7 @@ func (s *Server) issueCertificate() http.Handler {
 			return
 		}
 		s.metrics.certificateIssued(agentState(bound))
+		s.announce(r.Context(), id)
 
 		respond(w, http.StatusCreated, issued)
 	})

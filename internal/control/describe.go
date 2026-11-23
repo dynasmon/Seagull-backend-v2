@@ -52,6 +52,9 @@ func (s *Server) describeToAgents(described *platformv1.Descriptor, tag string) 
 			Refuse(w, http.StatusTooManyRequests, CodeRateLimited, "this agent is asking what the listener serves too often")
 			return
 		}
+		if !s.presents(w, r, presented, http.MethodGet+" "+DescriptorPath) {
+			return
+		}
 		state, err := s.agents.State(r.Context(), presented.AgentID)
 		switch {
 		case errors.Is(err, agent.ErrUnknown):

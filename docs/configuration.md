@@ -482,8 +482,25 @@ confirmed it reads the end of the status log and a gateway said it admits, and
 only once that has lasted five of the agent's intervals without a break: an
 outage of the backbone, of the gateways or of the judge itself never reads as a
 silent fleet. Every replica judges every agent and names the same findings, so a
-second replica doubles decisions the store collapses. It holds about a few hundred
-bytes per agent.
+second replica doubles decisions the store collapses. It holds a few hundred bytes
+for an agent heard from one place.
+
+It tells the places an agent reports from apart by run — the installation, the
+boot and when the run started — and finds a copied installation when a run
+reports a sequence another run of its installation already holds and did not
+account for, and a shared identity when two installations write new reports in
+turn. Both are decided from live reports only, and close once a single place was
+heard for five of its intervals while the platform listened, or once the registry
+stops admitting the agent; see
+[ADR 57](decisions/0057-a-place-is-a-run-and-a-renewal-is-refused-before-it-is-signed.md).
+An agent holds at most four places, four open findings of each kind and four
+closed shared identities, so an agent reported from many places costs at most
+some tens of kilobytes, never what the holder of its key chooses. An episode found while its
+agent holds four open findings of its kind is counted and not opened:
+
+```text
+seagull_fleetjudge_findings_not_opened_total{kind="copied_installation|shared_identity"}
+```
 
 ### agent-finding-writer
 
@@ -751,8 +768,8 @@ detection away from somebody's triage.
 | `SEAGULL_CONTROL_API_START_TIMEOUT` | `30s` | how long it will spend reading the ruleset log, and then publishing the rules it starts from, before it gives up |
 | `SEAGULL_CONTROL_API_RULESET_RECORDS` | `256` | ruleset records read per fetch |
 | `SEAGULL_DETECTION_RULES` | `/etc/seagull/rules` | the rule tree the engine starts on, published as the installation's first ruleset; it does not start without one |
-| `SEAGULL_CONTROL_API_ANNOUNCE_INTERVAL` | `5s` | how often it republishes agent decisions the backbone has not taken |
-| `SEAGULL_CONTROL_API_ANNOUNCE_BATCH` | `100` | outstanding decisions carried per sweep |
+| `SEAGULL_CONTROL_API_ANNOUNCE_INTERVAL` | `5s` | how often it republishes agent decisions and findings the backbone has not taken |
+| `SEAGULL_CONTROL_API_ANNOUNCE_BATCH` | `100` | outstanding decisions carried per sweep, and outstanding findings |
 | `SEAGULL_CONTROL_API_LIVENESS_HORIZON` | `720h` | how far back it looks for when an agent was last heard from |
 | `SEAGULL_CONTROL_TELEMETRY_STORE_ADDRESS` | required | ClickHouse address, read only, for those questions |
 | `SEAGULL_CONTROL_TELEMETRY_STORE_DATABASE` | `seagull` | |
@@ -810,6 +827,24 @@ is published there for the gateway, and a decision the backbone did not take is
 carried again on the next sweep. Its connection to the telemetry store answers
 two questions — when an agent was last heard from, and what its newest status
 report and assessment said — and writes nothing.
+
+It writes `security.agents.findings` too, and never reads it. A renewal is asked
+of the registry, under the agent's row lock, before the authority signs it, so
+one the registry refuses spends no signature. One presented with a certificate a
+renewal had replaced is refused that way and kept in `agent_replaced_certificates`
+beside the certificate trail, one row for each agent and certificate in force,
+until another certificate is bound or the agent is no longer admitted. Every
+`SEAGULL_CONTROL_API_ANNOUNCE_INTERVAL` it publishes what the registry decided and
+the log has not taken as `replaced_certificate` findings, which say where the
+certificate was used and never which one it was, and it decides an open one again
+every day; see
+[ADR 57](decisions/0057-a-place-is-a-run-and-a-renewal-is-refused-before-it-is-signed.md).
+
+```text
+seagull_control_agent_certificates_renewed_total{outcome="renewed|replaced|refused|rate_limited|unidentified"}
+seagull_control_agent_findings_published_total{outcome="published|refused|unrecorded"}
+seagull_control_agent_findings_outstanding
+```
 
 It holds the agent policies operators publish and never signs one: the signers
 setting names the public keys a publication must verify under, and an agent asks
@@ -915,7 +950,7 @@ Nineteen topics, declared once in `internal/broker` and applied by
 | `security.assessments.quarantine` | 1 | 30 days | 1 MiB + 64 KiB | assessments the assessment projector could not store |
 | `security.findings` | 6 | 30 days | 1 MiB | every decision the vulnerability matcher made and the assessment it made it in, keyed by the agent so one asset's decisions are read in the order they were made, an assessment after the findings it covered |
 | `security.findings.quarantine` | 1 | 30 days | 1 MiB + 64 KiB | finding records the finding writer could not store |
-| `security.agents.findings` | 3 | 30 days | 1 MiB | every decision about what the platform found about an agent, keyed by the agent; not compacted, because a decider reads its own decisions back to learn which findings it left open |
+| `security.agents.findings` | 3 | 30 days | 1 MiB | every decision about what the platform found about an agent, keyed by the agent, written by the fleet judge and by the control plane, each for its own kinds; not compacted, because the judge reads its own decisions back to learn which findings it left open |
 | `security.agents.findings.quarantine` | 1 | 30 days | 1 MiB + 64 KiB | decisions the agent finding writer could not store |
 | `security.gateways` | 1 | compacted, kept | 1 MiB | the newest beacon of every gateway, keyed by it: whether it admits what agents send, which is how the fleet judge tells a silent agent from a platform that stopped listening |
 

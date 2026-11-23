@@ -16,6 +16,12 @@
 > by default, and answers every batch `503 roster_stale` past it, so a revocation
 > that reached the log is enforced within that bound or nothing is admitted.
 
+> Amended by [ADR 58](0058-a-listener-admits-an-agent-only-on-the-certificate-in-force.md):
+> the admission record also names the certificate the registry binds the agent
+> to, by fingerprint, and a gateway admits the agent on that certificate and, for
+> a declared tolerance, on the one it replaced. The record still names no reason
+> and no operator.
+
 ## Context
 
 [ADR 2](0002-identity-comes-from-the-certificate.md) settled where an agent's

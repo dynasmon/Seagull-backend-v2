@@ -155,6 +155,11 @@ type controlPlane struct {
 
 func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 	t.Helper()
+	return startControlPlane(t, limiter, 0)
+}
+
+func startControlPlane(t *testing.T, limiter *ratelimit.Limiter, tolerance time.Duration) *controlPlane {
+	t.Helper()
 
 	authority, err := devpki.NewAuthority("Seagull Control Test CA", time.Hour)
 	if err != nil {
@@ -243,34 +248,35 @@ func startControlAPI(t *testing.T, limiter *ratelimit.Limiter) *controlPlane {
 	anchor := func() (*agentupdate.Root, error) { return agentupdate.Anchor(updateRoot, time.Now()) }
 
 	options := control.ServerOptions{
-		Address:         "127.0.0.1:0",
-		TLS:             mutual,
-		Guard:           guard,
-		Sessions:        sessions,
-		Registry:        registry,
-		Rulesets:        &recordingRulesets{},
-		Alerts:          newRaisedAlerts(),
-		Incidents:       newOpenedIncidents(),
-		Agents:          registered,
-		Admissions:      told,
-		Authority:       signing,
-		TrustBundle:     func() ([]byte, error) { return os.ReadFile(bundleFile) },
-		CertificateLife: time.Hour,
-		RenewalAddress:  "127.0.0.1:0",
-		RenewalTLS:      renewalMutual,
-		Policies:        newPublishedPolicies(registered),
-		PolicySigners:   signersOf(t, policyKey),
-		Updates:         updates,
-		UpdateRoot:      anchor,
-		Rollouts:        rollouts,
-		Dispositions:    newKeptDispositions(),
-		Metrics:         instruments,
-		Instrumentation: platform.HTTP(),
-		Logger:          platform.Logger(),
-		ReadTimeout:     10 * time.Second,
-		WriteTimeout:    10 * time.Second,
-		IdleTimeout:     30 * time.Second,
-		ShutdownTimeout: platform.ShutdownTimeout(),
+		Address:           "127.0.0.1:0",
+		TLS:               mutual,
+		Guard:             guard,
+		Sessions:          sessions,
+		Registry:          registry,
+		Rulesets:          &recordingRulesets{},
+		Alerts:            newRaisedAlerts(),
+		Incidents:         newOpenedIncidents(),
+		Agents:            registered,
+		Admissions:        told,
+		Authority:         signing,
+		TrustBundle:       func() ([]byte, error) { return os.ReadFile(bundleFile) },
+		CertificateLife:   time.Hour,
+		RenewalAddress:    "127.0.0.1:0",
+		RenewalTLS:        renewalMutual,
+		ReplacedTolerance: tolerance,
+		Policies:          newPublishedPolicies(registered),
+		PolicySigners:     signersOf(t, policyKey),
+		Updates:           updates,
+		UpdateRoot:        anchor,
+		Rollouts:          rollouts,
+		Dispositions:      newKeptDispositions(),
+		Metrics:           instruments,
+		Instrumentation:   platform.HTTP(),
+		Logger:            platform.Logger(),
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       30 * time.Second,
+		ShutdownTimeout:   platform.ShutdownTimeout(),
 	}
 
 	listener, err := control.NewServer(options)

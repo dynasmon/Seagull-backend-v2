@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -59,9 +60,16 @@ func admissible(ctx context.Context, settings configuration, platform *service.S
 // the only record of. A record naming no agent at all can do neither, so it ends
 // the replay and the process stays out of service.
 func (r roster) applying(logger *slog.Logger) broker.Deliver {
+	return r.following(logger, func() time.Time { return time.Time{} })
+}
+
+// A record heard while serving is learned when it arrives, which is what starts
+// the tolerance of a certificate it replaced.
+func (r roster) following(logger *slog.Logger, now func() time.Time) broker.Deliver {
 	return func(_ context.Context, records []broker.Record) error {
+		learned := now()
 		for _, record := range records {
-			err := r.read(record)
+			err := r.read(record, learned)
 			if err == nil {
 				continue
 			}
@@ -82,7 +90,7 @@ func (r roster) applying(logger *slog.Logger) broker.Deliver {
 // The key is the agent the record is about and the payload says so again, so a
 // record where the two disagree is one this reader cannot attribute: applying it
 // under either name decides for an agent the control plane did not write about.
-func (r roster) read(record broker.Record) error {
+func (r roster) read(record broker.Record, learned time.Time) error {
 	var admission agentv1.Admission
 	if err := proto.Unmarshal(record.Value, &admission); err != nil {
 		return err
@@ -90,11 +98,11 @@ func (r roster) read(record broker.Record) error {
 	if admission.GetAgentId() != string(record.Key) {
 		return fmt.Errorf("the record is keyed %q and decides about agent %q", record.Key, admission.GetAgentId())
 	}
-	return r.held.Apply(&admission)
+	return r.held.Learn(&admission, learned)
 }
 
 func (r roster) follower(logger *slog.Logger) follower {
-	return follower{reader: r.reader, deliver: r.applying(logger)}
+	return follower{reader: r.reader, deliver: r.following(logger, time.Now)}
 }
 
 func (r roster) close() {

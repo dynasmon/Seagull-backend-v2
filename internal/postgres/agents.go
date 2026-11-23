@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agent"
+	"github.com/dynasmon/Seagull-backend-v2/internal/agentidentity"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 )
 
@@ -112,6 +113,22 @@ func (a *Agents) Admission(ctx context.Context, id string) (*agentv1.Admission, 
 		return nil, agent.ErrUnknown
 	}
 	return told[0], nil
+}
+
+func (a *Agents) Binding(ctx context.Context, id string) (agent.State, agentidentity.Binding, error) {
+	rows, err := a.store.pool.Query(ctx, "SELECT "+admissionColumns+" FROM agents WHERE agent_id = $1", id)
+	if err != nil {
+		return "", agentidentity.Binding{}, fmt.Errorf("read the certificate agent %s is bound to: %w", id, err)
+	}
+	told, err := pgx.CollectRows(rows, restoreAdmission)
+	switch {
+	case err != nil:
+		return "", agentidentity.Binding{}, fmt.Errorf("read the certificate agent %s is bound to: %w", id, err)
+	case len(told) == 0:
+		return "", agentidentity.Binding{}, agent.ErrUnknown
+	}
+	state, _ := agent.FromWire(told[0].GetState())
+	return state, agent.BindingOf(told[0]), nil
 }
 
 func (a *Agents) Admitted(ctx context.Context) (map[string]string, error) {
@@ -296,7 +313,10 @@ func (a *Agents) move(ctx context.Context, id string, asked agent.Move, query st
 
 	moved, line, err := agent.Apply(held[0], asked)
 	if asked.Renewal && errors.Is(err, agent.ErrCertificateReplaced) {
-		return nil, replacedCommitted(ctx, transaction, held[0], asked.At, err)
+		if recorded := replacedCommitted(ctx, transaction, held[0], asked.At, ""); recorded != nil {
+			return nil, recorded
+		}
+		return nil, err
 	}
 	if err != nil {
 		return nil, err

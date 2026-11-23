@@ -61,6 +61,7 @@ const (
 	CodeUnknownPolicy        = "unknown_policy"
 	CodeNoPolicy             = "no_policy"
 	CodeNotAdmitted          = "agent_not_admitted"
+	CodeCertificateReplaced  = "agent_certificate_replaced"
 	CodePoliciesUnconfigured = "agent_policies_not_configured"
 	CodePoliciesUnavailable  = "agent_policies_unavailable"
 

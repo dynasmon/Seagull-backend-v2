@@ -160,6 +160,10 @@ func (s *Server) servePolicy() http.Handler {
 			Refuse(w, http.StatusTooManyRequests, CodeRateLimited, "this agent is asking for its policy too often")
 			return
 		}
+		if !s.presents(w, r, presented, http.MethodGet+" "+PolicyPath) {
+			s.metrics.policyServed("replaced")
+			return
+		}
 
 		served, err := s.policies.Served(r.Context(), presented.AgentID)
 		switch {

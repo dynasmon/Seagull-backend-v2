@@ -14,11 +14,13 @@ import (
 // registry keeps it beside the certificate trail. It is named by the certificate
 // in force when the first use was refused, which the finding it becomes never
 // carries: a digest of it names the finding, and nothing else leaves the
-// platform. Revision counts the decisions about it, each published once.
+// platform. Revision counts the decisions about it, each published once; Route
+// is the route of the agent listener it was last refused on, empty for renewal.
 type Replaced struct {
 	TenantID       string
 	AgentID        string
 	InForce        string
+	Route          string
 	OpenedAt       time.Time
 	LastObservedAt time.Time
 	Observations   uint64

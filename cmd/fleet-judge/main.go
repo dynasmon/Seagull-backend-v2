@@ -55,7 +55,8 @@ func judge(ctx context.Context) error {
 	// to judge when a log it reads or writes is missing or reshaped.
 	topologyCtx, cancel := context.WithTimeout(ctx, settings.startTimeout)
 	defer cancel()
-	read := []broker.Topic{settings.topology.Status, settings.topology.Agents, settings.topology.Gateways, settings.topology.AgentFindings}
+	read := []broker.Topic{settings.topology.Status, settings.topology.Agents, settings.topology.Gateways, settings.topology.AgentFindings,
+		settings.topology.Refusals}
 	drift, err := decisions.VerifyTopics(topologyCtx, read...)
 	if err != nil {
 		return err
@@ -86,6 +87,7 @@ func judge(ctx context.Context) error {
 		Admissions: logs[settings.topology.Agents.Name],
 		Beacons:    logs[settings.topology.Gateways.Name],
 		Findings:   logs[settings.topology.AgentFindings.Name],
+		Refusals:   logs[settings.topology.Refusals.Name],
 		Decisions:  decisions,
 		Metrics:    fleetjudge.NewMetrics(platform.Metrics()),
 		Logger:     platform.Logger(),
@@ -106,6 +108,7 @@ func judge(ctx context.Context) error {
 		slog.String("agents_topic", settings.topology.Agents.Name),
 		slog.String("gateways_topic", settings.topology.Gateways.Name),
 		slog.String("findings_topic", settings.topology.AgentFindings.Name),
+		slog.String("refusals_topic", settings.topology.Refusals.Name),
 		slog.Duration("interval", settings.every),
 		slog.Duration("stale_after", settings.staleAfter),
 		slog.Int("max_agents", settings.maxAgents),

@@ -326,6 +326,10 @@ func (j *Judge) restore() {
 			continue
 		}
 		delete(j.recalled, id)
+		if recalled.GetKind() == agentv1.Finding_KIND_REPLACED_CERTIFICATE {
+			j.restoreRefusals(recalled, now)
+			continue
+		}
 		known := j.admitted[recalled.GetAgentId()]
 		open := recalled.GetState() == agentv1.Finding_STATE_OPEN
 		switch {

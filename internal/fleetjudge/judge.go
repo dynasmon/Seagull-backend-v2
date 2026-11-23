@@ -26,6 +26,7 @@ type Options struct {
 	Admissions Log
 	Beacons    Log
 	Findings   Log
+	Refusals   Log
 	Decisions  Decisions
 	Metrics    *Metrics
 	Logger     *slog.Logger
@@ -40,6 +41,7 @@ type admission struct {
 	tenant  string
 	admits  bool
 	changed time.Time
+	inForce string
 }
 
 type held struct {
@@ -54,6 +56,7 @@ type Judge struct {
 	admissions Log
 	beacons    Log
 	findings   Log
+	refusals   Log
 	decisions  Decisions
 	metrics    *Metrics
 	logger     *slog.Logger
@@ -67,6 +70,7 @@ type Judge struct {
 	agents    map[string]*held
 	admitted  map[string]admission
 	recalled  map[string]*agentv1.Finding
+	refusing  map[string]*refusing
 	gateways  *listening.Gateways
 	stretch   listening.Stretch
 	confirmed time.Time
@@ -77,8 +81,8 @@ type Judge struct {
 
 func New(options Options) (*Judge, error) {
 	switch {
-	case options.Status == nil || options.Admissions == nil || options.Beacons == nil || options.Findings == nil:
-		return nil, errors.New("a fleet judge reads the status, the admissions, the beacons and its own findings, and was not given all four")
+	case options.Status == nil || options.Admissions == nil || options.Beacons == nil || options.Findings == nil || options.Refusals == nil:
+		return nil, errors.New("a fleet judge reads the status, the admissions, the beacons, the gateways' refusals and its own findings, and was not given all five")
 	case options.Decisions == nil:
 		return nil, errors.New("a fleet judge needs somewhere to publish what it decides")
 	case options.Metrics == nil || options.Logger == nil:
@@ -94,10 +98,10 @@ func New(options Options) (*Judge, error) {
 		options.Now = time.Now
 	}
 	return &Judge{
-		status: options.Status, admissions: options.Admissions, beacons: options.Beacons, findings: options.Findings,
+		status: options.Status, admissions: options.Admissions, beacons: options.Beacons, findings: options.Findings, refusals: options.Refusals,
 		decisions: options.Decisions, metrics: options.Metrics, logger: options.Logger,
 		every: options.Every, staleAfter: options.StaleAfter, maxAgents: options.MaxAgents, again: options.Again, now: options.Now,
-		agents: map[string]*held{}, admitted: map[string]admission{}, recalled: map[string]*agentv1.Finding{},
+		agents: map[string]*held{}, admitted: map[string]admission{}, recalled: map[string]*agentv1.Finding{}, refusing: map[string]*refusing{},
 		gateways: listening.NewGateways(), pending: map[string]*agentv1.Finding{},
 	}, nil
 }
@@ -118,6 +122,7 @@ func (j *Judge) Run(ctx context.Context) error {
 		{"beacons", j.beacons, func(context.Context, []Record) error { return nil }},
 		{"findings", j.findings, j.recall},
 		{"status", j.status, j.replayed},
+		{"refusals", j.refusals, j.replayedRefusals},
 	} {
 		if replayed.name == "status" {
 			j.restore()
@@ -130,7 +135,7 @@ func (j *Judge) Run(ctx context.Context) error {
 
 	following, stop := context.WithCancel(ctx)
 	defer stop()
-	failed := make(chan error, 3)
+	failed := make(chan error, 4)
 	var group sync.WaitGroup
 	for name, followed := range map[string]struct {
 		log     Log
@@ -139,6 +144,7 @@ func (j *Judge) Run(ctx context.Context) error {
 		"admissions": {j.admissions, j.admit},
 		"beacons":    {j.beacons, j.beacon},
 		"status":     {j.status, j.hear},
+		"refusals":   {j.refusals, j.heardRefusals},
 	} {
 		group.Go(func() {
 			if err := followed.log.Follow(following, followed.deliver); err != nil && following.Err() == nil {
@@ -199,6 +205,7 @@ func (j *Judge) Sweep(ctx context.Context) {
 		one.silence = agentfinding.Silence(known.tenant, agentID, one.newest, now)
 		j.decide(one.silence)
 	}
+	j.settleRefusals(now)
 	j.mu.Unlock()
 
 	j.publish(ctx)
@@ -258,6 +265,7 @@ func (j *Judge) observe(listens, current bool, serving int, behind int64, err er
 			}
 		}
 	}
+	open[agentfinding.KindName(agentv1.Finding_KIND_REPLACED_CERTIFICATE)] += len(j.refusing)
 	for _, kind := range agentfinding.Kinds() {
 		j.metrics.open.WithLabelValues(agentfinding.KindName(kind)).Set(float64(open[agentfinding.KindName(kind)]))
 	}
@@ -296,7 +304,12 @@ func (j *Judge) admit(_ context.Context, records []Record) error {
 		if decided.GetChangedAt().IsValid() {
 			changed = decided.GetChangedAt().AsTime()
 		}
-		j.admitted[decided.GetAgentId()] = admission{tenant: decided.GetTenantId(), admits: known && state.Admits(), changed: changed}
+		inForce := decided.GetFingerprintSha256()
+		if inForce == "" {
+			inForce = j.admitted[decided.GetAgentId()].inForce
+		}
+		j.admitted[decided.GetAgentId()] = admission{tenant: decided.GetTenantId(), admits: known && state.Admits(), changed: changed, inForce: inForce}
+		j.ended(decided.GetAgentId(), now)
 		if one := j.agents[decided.GetAgentId()]; one != nil && !(known && state.Admits()) {
 			if one.silence != nil {
 				j.close(one, agentv1.Finding_CLOSURE_NOT_ADMITTED, changed, now)
@@ -331,7 +344,7 @@ func (j *Judge) recall(_ context.Context, records []Record) error {
 			j.metrics.refused.WithLabelValues("findings").Inc()
 			continue
 		}
-		if decided.GetKind() == agentv1.Finding_KIND_REPLACED_CERTIFICATE {
+		if decided.GetKind() == agentv1.Finding_KIND_REPLACED_CERTIFICATE && decided.GetUse().GetListener() != agentv1.Finding_Use_LISTENER_GATEWAY {
 			continue
 		}
 		if known, held := j.recalled[decided.GetFindingId()]; held && known.GetDecidedAt().AsTime().After(decided.GetDecidedAt().AsTime()) {

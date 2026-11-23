@@ -66,6 +66,7 @@ type judged struct {
 	status    *broker.Status
 	agents    *broker.Agents
 	beacons   *broker.Beacons
+	refusals  *broker.Refusals
 	logs      map[string]*broker.StateLog
 	agentID   string
 	silentAt  time.Time
@@ -92,6 +93,7 @@ func judging(t *testing.T) *judged {
 		topics: map[string]string{
 			"status": compactedTopic(t, addresses), "agents": compactedTopic(t, addresses),
 			"gateways": compactedTopic(t, addresses), "findings": temporaryTopic(t, addresses),
+			"refusals": temporaryTopic(t, addresses),
 		},
 		logs: map[string]*broker.StateLog{},
 	}
@@ -108,6 +110,10 @@ func judging(t *testing.T) *judged {
 		t.Fatal(err)
 	}
 	t.Cleanup(j.beacons.Close)
+	if j.refusals, err = broker.NewRefusals(broker.Config{Brokers: addresses, Topic: j.topics["refusals"], MaxMessageBytes: temporaryCarriage, ClientID: "integration-test"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(j.refusals.Close)
 	return j
 }
 
@@ -140,7 +146,7 @@ func (j *judged) start() {
 	}
 	j.judge, err = fleetjudge.New(fleetjudge.Options{
 		Status: wholeLog{j.logs["status"]}, Admissions: wholeLog{j.logs["agents"]}, Beacons: wholeLog{j.logs["gateways"]},
-		Findings: wholeLog{j.logs["findings"]}, Decisions: decisions, Metrics: fleetjudge.NewMetrics(j.exported),
+		Findings: wholeLog{j.logs["findings"]}, Refusals: wholeLog{j.logs["refusals"]}, Decisions: decisions, Metrics: fleetjudge.NewMetrics(j.exported),
 		Logger: slog.New(slog.DiscardHandler), Every: time.Minute, StaleAfter: 2 * time.Minute, MaxAgents: 1_000,
 		Again: 24 * time.Hour, Now: j.clock.now,
 	})

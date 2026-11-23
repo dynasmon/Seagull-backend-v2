@@ -133,6 +133,7 @@ type harness struct {
 	admissions *memLog
 	beacons    *memLog
 	findings   *memLog
+	refusals   *memLog
 	published  *published
 	exported   *metrics.Registry
 	judge      *fleetjudge.Judge
@@ -169,7 +170,7 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 	return &harness{
 		t: t, clock: &clock{at: start},
-		status: &statusLog{memLog: newLog()}, admissions: newLog(), beacons: newLog(), findings: newLog(),
+		status: &statusLog{memLog: newLog()}, admissions: newLog(), beacons: newLog(), findings: newLog(), refusals: newLog(),
 		published: &published{}, exported: metrics.New("fleet-judge-test"), maxAgents: 100,
 	}
 }
@@ -177,7 +178,7 @@ func newHarness(t *testing.T) *harness {
 func (h *harness) run() {
 	h.t.Helper()
 	judge, err := fleetjudge.New(fleetjudge.Options{
-		Status: h.status, Admissions: h.admissions, Beacons: h.beacons, Findings: h.findings, Decisions: h.published,
+		Status: h.status, Admissions: h.admissions, Beacons: h.beacons, Findings: h.findings, Refusals: h.refusals, Decisions: h.published,
 		Metrics: fleetjudge.NewMetrics(h.exported), Logger: slog.New(slog.DiscardHandler),
 		Every: time.Minute, StaleAfter: 2 * time.Minute, MaxAgents: h.maxAgents, Again: 24 * time.Hour, Now: h.clock.now,
 	})
@@ -187,7 +188,7 @@ func (h *harness) run() {
 	ctx, stop := context.WithCancel(context.Background())
 	h.judge, h.stop, h.done = judge, stop, make(chan error, 1)
 	go func() { h.done <- judge.Run(ctx) }()
-	for _, followed := range []*memLog{h.status.memLog, h.admissions, h.beacons} {
+	for _, followed := range []*memLog{h.status.memLog, h.admissions, h.beacons, h.refusals} {
 		select {
 		case <-followed.following:
 		case err := <-h.done:

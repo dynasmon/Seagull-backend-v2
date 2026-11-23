@@ -1,5 +1,12 @@
 # 57. A place is a run: a copy reports a sequence another run already holds, a shared identity is two installations heard in turn, and a renewal is refused before it is signed
 
+> Amended by [ADR 58](0058-a-listener-admits-an-agent-only-on-the-certificate-in-force.md):
+> a replaced certificate presented at a listener is found too. The agent listener
+> keeps it in the same episode as a refused renewal, with the route it was last
+> refused on; a gateway's refusals are `fleet-judge`'s, a finding of their own per
+> certificate in force, so each writer decides its own episodes rather than its
+> own kinds.
+
 ## Context
 
 [ADR 56](0056-a-finding-about-an-agent-is-a-record-of-its-own-judged-only-while-the-platform-listens.md)

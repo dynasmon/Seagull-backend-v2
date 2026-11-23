@@ -35,6 +35,7 @@ type configuration struct {
 	renewalsPerSecond   float64
 	renewalBurst        int
 	trackedRenewalAgent int
+	replacedTolerance   time.Duration
 
 	policySignersFile    string
 	policyPullsPerSecond float64
@@ -102,6 +103,7 @@ func load(parser *config.Parser) (configuration, error) {
 		agentCAFile:         parser.RequiredFilePath("SEAGULL_CONTROL_API_AGENT_CA"),
 		renewalBurst:        parser.Int("SEAGULL_CONTROL_API_RENEWAL_BURST", 4, 1, 1_000),
 		trackedRenewalAgent: parser.Int("SEAGULL_CONTROL_API_TRACKED_RENEWING_AGENTS", 8192, 1, 1_000_000),
+		replacedTolerance:   parser.Duration("SEAGULL_CONTROL_API_REPLACED_CERTIFICATE_TOLERANCE", time.Minute, 5*time.Second, 10*time.Minute),
 
 		policySignersFile:   parser.FilePath("SEAGULL_CONTROL_API_AGENT_POLICY_SIGNERS", ""),
 		policyPullBurst:     parser.Int("SEAGULL_CONTROL_API_AGENT_POLICY_BURST", 4, 1, 1_000),

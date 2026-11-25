@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
+	platformmetrics "github.com/dynasmon/Seagull-backend-v2/internal/platform/metrics"
 )
 
 func authenticated(user, password string) Security {
@@ -159,5 +160,22 @@ func TestAComponentAuthenticatesAsItselfUnlessToldOtherwise(t *testing.T) {
 	nobody := loadedSecurity(t, map[string]string{"SEAGULL_BACKBONE_SASL_MECHANISM": MechanismNone, "SEAGULL_BACKBONE_DURABILITY": Development.String()})
 	if nobody.User != "" {
 		t.Errorf("a backbone that authenticates nobody was given user %q", nobody.User)
+	}
+}
+
+func TestEveryClientIsGivenItsTimeoutsAndReadLimitAndReportsWhatItIsRefused(t *testing.T) {
+	plain, err := Security{}.options()
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, err := Security{}.Observed(NewDenials(platformmetrics.New("security-test"))).options()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plain) != 4 {
+		t.Errorf("a client is built with %d stated limits, want the dial and request timeouts, the idle timeout and the read ceiling", len(plain))
+	}
+	if len(observed) != len(plain)+1 {
+		t.Errorf("an observed client carries %d options beyond a plain one, want its hooks", len(observed)-len(plain))
 	}
 }

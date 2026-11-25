@@ -72,7 +72,7 @@ func (a *Assessments) PublishAssessments(ctx context.Context, assessments []*ass
 
 func (a *Assessments) Ping(ctx context.Context) error {
 	if err := a.client.Ping(ctx); err != nil {
-		return fmt.Errorf("reach the backbone: %w", err)
+		return fmt.Errorf("reach the backbone: %w", named(err))
 	}
 	return nil
 }

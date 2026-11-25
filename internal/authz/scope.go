@@ -29,6 +29,7 @@ var reach = map[Resource]map[Action]Scope{
 	Sessions:   {Read: Platform, Write: Platform, Delete: Platform},
 	Releases:   {Read: Platform, Write: Platform, Delete: Platform},
 
+	Inventory:       {Read: Tenant, Write: Tenant, Delete: Tenant},
 	Vulnerabilities: {Read: Tenant, Write: Tenant, Delete: Tenant},
 }
 

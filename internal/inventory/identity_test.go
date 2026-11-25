@@ -171,3 +171,17 @@ func filled(kind inventoryv1.Kind) *inventoryv1.Item {
 		return &inventoryv1.Item{}
 	}
 }
+
+func TestAKindIsReadBackFromTheNameItIsStoredUnder(t *testing.T) {
+	for value := range inventoryv1.Kind_name {
+		kind := inventoryv1.Kind(value)
+		if read, known := KindOf(KindName(kind)); kind != inventoryv1.Kind_KIND_UNSPECIFIED && (!known || read != kind) {
+			t.Errorf("%s was stored as %q and read back as %s", kind, KindName(kind), read)
+		}
+	}
+	for _, unknown := range []string{"", "unknown", "unspecified", "PACKAGE", "kind_package"} {
+		if read, known := KindOf(unknown); known {
+			t.Errorf("%q was read back as %s", unknown, read)
+		}
+	}
+}

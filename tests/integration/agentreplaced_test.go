@@ -14,8 +14,8 @@ import (
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 )
 
-// What earlier runs left unpublished is published first, so a test reads its
-// own decisions however many the shared store holds (BE-103).
+// Every decision a store of the test's own holds is the test's, so publishing
+// them all is what the announcer would do between two of its steps.
 func publishedAll(t *testing.T, registry *postgres.Agents) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -73,7 +73,8 @@ func renewedOnce(t *testing.T, registry *postgres.Agents, at time.Time) (string,
 }
 
 func TestARenewalRefusedAsAlreadyReplacedIsOneEpisodeUntilAnotherCertificateIsBoundOnPostgresql(t *testing.T) {
-	registry := migratedAlertStore(t, alertStoreAddress(t)).Agents()
+	store, _ := ownRelationalStore(t, alertStoreAddress(t))
+	registry := store.Agents()
 	publishedAll(t, registry)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -161,7 +162,8 @@ func TestARenewalRefusedAsAlreadyReplacedIsOneEpisodeUntilAnotherCertificateIsBo
 }
 
 func TestAReplacedCertificateLeftOpenIsDecidedAgainAndAClosedOneIsNotOnPostgresql(t *testing.T) {
-	registry := migratedAlertStore(t, alertStoreAddress(t)).Agents()
+	store, _ := ownRelationalStore(t, alertStoreAddress(t))
+	registry := store.Agents()
 	publishedAll(t, registry)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()

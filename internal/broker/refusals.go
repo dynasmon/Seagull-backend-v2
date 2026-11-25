@@ -56,7 +56,7 @@ func (r *Refusals) PublishRefusals(ctx context.Context, refused []*agentv1.Refus
 
 func (r *Refusals) Ping(ctx context.Context) error {
 	if err := r.client.Ping(ctx); err != nil {
-		return fmt.Errorf("reach the backbone: %w", err)
+		return fmt.Errorf("reach the backbone: %w", named(err))
 	}
 	return nil
 }

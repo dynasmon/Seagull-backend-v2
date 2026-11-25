@@ -49,11 +49,16 @@ const feedFreshness = `
 
 func migratedAdvisoryStore(t *testing.T, address string) *clickhouse.AdvisoryStore {
 	t.Helper()
+	return advisoryStoreAt(t, storeSettings(address))
+}
+
+func advisoryStoreAt(t *testing.T, settings clickhouse.Config) *clickhouse.AdvisoryStore {
+	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	migrator, err := clickhouse.NewMigrator(storeSettings(address), slog.New(slog.DiscardHandler))
+	migrator, err := clickhouse.NewMigrator(settings, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("build the migrator: %v", err)
 	}
@@ -64,7 +69,7 @@ func migratedAdvisoryStore(t *testing.T, address string) *clickhouse.AdvisorySto
 		t.Fatalf("close the migrator: %v", err)
 	}
 
-	store, err := clickhouse.NewAdvisoryStore(storeSettings(address))
+	store, err := clickhouse.NewAdvisoryStore(settings)
 	if err != nil {
 		t.Fatalf("build the advisory store: %v", err)
 	}

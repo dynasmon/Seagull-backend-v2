@@ -41,10 +41,10 @@ func NewPositions(brokers []string, clientID string, security Security) (*Positi
 func (p *Positions) Committed(ctx context.Context, group, topic string) (map[int32]int64, error) {
 	offsets, err := p.admin.FetchOffsets(ctx, group)
 	if err != nil {
-		return nil, fmt.Errorf("read where %s stands on %s: %w", group, topic, err)
+		return nil, fmt.Errorf("read where %s stands on %s: %w", group, topic, named(err))
 	}
 	if err := offsets.Error(); err != nil {
-		return nil, fmt.Errorf("read where %s stands on %s: %w", group, topic, err)
+		return nil, fmt.Errorf("read where %s stands on %s: %w", group, topic, named(err))
 	}
 	committed := map[int32]int64{}
 	offsets.Each(func(offset kadm.OffsetResponse) {
@@ -59,13 +59,13 @@ func (p *Positions) Committed(ctx context.Context, group, topic string) (map[int
 func (p *Positions) Ends(ctx context.Context, topic string) (map[int32]int64, error) {
 	listed, err := p.admin.ListEndOffsets(ctx, topic)
 	if err != nil {
-		return nil, fmt.Errorf("read where %s ends: %w", topic, err)
+		return nil, fmt.Errorf("read where %s ends: %w", topic, named(err))
 	}
 	ends := map[int32]int64{}
 	var failed error
 	listed.Each(func(offset kadm.ListedOffset) {
 		if offset.Err != nil {
-			failed = fmt.Errorf("read where partition %d of %s ends: %w", offset.Partition, topic, offset.Err)
+			failed = fmt.Errorf("read where partition %d of %s ends: %w", offset.Partition, topic, named(offset.Err))
 			return
 		}
 		ends[offset.Partition] = offset.Offset
@@ -81,7 +81,7 @@ func (p *Positions) Ends(ctx context.Context, topic string) (map[int32]int64, er
 
 func (p *Positions) Ping(ctx context.Context) error {
 	if err := p.client.Ping(ctx); err != nil {
-		return fmt.Errorf("reach the backbone: %w", err)
+		return fmt.Errorf("reach the backbone: %w", named(err))
 	}
 	return nil
 }

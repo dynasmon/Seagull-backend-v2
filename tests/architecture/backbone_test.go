@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"go.yaml.in/yaml/v3"
+
 	"github.com/dynasmon/Seagull-backend-v2/internal/broker"
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
 )
@@ -62,6 +64,27 @@ func TestEveryComponentThatReachesTheBackboneIsGrantedAsItself(t *testing.T) {
 		if !slices.Contains(components, component) {
 			t.Errorf("cmd/%s reaches the backbone and the Makefile does not build it", component)
 		}
+	}
+}
+
+func TestTheGrantsAreHeldAgainstTheBackboneTheStackRuns(t *testing.T) {
+	images := map[string]string{}
+	for file, service := range map[string]string{"compose.yaml": "redpanda", "compose.test.yaml": "redpanda-secured"} {
+		var compose struct {
+			Services map[string]struct {
+				Image string `yaml:"image"`
+			} `yaml:"services"`
+		}
+		if err := yaml.Unmarshal(read(t, "deploy", file), &compose); err != nil {
+			t.Fatalf("%s: %v", file, err)
+		}
+		images[service] = compose.Services[service].Image
+	}
+	if images["redpanda-secured"] == "" || images["redpanda-secured"] != images["redpanda"] {
+		t.Errorf("the grants are held against %q and the stack runs %q", images["redpanda-secured"], images["redpanda"])
+	}
+	if !strings.Contains(string(read(t, "Makefile")), "up -d --wait redpanda clickhouse postgres redpanda-secured") {
+		t.Error("make test-integration does not start the secured backbone, so the suite holding the grants would skip")
 	}
 }
 

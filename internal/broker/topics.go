@@ -437,6 +437,10 @@ func shortOf(held, declared string) bool {
 type Provisioner struct {
 	client *kgo.Client
 	admin  *kadm.Client
+
+	brokers  []string
+	clientID string
+	security Security
 }
 
 func NewProvisioner(brokers []string, clientID string, security Security) (*Provisioner, error) {
@@ -454,7 +458,7 @@ func NewProvisioner(brokers []string, clientID string, security Security) (*Prov
 	if err != nil {
 		return nil, fmt.Errorf("create backbone admin client: %w", err)
 	}
-	return &Provisioner{client: client, admin: kadm.NewClient(client)}, nil
+	return &Provisioner{client: client, admin: kadm.NewClient(client), brokers: brokers, clientID: clientID, security: security}, nil
 }
 
 // Retention, cleanup and compression converge; partitions and replication are

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/sasl/scram"
@@ -17,6 +18,11 @@ const (
 	MechanismNone        = "none"
 	MechanismScramSHA256 = "scram-sha-256"
 	MechanismScramSHA512 = "scram-sha-512"
+
+	dialTimeout            = 10 * time.Second
+	requestTimeoutOverhead = 10 * time.Second
+	connectionIdleTimeout  = 20 * time.Second
+	brokerMaxReadBytes     = 100 << 20
 )
 
 // How a process reaches the backbone. Every client in this package is built
@@ -35,6 +41,13 @@ type Security struct {
 	Mechanism string
 	User      string
 	Password  config.Secret
+
+	denials *Denials
+}
+
+func (s Security) Observed(denials *Denials) Security {
+	s.denials = denials
+	return s
 }
 
 func LoadSecurity(parser *config.Parser, component string) Security {
@@ -89,7 +102,15 @@ func (s Security) options() ([]kgo.Opt, error) {
 		return nil, err
 	}
 
-	var options []kgo.Opt
+	options := []kgo.Opt{
+		kgo.DialTimeout(dialTimeout),
+		kgo.RequestTimeoutOverhead(requestTimeoutOverhead),
+		kgo.ConnIdleTimeout(connectionIdleTimeout),
+		kgo.BrokerMaxReadBytes(brokerMaxReadBytes),
+	}
+	if s.denials != nil {
+		options = append(options, kgo.WithHooks(s.denials))
+	}
 	if s.TLS {
 		configured, err := s.tls()
 		if err != nil {

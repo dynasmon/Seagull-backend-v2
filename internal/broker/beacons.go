@@ -54,7 +54,7 @@ func (b *Beacons) Announce(ctx context.Context, beacon *platformv1.GatewayBeacon
 
 func (b *Beacons) Ping(ctx context.Context) error {
 	if err := b.client.Ping(ctx); err != nil {
-		return fmt.Errorf("reach the backbone: %w", err)
+		return fmt.Errorf("reach the backbone: %w", named(err))
 	}
 	return nil
 }

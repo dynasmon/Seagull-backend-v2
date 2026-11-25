@@ -20,6 +20,7 @@ type StateLog struct {
 	admin      *kadm.Client
 	topic      string
 	maxRecords int
+	denials    *Denials
 
 	mu        sync.Mutex
 	delivered map[int32]int64
@@ -51,7 +52,7 @@ func NewStateLog(config Config, maxRecords int) (*StateLog, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create backbone client: %w", err)
 	}
-	return &StateLog{client: client, admin: kadm.NewClient(client), topic: config.Topic, maxRecords: maxRecords, delivered: map[int32]int64{}}, nil
+	return &StateLog{client: client, admin: kadm.NewClient(client), topic: config.Topic, maxRecords: maxRecords, denials: config.Security.denials, delivered: map[int32]int64{}}, nil
 }
 
 // Everything written before this call, and then nothing. A process reads the
@@ -60,7 +61,8 @@ func NewStateLog(config Config, maxRecords int) (*StateLog, error) {
 func (l *StateLog) Replay(ctx context.Context, deliver Deliver) error {
 	ends, err := l.admin.ListEndOffsets(ctx, l.topic)
 	if err != nil {
-		return fmt.Errorf("read the end of %s: %w", l.topic, err)
+		l.denials.observe(err)
+		return fmt.Errorf("read the end of %s: %w", l.topic, named(err))
 	}
 
 	remaining := make(map[int32]int64)
@@ -148,14 +150,15 @@ func (l *StateLog) poll(ctx context.Context) ([]Record, error) {
 		return nil, err
 	}
 	if err := fetches.Err(); err != nil {
-		return nil, fmt.Errorf("read %s: %w", l.topic, err)
+		l.denials.observe(err)
+		return nil, fmt.Errorf("read %s: %w", l.topic, named(err))
 	}
 	return collect(fetches), nil
 }
 
 func (l *StateLog) Ping(ctx context.Context) error {
 	if err := l.client.Ping(ctx); err != nil {
-		return fmt.Errorf("reach the backbone: %w", err)
+		return fmt.Errorf("reach the backbone: %w", named(err))
 	}
 	return nil
 }

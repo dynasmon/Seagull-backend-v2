@@ -108,6 +108,7 @@ type Consumer struct {
 	ownership       Ownership
 	lastRecordTimes func(ctx context.Context, positions map[int32]int64) (map[int32]time.Time, error)
 	logger          *slog.Logger
+	denials         *Denials
 
 	mu        sync.Mutex
 	assigned  map[string]map[int32]struct{}
@@ -155,6 +156,7 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 		recovery:   config.Recovery,
 		ownership:  config.Ownership,
 		logger:     logger,
+		denials:    config.Security.denials,
 		assigned:   make(map[string]map[int32]struct{}, len(topics)),
 	}
 
@@ -289,6 +291,7 @@ func (c *Consumer) report(fetches kgo.Fetches) {
 		if errors.Is(err, context.Canceled) {
 			return
 		}
+		c.denials.observe(err)
 		c.metrics.fetchFailed(topic, partition)
 	})
 	fetches.EachPartition(func(partition kgo.FetchTopicPartition) {
@@ -349,7 +352,7 @@ func (c *Consumer) refreshLag(ctx context.Context) {
 
 func (c *Consumer) Ping(ctx context.Context) error {
 	if err := c.client.Ping(ctx); err != nil {
-		return fmt.Errorf("reach the backbone: %w", err)
+		return fmt.Errorf("reach the backbone: %w", named(err))
 	}
 	return nil
 }

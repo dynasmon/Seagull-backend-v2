@@ -51,6 +51,9 @@ func writer(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	denials := broker.NewDenials(platform.Metrics())
+	settings.security = settings.security.Observed(denials)
+	platform.Health().Register("backbone-access", denials.Check)
 
 	store, err := postgres.New(ctx, settings.store)
 	if err != nil {

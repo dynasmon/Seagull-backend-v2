@@ -118,7 +118,7 @@ func encode(topic string, events []*eventv1.Event) ([]*kgo.Record, error) {
 
 func (p *Publisher) Ping(ctx context.Context) error {
 	if err := p.client.Ping(ctx); err != nil {
-		return fmt.Errorf("reach the backbone: %w", err)
+		return fmt.Errorf("reach the backbone: %w", named(err))
 	}
 	return nil
 }

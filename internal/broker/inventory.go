@@ -70,7 +70,7 @@ func (i *Inventory) PublishInventory(ctx context.Context, records []*inventoryv1
 
 func (i *Inventory) Ping(ctx context.Context) error {
 	if err := i.client.Ping(ctx); err != nil {
-		return fmt.Errorf("reach the backbone: %w", err)
+		return fmt.Errorf("reach the backbone: %w", named(err))
 	}
 	return nil
 }

@@ -500,7 +500,7 @@ func (p *Provisioner) Apply(ctx context.Context, topics []Topic) ([]string, erro
 
 func (p *Provisioner) Ping(ctx context.Context) error {
 	if err := p.client.Ping(ctx); err != nil {
-		return fmt.Errorf("reach the backbone: %w", err)
+		return fmt.Errorf("reach the backbone: %w", named(err))
 	}
 	return nil
 }
@@ -531,7 +531,7 @@ func verifyTopics(ctx context.Context, client *kgo.Client, topics []Topic) ([]st
 		}
 		held, err := describe(ctx, client, topic.Name)
 		if err != nil {
-			return nil, err
+			return nil, named(err)
 		}
 		if held == nil {
 			return nil, fmt.Errorf("the backbone has no topic %s — run backbone-migrator", topic.Name)
@@ -541,7 +541,7 @@ func verifyTopics(ctx context.Context, client *kgo.Client, topics []Topic) ([]st
 		}
 		diverged, err := diverging(ctx, admin, topic)
 		if err != nil {
-			return nil, err
+			return nil, named(err)
 		}
 		for _, one := range diverged {
 			if one.breaks() {

@@ -59,7 +59,7 @@ func (a *AgentFindings) Publish(ctx context.Context, decided []*agentv1.Finding)
 
 func (a *AgentFindings) Ping(ctx context.Context) error {
 	if err := a.client.Ping(ctx); err != nil {
-		return fmt.Errorf("reach the backbone: %w", err)
+		return fmt.Errorf("reach the backbone: %w", named(err))
 	}
 	return nil
 }

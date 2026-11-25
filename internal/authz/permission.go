@@ -21,6 +21,7 @@ const (
 	Sessions   Resource = "sessions"
 	Releases   Resource = "releases"
 
+	Inventory       Resource = "inventory"
 	Vulnerabilities Resource = "vulnerabilities"
 )
 

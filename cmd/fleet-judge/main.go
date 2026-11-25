@@ -38,6 +38,9 @@ func judge(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	denials := broker.NewDenials(platform.Metrics())
+	settings.security = settings.security.Observed(denials)
+	platform.Health().Register("backbone-access", denials.Check)
 
 	decisions, err := broker.NewAgentFindings(broker.Config{
 		Brokers:         settings.brokers,

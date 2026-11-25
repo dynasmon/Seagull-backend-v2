@@ -87,7 +87,7 @@ func findingKey(record *vulnerabilityv1.FindingRecord) ([]byte, error) {
 
 func (f *Findings) Ping(ctx context.Context) error {
 	if err := f.client.Ping(ctx); err != nil {
-		return fmt.Errorf("reach the backbone: %w", err)
+		return fmt.Errorf("reach the backbone: %w", named(err))
 	}
 	return nil
 }

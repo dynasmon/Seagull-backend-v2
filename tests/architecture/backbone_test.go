@@ -64,3 +64,23 @@ func TestEveryComponentThatReachesTheBackboneIsGrantedAsItself(t *testing.T) {
 		}
 	}
 }
+
+func TestEveryComponentThatReachesTheBackboneObservesWhatItIsRefused(t *testing.T) {
+	topology := broker.LoadTopology(config.New(func(string) (string, bool) { return "", false }))
+	for _, grant := range topology.Grants() {
+		main := string(read(t, "cmd", string(grant.Component), "main.go"))
+		for _, wiring := range []string{
+			"denials := broker.NewDenials(platform.Metrics())",
+			"settings.security = settings.security.Observed(denials)",
+			`platform.Health().Register("backbone-access", denials.Check)`,
+		} {
+			if !strings.Contains(main, wiring) {
+				t.Errorf("cmd/%s/main.go lacks %s, so what the backbone refuses it is neither counted nor reported", grant.Component, wiring)
+			}
+		}
+		observed := strings.Index(main, "settings.security = settings.security.Observed(denials)")
+		if first := strings.Index(main, "settings.security,"); first >= 0 && observed > first {
+			t.Errorf("cmd/%s/main.go builds a backbone client before it observes what the backbone refuses", grant.Component)
+		}
+	}
+}

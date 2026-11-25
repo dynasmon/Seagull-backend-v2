@@ -73,7 +73,7 @@ func (d *Detections) Publish(ctx context.Context, detections []*detectionv1.Dete
 
 func (d *Detections) Ping(ctx context.Context) error {
 	if err := d.client.Ping(ctx); err != nil {
-		return fmt.Errorf("reach the backbone: %w", err)
+		return fmt.Errorf("reach the backbone: %w", named(err))
 	}
 	return nil
 }

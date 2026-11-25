@@ -37,6 +37,9 @@ func projector(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	denials := broker.NewDenials(platform.Metrics())
+	settings.security = settings.security.Observed(denials)
+	platform.Health().Register("backbone-access", denials.Check)
 
 	store, err := clickhouse.NewAssessmentStore(settings.store)
 	if err != nil {

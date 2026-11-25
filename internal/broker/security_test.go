@@ -119,10 +119,15 @@ func TestTheMechanismsOnOfferAreTheOnesTheParserAdmits(t *testing.T) {
 		if mechanism != MechanismNone {
 			user, password = "seagull", "hunter2"
 		}
+		durability := Production.String()
+		if mechanism == MechanismNone {
+			durability = Development.String()
+		}
 		t.Setenv("SEAGULL_BACKBONE_SASL_MECHANISM", mechanism)
 		t.Setenv("SEAGULL_BACKBONE_TLS", "true")
 		t.Setenv("SEAGULL_BACKBONE_SASL_USER", user)
 		t.Setenv("SEAGULL_BACKBONE_SASL_PASSWORD", password)
+		t.Setenv("SEAGULL_BACKBONE_DURABILITY", durability)
 
 		parser := config.FromEnvironment()
 		held := LoadSecurity(parser, "event-writer")

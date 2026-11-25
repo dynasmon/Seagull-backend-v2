@@ -4,6 +4,10 @@
 > the query plane refuses the policy the control plane refuses, and a grant of
 > the platform that lists no tenant hunts nowhere.
 
+> Amended by [ADR 59](0059-the-read-plane-lists-what-an-asset-has-and-what-is-wrong-with-it.md):
+> `inventory:read` and `vulnerabilities:read` authorise the read plane's
+> listings, within the tenants of the grant, as the hunts' permissions do.
+
 ## Context
 
 [ADR 13](0013-a-query-is-a-scope-a-window-and-a-question.md) took the tenants a

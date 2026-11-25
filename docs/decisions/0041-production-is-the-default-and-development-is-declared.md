@@ -1,5 +1,11 @@
 # 41. Production is the default and development is declared: an acknowledgement is held by two of three replicas, a limit is turned off only in words, and a body is weighed by what decoding it costs
 
+> Amended by [ADR 60](0060-a-component-reaches-the-backbone-as-itself-and-is-held-to-its-grant.md):
+> the per-component principals this record left aside exist, and a deployment that
+> did not declare `development` is also reached only over TLS by processes that each
+> authenticate: `SEAGULL_BACKBONE_TLS=false` and `SEAGULL_BACKBONE_SASL_MECHANISM=none`
+> are refused beside a production backbone.
+
 ## Context
 
 The 2026-09-26 security audit made the backbone's transport secure by default

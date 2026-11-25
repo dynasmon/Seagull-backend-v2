@@ -6,6 +6,30 @@
 [![Store](https://img.shields.io/badge/store-ClickHouse-FFCC01.svg)](internal/clickhouse)
 [![Contracts](https://img.shields.io/badge/contracts-Seagull--contracts-00A6A6.svg)](https://github.com/dynasmon/Seagull-contracts)
 
+<!-- progress:start -->
+## Backlog progress
+
+**59% built, 41% to go** — of the backend backlog's 101 cards, 56 are done, 8 partial and 37 open; 2 more were closed by decision. Updated on 2026-11-25.
+
+🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟨🟨⬜⬜⬜⬜⬜⬜⬜
+
+| Stage | Cards | Built |
+| --- | --- | --- |
+| Foundation | 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟨 | 98% |
+| Correctness | 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜ | 88% |
+| Core release | 🟩🟩🟩🟩 | 100% |
+| Inventory and vulnerability | 🟩🟩 | 100% |
+| Fleet visibility | 🟩🟩🟨 | 83% |
+| Production | 🟩🟨🟨🟨🟨⬜⬜⬜⬜⬜⬜⬜⬜⬜ | 21% |
+| Linux SIEM | ⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜ | 0% |
+| SOC and operator identity | ⬜⬜⬜⬜⬜ | 0% |
+| Fleet management | 🟩🟨🟨 | 67% |
+| Response (XDR) | ⬜⬜ | 0% |
+| Breadth | ⬜⬜⬜⬜⬜⬜⬜⬜ | 0% |
+
+🟩 done · 🟨 partial, counted as half · ⬜ open. Each square of the table is a card. The count is not an estimate of effort: the open cards hold the largest pieces — highly available stores, disaster recovery, federated sign-in, four new event classes, third-party connectors and response — so what is left takes longer than its share of cards.
+<!-- progress:end -->
+
 Seagull v2 is the backend of an open security operations platform, rebuilt as a
 set of small processes around a durable event backbone. Telemetry becomes
 durable before anything else happens to it; every capability downstream is a
@@ -152,6 +176,22 @@ it is read. Reaching the platform is never reaching every tenant: a tenant's
 records still need the tenant named. `deploy/policy.yml` shows an administrator
 of each kind; see
 [ADR 50](docs/decisions/0050-a-grant-reaches-the-platform-or-the-tenants-it-names.md).
+
+### Backbone principals
+
+Every component reaches the backbone as itself: its principal and its consumer
+group are its name, and what it may write, read and describe there is a grant
+declared once in code, from which the broker's ACLs follow and nothing else —
+`security.agents` and `security.rulesets` are written by the control plane alone,
+`security.advisories` by the advisory importer alone, and no writer writes what it
+consumes. `backbone-migrator` makes the principals from passwords the installation
+generates, converges their ACLs and refuses to finish while any component can see,
+describe or join more than its grant, which catches a broker that enforces no ACL
+and an ACL granted to everyone. A production backbone is reached only over TLS by
+processes that authenticate, and what it refuses a process is named in readiness
+and counted rather than reported as a generic error; a suite holds every grant
+against a broker run the way production runs one
+([ADR 60](docs/decisions/0060-a-component-reaches-the-backbone-as-itself-and-is-held-to-its-grant.md)).
 
 ### Agent registry and admission
 
@@ -770,7 +810,8 @@ container without going through the environment. The settings that matter most:
 | `SEAGULL_DETECTION_STATE_SOLE_READER` | Declares that this engine reads the whole stream, which is what makes a rule counting across agents answerable. Verified against the assignment; a broken claim stops the engine. |
 | `SEAGULL_GATEWAY_MAX_INFLIGHT_BYTES`, `SEAGULL_GATEWAY_MAX_INFLIGHT_REQUESTS` | What the gateway holds at once across every caller: each body and what decoding it would allocate, weighed before it is decoded. Past it a batch is refused with `503` and `Retry-After`, never queued, and one that could never fit with `413`. |
 | `SEAGULL_GATEWAY_RATE_PER_SECOND`, `SEAGULL_CONTROL_API_RATE_PER_SECOND`, `SEAGULL_QUERY_API_RATE_PER_SECOND` | What one caller may spend of a process, at least one a second. Only the word `unlimited` turns a limiter off, and a process told it says so at startup. |
-| `SEAGULL_BACKBONE_TLS`, `SEAGULL_BACKBONE_TLS_CA`, `SEAGULL_BACKBONE_SASL_MECHANISM`, `SEAGULL_BACKBONE_SASL_USER`, `SEAGULL_BACKBONE_SASL_PASSWORD` | How every process reaches the backbone. Off is a development posture stated rather than inherited; authenticating without TLS is refused. |
+| `SEAGULL_BACKBONE_TLS`, `SEAGULL_BACKBONE_TLS_CA`, `SEAGULL_BACKBONE_SASL_MECHANISM`, `SEAGULL_BACKBONE_SASL_USER`, `SEAGULL_BACKBONE_SASL_PASSWORD` | How every process reaches the backbone, as its own principal. A backbone reached without TLS or without authentication is refused unless the deployment declares a `development` durability; authenticating without TLS is always refused. |
+| `SEAGULL_BACKBONE_PRINCIPALS_DIR` | Where `backbone-migrator` reads each component's password, one file named after it, to give every component its credential and exactly its grant. |
 | `SEAGULL_BACKBONE_REPLICAS`, `SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS`, `SEAGULL_BACKBONE_DURABILITY` | How many copies of a record the backbone keeps and how many must hold it before it is acknowledged: three and two, unless the deployment declares a `development` durability. Every process reports at startup what an acknowledgement is worth. |
 | `SEAGULL_EVENT_STORE_TLS`, `SEAGULL_EVENT_STORE_TLS_CA` | Encryption to the telemetry store. There is no option to skip verification. |
 | `SEAGULL_CONTROL_API_POLICY` | The policy document the control plane is pinned to. |
@@ -797,7 +838,7 @@ the shape of the store.
 ```bash
 make test              # unit, architecture and end-to-end suites
 make test-race         # the same suites under the race detector
-make test-integration  # the data plane against a live Redpanda and ClickHouse
+make test-integration  # the data plane against a live Redpanda and ClickHouse, and the grants against one that authorizes
 make test-load         # the ingest load scenarios against a live Redpanda
 make test-alerts       # the operational alert rules against recorded series
 make bench             # the hot path, one core, no infrastructure
@@ -814,7 +855,10 @@ whole stream it claimed. The end-to-end suite mints its own certificate
 authority and drives the real listeners over real mutual TLS, so it depends on no fixture files and no
 property of the machine it runs on. The integration suite ends with the whole
 slice — admission, backbone, writer, store — against real infrastructure, which
-is what the rest of it is a decomposition of. The load suite fails a run when
+is what the rest of it is a decomposition of, and holds every component to its
+grant against a second Redpanda that authenticates by SCRAM over TLS and enforces
+ACLs, whose administrator's password `make test-integration` generates under
+`.local/` and whose authority the broker mints itself. The load suite fails a run when
 the gateway allocates more than 8 KB per admitted event, when a slow backbone
 produces an acknowledgement the backbone never received, or when a shutdown
 drops a batch it had already answered for.

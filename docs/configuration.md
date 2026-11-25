@@ -189,12 +189,13 @@ capacity does not count, so a host is sized for it beside this setting. See
 | `SEAGULL_BACKBONE_DURABILITY` | `production` | `production` refuses a topic that keeps fewer than 3 replicas or acknowledges a write fewer than 2 hold; `development`, which the development Compose file sets beside one replica, admits one broker and is reported as a warning |
 | `SEAGULL_BACKBONE_REPLICAS` | `3` | replication factor of every topic; fewer only under a `development` durability |
 | `SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS` | `replicas/2 + 1` | replicas that must hold a write before it is acknowledged; fewer than 2 only under a `development` durability |
-| `SEAGULL_BACKBONE_TLS` | `true` | encrypt the connection to the brokers; the development Compose file explicitly sets `false` |
+| `SEAGULL_BACKBONE_TLS` | `true` | encrypt the connection to the brokers; `false` is refused unless `SEAGULL_BACKBONE_DURABILITY=development`, which the development Compose file declares beside it |
 | `SEAGULL_BACKBONE_TLS_CA` | unset | authority the brokers must chain to; the system pool when unset |
 | `SEAGULL_BACKBONE_TLS_CERT`, `SEAGULL_BACKBONE_TLS_KEY` | unset | client certificate for mutual TLS to the brokers |
 | `SEAGULL_BACKBONE_TLS_SERVER_NAME` | unset | name the broker certificate must carry |
-| `SEAGULL_BACKBONE_SASL_MECHANISM` | required | `none` for an explicitly unauthenticated development backbone, or `scram-sha-256` / `scram-sha-512` |
-| `SEAGULL_BACKBONE_SASL_USER`, `SEAGULL_BACKBONE_SASL_PASSWORD` | unset | credentials for that mechanism |
+| `SEAGULL_BACKBONE_SASL_MECHANISM` | required | `scram-sha-256` / `scram-sha-512`, or `none`, which is refused unless `SEAGULL_BACKBONE_DURABILITY=development`: a client certificate alone does not authenticate a process, because one certificate given to every process makes them one principal |
+| `SEAGULL_BACKBONE_SASL_USER` | the component's name | the principal a process authenticates as; a component is granted under its own name, so only `backbone-migrator`, which authenticates as the backbone's superuser, sets it |
+| `SEAGULL_BACKBONE_SASL_PASSWORD` | unset | the process's own password, through `SEAGULL_BACKBONE_SASL_PASSWORD_FILE` in a deployment |
 
 Every process reads the same declaration: `backbone-migrator` applies it, and
 the gateway and the writer verify it before they serve.
@@ -202,7 +203,9 @@ the gateway and the writer verify it before they serve.
 Plaintext, unauthenticated and on one broker is a development posture, written
 down rather than inherited. A deployment turns encryption and authentication on
 together: authenticating without TLS is refused, because a password on a
-plaintext connection is a password given away. A production backbone keeps three
+plaintext connection is a password given away, and a backbone reached without
+either is refused unless the deployment declares a `development` durability
+([ADR 60](decisions/0060-a-component-reaches-the-backbone-as-itself-and-is-held-to-its-grant.md)). A production backbone keeps three
 replicas of every record and acknowledges one once two hold it, so losing a
 broker loses nothing it acknowledged; a topology that keeps or waits for fewer is
 refused by every process and by the migrator unless the deployment declares a
@@ -221,7 +224,6 @@ of its container image turns on, acknowledges from memory. See [ADR 41](decision
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SEAGULL_ANALYSIS_CONSUMER_GROUP` | `analysis-engine` | the consumer group that owns its offsets |
 | `SEAGULL_DETECTION_RULES` | `/etc/seagull/rules` | the rule tree it starts on and falls back to; it does not start without one |
 | `SEAGULL_ANALYSIS_RULESET_RECORDS` | `256` | ruleset records read per fetch |
 | `SEAGULL_ANALYSIS_BATCH_EVENTS` | `5000` | records per poll |
@@ -391,7 +393,6 @@ that spread, so an analyst can see the order was not established by the data. Se
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SEAGULL_WRITER_CONSUMER_GROUP` | `event-writer` | the consumer group that owns the offsets |
 | `SEAGULL_WRITER_BATCH_EVENTS` | `5000` | records per poll, and per store batch |
 | `SEAGULL_WRITER_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
 | `SEAGULL_WRITER_RETRY_DELAY` | `1s` | first delay before a batch is retried |
@@ -419,7 +420,6 @@ the development network and has no certificate.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SEAGULL_DETECTION_WRITER_CONSUMER_GROUP` | `detection-writer` | the consumer group that owns the offsets |
 | `SEAGULL_DETECTION_WRITER_BATCH_DETECTIONS` | `500` | records per poll, and per store batch |
 | `SEAGULL_DETECTION_WRITER_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
 | `SEAGULL_DETECTION_WRITER_RETRY_DELAY` | `1s` | first delay before a batch is retried |
@@ -443,7 +443,6 @@ processes choosing the same adapter is not the same as sharing one.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SEAGULL_INVENTORY_PROJECTOR_CONSUMER_GROUP` | `inventory-projector` | the consumer group that owns the offsets |
 | `SEAGULL_INVENTORY_PROJECTOR_BATCH_RECORDS` | `64` | records per poll, and per store batch |
 | `SEAGULL_INVENTORY_PROJECTOR_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
 | `SEAGULL_INVENTORY_PROJECTOR_RETRY_DELAY` | `1s` | first delay before a batch is retried |
@@ -467,7 +466,6 @@ everything the record was about to confirm.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SEAGULL_STATUS_PROJECTOR_CONSUMER_GROUP` | `status-projector` | the consumer group that owns the offsets |
 | `SEAGULL_STATUS_PROJECTOR_BATCH_RECORDS` | `512` | reports per poll, and per store batch |
 | `SEAGULL_STATUS_PROJECTOR_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
 | `SEAGULL_STATUS_PROJECTOR_RETRY_DELAY` | `1s` | first delay before a batch is retried |
@@ -539,7 +537,6 @@ seagull_fleetjudge_refusals_total{outcome="counted|outdated"}
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SEAGULL_AGENT_FINDING_WRITER_CONSUMER_GROUP` | `agent-finding-writer` | the consumer group that owns the offsets |
 | `SEAGULL_AGENT_FINDING_WRITER_BATCH_RECORDS` | `256` | decisions per poll, and per store batch |
 | `SEAGULL_AGENT_FINDING_WRITER_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
 | `SEAGULL_AGENT_FINDING_WRITER_RETRY_DELAY` | `1s` | first delay before a batch is retried |
@@ -561,7 +558,6 @@ batch is durable; a decision is never skipped to make progress.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SEAGULL_ASSESSMENT_PROJECTOR_CONSUMER_GROUP` | `assessment-projector` | the consumer group that owns the offsets |
 | `SEAGULL_ASSESSMENT_PROJECTOR_BATCH_RECORDS` | `128` | assessments per poll, and per store batch |
 | `SEAGULL_ASSESSMENT_PROJECTOR_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
 | `SEAGULL_ASSESSMENT_PROJECTOR_RETRY_DELAY` | `1s` | first delay before a batch is retried |
@@ -585,10 +581,6 @@ progress.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SEAGULL_VULNERABILITY_MATCHER_CONSUMER_GROUP` | `vulnerability-matcher` | the group it reads `security.inventory.raw` and `security.advisories` in, alone: a member that holds part of either topic stops |
-| `SEAGULL_VULNERABILITY_MATCHER_INVENTORY_OWNER` | `inventory-projector` | the group whose committed offset says the inventory store holds a record |
-| `SEAGULL_VULNERABILITY_MATCHER_ADVISORY_OWNER` | `advisory-writer` | the group whose committed offset says the advisory store holds a record |
-| `SEAGULL_VULNERABILITY_MATCHER_FINDING_OWNER` | `finding-writer` | the group whose committed offset says the findings store holds what was decided before |
 | `SEAGULL_VULNERABILITY_MATCHER_BATCH_RECORDS` | `64` | records per poll; an inventory record is a whole scan |
 | `SEAGULL_VULNERABILITY_MATCHER_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
 | `SEAGULL_VULNERABILITY_MATCHER_SETTLE_DELAY` | `250ms` | how often an owner's position is asked again while the matcher waits for it |
@@ -617,7 +609,6 @@ moves only once the batch is published.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SEAGULL_FINDING_WRITER_CONSUMER_GROUP` | `finding-writer` | the consumer group that owns the offsets |
 | `SEAGULL_FINDING_WRITER_BATCH_RECORDS` | `1000` | finding records per poll, and per store batch |
 | `SEAGULL_FINDING_WRITER_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
 | `SEAGULL_FINDING_WRITER_RETRY_DELAY` | `1s` | first delay before a batch is retried |
@@ -674,7 +665,6 @@ unless a deployment names it.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SEAGULL_ADVISORY_WRITER_CONSUMER_GROUP` | `advisory-writer` | the consumer group that owns the offsets |
 | `SEAGULL_ADVISORY_WRITER_BATCH_RECORDS` | `512` | records per poll, and per store batch |
 | `SEAGULL_ADVISORY_WRITER_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
 | `SEAGULL_ADVISORY_WRITER_RETRY_DELAY` | `1s` | first delay before a batch is retried |
@@ -696,7 +686,6 @@ cannot tell from a right one.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SEAGULL_ALERT_WRITER_CONSUMER_GROUP` | `alert-writer` | the consumer group that owns the offsets |
 | `SEAGULL_ALERT_WRITER_BATCH_DETECTIONS` | `500` | records per poll, and per store batch |
 | `SEAGULL_ALERT_WRITER_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
 | `SEAGULL_ALERT_WRITER_RETRY_DELAY` | `1s` | first delay before a batch is retried |
@@ -1039,6 +1028,56 @@ docker compose -f deploy/compose.yaml run --rm backbone-migrator
 Retention drift is logged as `backbone_topology_drift` and does not stop a
 process: refusing to admit telemetry over a setting the process cannot fix would
 trade the stream for the window.
+
+## The backbone's principals
+
+On a backbone that authenticates, every component reaches it as itself: its
+principal and its consumer group are its name, and what it may do there is the
+grant `broker.Topology.Grants` names. A component may write the topics it
+produces, read the ones it consumes or follows, read the configuration of every
+topic it touches, use its own group if it consumes in one, and describe the
+groups whose positions it waits on; nothing administrative, and nothing else.
+
+| Component | Writes | Consumes in its group | Follows whole | Observes |
+|---|---|---|---|---|
+| `ingest-gateway` | events, inventory, status, assessments, gateways, refusals | | agents | |
+| `control-api` | agents, agent findings, rulesets | | rulesets | |
+| `analysis-engine` | detections | events | rulesets | |
+| `event-writer` | events quarantine | events | | |
+| `detection-writer` | detections quarantine | detections | | |
+| `alert-writer` | | detections | | |
+| `inventory-projector` | inventory quarantine | inventory | | |
+| `status-projector` | status quarantine | status | | |
+| `fleet-judge` | agent findings | | status, agents, gateways, agent findings, refusals | |
+| `agent-finding-writer` | agent findings quarantine | agent findings | | |
+| `assessment-projector` | assessments quarantine | assessments | | |
+| `advisory-importer` | advisories | | advisories | |
+| `advisory-writer` | advisories quarantine | advisories | | |
+| `finding-writer` | findings quarantine | findings | | |
+| `vulnerability-matcher` | findings | inventory, advisories | | `inventory-projector`, `advisory-writer`, `finding-writer` |
+
+`backbone-migrator` makes them. On a backbone that authenticates it reads
+`SEAGULL_BACKBONE_PRINCIPALS_DIR`, a directory holding one file named after each
+component with that component's password — the shape of a Kubernetes Secret
+mounted as a volume — sets each component's SCRAM credential, grants what is
+missing and revokes whatever else a component's principal holds, and leaves every
+other principal alone. It then asks as each component and refuses to finish while
+one can see a topic, read a topic's configuration or describe a group its grant
+does not name: a broker that enforces no ACL, an ACL granted to every principal and
+a component made a superuser all fail the run. Each process reads its own password
+through `SEAGULL_BACKBONE_SASL_PASSWORD_FILE`.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEAGULL_BACKBONE_PRINCIPALS_DIR` | unset | `backbone-migrator` only: required when the backbone authenticates, refused when it does not |
+
+What the backbone refuses a process is named and counted rather than reported as
+a generic error: `seagull_backbone_denials_total{reason}` counts the connections,
+group sessions, records and reads refused, `reason` being `authentication` or
+`authorization`, and the readiness check `backbone-access` fails while new
+refusals arrive, naming the newest, and holds again once a look finds none. A
+consumer's group can no longer be renamed: a replay moves the group's offsets with
+the broker's own tools.
 
 ## The telemetry store
 

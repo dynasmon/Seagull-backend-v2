@@ -9,14 +9,14 @@
 <!-- progress:start -->
 ## Backlog progress
 
-**59% built, 41% to go** — of the backend backlog's 101 cards, 56 are done, 8 partial and 37 open; 2 more were closed by decision. Updated on 2026-11-25.
+**60% built, 40% to go** — of the backend backlog's 101 cards, 57 are done, 8 partial and 36 open; 2 more were closed by decision. Updated on 2026-11-25.
 
 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟨🟨⬜⬜⬜⬜⬜⬜⬜
 
 | Stage | Cards | Built |
 | --- | --- | --- |
 | Foundation | 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟨 | 98% |
-| Correctness | 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜ | 88% |
+| Correctness | 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜ | 94% |
 | Core release | 🟩🟩🟩🟩 | 100% |
 | Inventory and vulnerability | 🟩🟩 | 100% |
 | Fleet visibility | 🟩🟩🟨 | 83% |

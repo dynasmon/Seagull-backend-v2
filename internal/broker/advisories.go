@@ -87,7 +87,7 @@ func advisoryKey(record *vulnerabilityv1.Record) ([]byte, error) {
 
 func (a *Advisories) Ping(ctx context.Context) error {
 	if err := a.client.Ping(ctx); err != nil {
-		return fmt.Errorf("reach the backbone: %w", err)
+		return fmt.Errorf("reach the backbone: %w", named(err))
 	}
 	return nil
 }

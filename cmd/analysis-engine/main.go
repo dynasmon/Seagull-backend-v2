@@ -35,6 +35,9 @@ func engine(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	denials := broker.NewDenials(platform.Metrics())
+	settings.security = settings.security.Observed(denials)
+	platform.Health().Register("backbone-access", denials.Check)
 
 	// What the engine decides leaves the process on a topic of its own, produced
 	// by a client of its own: the group that reads telemetry and the producer

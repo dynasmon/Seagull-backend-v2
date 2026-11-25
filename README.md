@@ -9,14 +9,14 @@
 <!-- progress:start -->
 ## Backlog progress
 
-**59% built, 41% to go** — of the backend backlog's 101 cards, 56 are done, 8 partial and 37 open; 2 more were closed by decision. Updated on 2026-11-25.
+**60% built, 40% to go** — of the backend backlog's 101 cards, 57 are done, 8 partial and 36 open; 2 more were closed by decision. Updated on 2026-11-25.
 
 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟨🟨⬜⬜⬜⬜⬜⬜⬜
 
 | Stage | Cards | Built |
 | --- | --- | --- |
 | Foundation | 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟨 | 98% |
-| Correctness | 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜ | 88% |
+| Correctness | 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜ | 94% |
 | Core release | 🟩🟩🟩🟩 | 100% |
 | Inventory and vulnerability | 🟩🟩 | 100% |
 | Fleet visibility | 🟩🟩🟨 | 83% |
@@ -858,7 +858,17 @@ slice — admission, backbone, writer, store — against real infrastructure, wh
 is what the rest of it is a decomposition of, and holds every component to its
 grant against a second Redpanda that authenticates by SCRAM over TLS and enforces
 ACLs, whose administrator's password `make test-integration` generates under
-`.local/` and whose authority the broker mints itself. The load suite fails a run when
+`.local/` and whose authority the broker mints itself.
+
+The stores of the suite are shared and kept between runs, so a test stays
+apart by a tenant or an agent identifier of its own. A test whose question spans
+the store — the oldest decisions not yet announced, the records held in an older
+shape, the replaced certificates not yet published, the freshness of a
+distribution's feed — migrates a database of its own and drops it after, so
+what earlier runs left never decides its verdict. The reads that span the store
+and pick their own records out of it — the rollouts in force, the agents
+admitted, the holders of a package, the chain of update roots and catalogs, the
+counts compared before and after — need none. The load suite fails a run when
 the gateway allocates more than 8 KB per admitted event, when a slow backbone
 produces an acknowledgement the backbone never received, or when a shutdown
 drops a batch it had already answered for.

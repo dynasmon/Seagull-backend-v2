@@ -183,8 +183,8 @@ func TestACertificateIsNeverBoundToTwoAgents(t *testing.T) {
 // never took is outstanding until it is carried, which is what stops a
 // revocation disappearing when the broker is down.
 func TestADecisionStaysOutstandingUntilTheDataPlaneIsTold(t *testing.T) {
-	address := alertStoreAddress(t)
-	registry := migratedAlertStore(t, address).Agents()
+	store, _ := ownRelationalStore(t, alertStoreAddress(t))
+	registry := store.Agents()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()

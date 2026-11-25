@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -53,11 +54,41 @@ func alertSettings(address string) postgres.Config {
 // The schema arrives by command, as in a deployment; the store only verifies.
 func migratedAlertStore(t *testing.T, address string) *postgres.Store {
 	t.Helper()
+	return migratedRelationalStore(t, alertSettings(address))
+}
+
+func ownRelationalStore(t *testing.T, address string) (*postgres.Store, string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	database := fmt.Sprintf("own_%d", time.Now().UnixNano())
+	administer, err := pgx.Connect(ctx, "postgres://"+storeUser+":seagull@"+address+"/"+storeDatabase+"?sslmode=disable")
+	if err != nil {
+		t.Fatalf("connect to create a database: %v", err)
+	}
+	if _, err := administer.Exec(ctx, "CREATE DATABASE "+database); err != nil {
+		t.Fatalf("create %s: %v", database, err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		_, _ = administer.Exec(ctx, "DROP DATABASE IF EXISTS "+database+" WITH (FORCE)")
+		_ = administer.Close(ctx)
+	})
+
+	settings := alertSettings(address)
+	settings.Database = database
+	return migratedRelationalStore(t, settings), database
+}
+
+func migratedRelationalStore(t *testing.T, settings postgres.Config) *postgres.Store {
+	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	migrator, err := postgres.NewMigrator(ctx, alertSettings(address))
+	migrator, err := postgres.NewMigrator(ctx, settings)
 	if err != nil {
 		t.Fatalf("build the migrator: %v", err)
 	}
@@ -68,7 +99,7 @@ func migratedAlertStore(t *testing.T, address string) *postgres.Store {
 		t.Fatalf("close the migrator: %v", err)
 	}
 
-	store, err := postgres.New(ctx, alertSettings(address))
+	store, err := postgres.New(ctx, settings)
 	if err != nil {
 		t.Fatalf("build the alert store: %v", err)
 	}

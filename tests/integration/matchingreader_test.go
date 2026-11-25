@@ -25,7 +25,20 @@ import (
 func matchingReaderOf(t *testing.T, address string) *clickhouse.MatchingReader {
 	t.Helper()
 	migratedFindingStore(t, address)
-	reader, err := clickhouse.NewMatchingReader(storeSettings(address))
+	return matchingReaderAt(t, storeSettings(address))
+}
+
+// The freshness of a distribution's feed is the platform's and no tenant or
+// identifier scopes it, so a test asking for it reads a database of its own.
+func ownAnalyticalStore(t *testing.T, address string) clickhouse.Config {
+	t.Helper()
+	database, _ := freshDatabase(t, address)
+	return settingsFor(address, database)
+}
+
+func matchingReaderAt(t *testing.T, settings clickhouse.Config) *clickhouse.MatchingReader {
+	t.Helper()
+	reader, err := clickhouse.NewMatchingReader(settings)
 	if err != nil {
 		t.Fatalf("build the matching reader: %v", err)
 	}
@@ -139,9 +152,9 @@ func almaAdvisory(id, pkg string, modified time.Time, normalization uint32, fixe
 // version of each advisory, its entries rebuilt range by range and event by
 // event from the columns they were stored in.
 func TestTheMatcherReadsTheNewestVersionOfEachAdvisoryAsItWasRead(t *testing.T) {
-	address := storeAddress(t)
-	advisories := migratedAdvisoryStore(t, address)
-	reader := matchingReaderOf(t, address)
+	settings := ownAnalyticalStore(t, storeAddress(t))
+	advisories := advisoryStoreAt(t, settings)
+	reader := matchingReaderAt(t, settings)
 	pkg := "openssl-libs-" + owned(t)
 	now := time.Now().UTC().Truncate(time.Millisecond)
 

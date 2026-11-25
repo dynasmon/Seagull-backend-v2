@@ -105,13 +105,14 @@ func TestTheRegistryTellsTheDataPlaneWhichCertificateAnAgentIsAdmittedOnOnPostgr
 // earlier run's decisions (BE-103).
 func TestARecordTheLogHoldsInAnOlderShapeIsWrittenAgainOnPostgresql(t *testing.T) {
 	address := alertStoreAddress(t)
-	registry := migratedAlertStore(t, address).Agents()
+	store, database := ownRelationalStore(t, address)
+	registry := store.Agents()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	at := time.Now().UTC().Truncate(time.Millisecond)
 	agentID, _, second := renewedOnce(t, registry, at)
 
-	side, err := pgx.Connect(ctx, "postgres://"+storeUser+":seagull@"+address+"/"+storeDatabase+"?sslmode=disable")
+	side, err := pgx.Connect(ctx, "postgres://"+storeUser+":seagull@"+address+"/"+database+"?sslmode=disable")
 	if err != nil {
 		t.Fatalf("connect beside the store: %v", err)
 	}
@@ -152,25 +153,16 @@ func unwritten(t *testing.T, registry *postgres.Agents, agentID string) *agentv1
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	for {
-		older, err := registry.Unwritten(ctx, postgres.MaxPageSize)
-		if err != nil {
-			t.Fatalf("read what is held in an older shape: %v", err)
-		}
-		for _, one := range older {
-			if one.GetAgentId() == agentID {
-				return one
-			}
-		}
-		if len(older) < postgres.MaxPageSize {
-			return nil
-		}
-		for _, one := range older {
-			if err := registry.Announced(ctx, one.GetAgentId(), one.GetRevision()); err != nil {
-				t.Fatal(err)
-			}
+	older, err := registry.Unwritten(ctx, postgres.MaxPageSize)
+	if err != nil {
+		t.Fatalf("read what is held in an older shape: %v", err)
+	}
+	for _, one := range older {
+		if one.GetAgentId() == agentID {
+			return one
 		}
 	}
+	return nil
 }
 
 // A refusal on a route of the agent listener other than renewal is one episode
@@ -178,7 +170,8 @@ func unwritten(t *testing.T, registry *postgres.Agents, agentID string) *agentv1
 // route it was refused on last; a refusal decided under a binding that has since
 // moved records nothing.
 func TestAReplacedCertificateRefusedOnTheAgentListenerIsAnEpisodeOfTheCertificateInForceOnPostgresql(t *testing.T) {
-	registry := migratedAlertStore(t, alertStoreAddress(t)).Agents()
+	store, _ := ownRelationalStore(t, alertStoreAddress(t))
+	registry := store.Agents()
 	publishedAll(t, registry)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()

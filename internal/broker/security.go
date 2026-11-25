@@ -42,7 +42,8 @@ type Security struct {
 	User      string
 	Password  config.Secret
 
-	denials *Denials
+	production bool
+	denials    *Denials
 }
 
 func (s Security) Observed(denials *Denials) Security {
@@ -50,6 +51,9 @@ func (s Security) Observed(denials *Denials) Security {
 	return s
 }
 
+// A component authenticates as itself unless told otherwise, and a deployment
+// that did not declare a development backbone is held to a production one: one
+// reached over TLS by processes that each authenticate.
 func LoadSecurity(parser *config.Parser, component string) Security {
 	security := Security{
 		TLS:        parser.Bool("SEAGULL_BACKBONE_TLS", true),
@@ -61,6 +65,8 @@ func LoadSecurity(parser *config.Parser, component string) Security {
 		Mechanism: parser.RequiredString("SEAGULL_BACKBONE_SASL_MECHANISM"),
 		User:      parser.String("SEAGULL_BACKBONE_SASL_USER", ""),
 		Password:  parser.Secret("SEAGULL_BACKBONE_SASL_PASSWORD"),
+
+		production: parser.Enum(durabilityKey, Production.String(), Production.String(), Development.String()) != Development.String(),
 	}
 	if security.Authenticated() && security.User == "" {
 		security.User = component
@@ -93,6 +99,12 @@ func (s Security) Validate() error {
 	// Credentials on a plaintext connection are read by anything on the path.
 	if s.Authenticated() && !s.TLS {
 		return errors.New("backbone authentication without tls would send the password in the clear")
+	}
+	if s.production && !s.TLS {
+		return fmt.Errorf("a production backbone is reached over tls only: SEAGULL_BACKBONE_TLS=false is admitted beside %s=%s", durabilityKey, Development)
+	}
+	if s.production && !s.Authenticated() {
+		return fmt.Errorf("a production backbone authenticates every process as itself: SEAGULL_BACKBONE_SASL_MECHANISM=%s is admitted beside %s=%s", MechanismNone, durabilityKey, Development)
 	}
 	return nil
 }

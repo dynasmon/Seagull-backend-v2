@@ -3,6 +3,7 @@ package broker
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/platform/config"
@@ -119,10 +120,15 @@ func TestTheMechanismsOnOfferAreTheOnesTheParserAdmits(t *testing.T) {
 		if mechanism != MechanismNone {
 			user, password = "seagull", "hunter2"
 		}
+		durability := Production.String()
+		if mechanism == MechanismNone {
+			durability = Development.String()
+		}
 		t.Setenv("SEAGULL_BACKBONE_SASL_MECHANISM", mechanism)
 		t.Setenv("SEAGULL_BACKBONE_TLS", "true")
 		t.Setenv("SEAGULL_BACKBONE_SASL_USER", user)
 		t.Setenv("SEAGULL_BACKBONE_SASL_PASSWORD", password)
+		t.Setenv("SEAGULL_BACKBONE_DURABILITY", durability)
 
 		parser := config.FromEnvironment()
 		held := LoadSecurity(parser, "event-writer")
@@ -146,6 +152,37 @@ func loadedSecurity(t *testing.T, environment map[string]string) Security {
 		t.Fatalf("load the backbone security: %v", err)
 	}
 	return held
+}
+
+func TestAProductionBackboneIsReachedOverTLSByProcessesThatEachAuthenticate(t *testing.T) {
+	directory := t.TempDir()
+	certificate, key := filepath.Join(directory, "client.pem"), filepath.Join(directory, "client-key.pem")
+	for _, path := range []string{certificate, key} {
+		if err := os.WriteFile(path, []byte("material"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, environment := range map[string]map[string]string{
+		"plaintext":                        {"SEAGULL_BACKBONE_TLS": "false", "SEAGULL_BACKBONE_SASL_MECHANISM": MechanismNone},
+		"encrypted and anonymous":          {"SEAGULL_BACKBONE_SASL_MECHANISM": MechanismNone},
+		"a client certificate and no sasl": {"SEAGULL_BACKBONE_SASL_MECHANISM": MechanismNone, "SEAGULL_BACKBONE_TLS_CERT": certificate, "SEAGULL_BACKBONE_TLS_KEY": key},
+	} {
+		err := loadedSecurity(t, environment).Validate()
+		switch {
+		case err == nil:
+			t.Errorf("%s was admitted for a production backbone", name)
+		case environment["SEAGULL_BACKBONE_TLS"] == "false" && !strings.Contains(err.Error(), "SEAGULL_BACKBONE_TLS"):
+			t.Errorf("%s was refused without naming the setting that turned tls off: %v", name, err)
+		}
+		environment["SEAGULL_BACKBONE_DURABILITY"] = Development.String()
+		if err := loadedSecurity(t, environment).Validate(); err != nil {
+			t.Errorf("%s was refused for a declared development backbone: %v", name, err)
+		}
+	}
+	secured := loadedSecurity(t, map[string]string{"SEAGULL_BACKBONE_SASL_MECHANISM": MechanismScramSHA512, "SEAGULL_BACKBONE_SASL_PASSWORD": "hunter2"})
+	if err := secured.Validate(); err != nil {
+		t.Errorf("an encrypted backbone every process authenticates to was refused: %v", err)
+	}
 }
 
 func TestAComponentAuthenticatesAsItselfUnlessToldOtherwise(t *testing.T) {

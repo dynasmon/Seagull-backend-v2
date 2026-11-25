@@ -20,7 +20,7 @@ func TestTheBackboneUsesTLSByDefault(t *testing.T) {
 		return "", false
 	})
 
-	loaded := LoadSecurity(parser)
+	loaded := LoadSecurity(parser, "event-writer")
 
 	if err := parser.Err(); err != nil {
 		t.Fatal(err)
@@ -33,7 +33,7 @@ func TestTheBackboneUsesTLSByDefault(t *testing.T) {
 func TestTheBackboneAuthenticationPostureMustBeExplicit(t *testing.T) {
 	parser := config.New(func(string) (string, bool) { return "", false })
 
-	LoadSecurity(parser)
+	LoadSecurity(parser, "event-writer")
 
 	if parser.Err() == nil {
 		t.Fatal("the backbone silently defaulted to unauthenticated")
@@ -120,12 +120,40 @@ func TestTheMechanismsOnOfferAreTheOnesTheParserAdmits(t *testing.T) {
 		t.Setenv("SEAGULL_BACKBONE_SASL_PASSWORD", password)
 
 		parser := config.FromEnvironment()
-		held := LoadSecurity(parser)
+		held := LoadSecurity(parser, "event-writer")
 		if err := parser.Err(); err != nil {
 			t.Fatalf("%s was refused by the parser: %v", mechanism, err)
 		}
 		if _, err := held.options(); err != nil {
 			t.Errorf("%s was refused: %v", mechanism, err)
 		}
+	}
+}
+
+func loadedSecurity(t *testing.T, environment map[string]string) Security {
+	t.Helper()
+	parser := config.New(func(key string) (string, bool) {
+		value, given := environment[key]
+		return value, given
+	})
+	held := LoadSecurity(parser, "event-writer")
+	if err := parser.Err(); err != nil {
+		t.Fatalf("load the backbone security: %v", err)
+	}
+	return held
+}
+
+func TestAComponentAuthenticatesAsItselfUnlessToldOtherwise(t *testing.T) {
+	itself := loadedSecurity(t, map[string]string{"SEAGULL_BACKBONE_SASL_MECHANISM": MechanismScramSHA256, "SEAGULL_BACKBONE_SASL_PASSWORD": "hunter2"})
+	if itself.User != "event-writer" {
+		t.Errorf("the event writer authenticates as %q", itself.User)
+	}
+	told := loadedSecurity(t, map[string]string{"SEAGULL_BACKBONE_SASL_MECHANISM": MechanismScramSHA256, "SEAGULL_BACKBONE_SASL_USER": "superuser", "SEAGULL_BACKBONE_SASL_PASSWORD": "hunter2"})
+	if told.User != "superuser" {
+		t.Errorf("a named user became %q", told.User)
+	}
+	nobody := loadedSecurity(t, map[string]string{"SEAGULL_BACKBONE_SASL_MECHANISM": MechanismNone, "SEAGULL_BACKBONE_DURABILITY": Development.String()})
+	if nobody.User != "" {
+		t.Errorf("a backbone that authenticates nobody was given user %q", nobody.User)
 	}
 }

@@ -86,7 +86,7 @@ func engine(ctx context.Context) error {
 	consumer, err := broker.NewConsumer(broker.ConsumerConfig{
 		Brokers:      settings.brokers,
 		Topic:        settings.topology.Events.Name,
-		Group:        settings.group,
+		Group:        serviceName,
 		ClientID:     serviceName,
 		MaxRecords:   settings.batchEvents,
 		FetchMaxWait: settings.fetchMaxWait,
@@ -140,7 +140,7 @@ func engine(ctx context.Context) error {
 	platform.Logger().Info("analysis_engine_configured",
 		slog.String("topic", settings.topology.Events.Name),
 		slog.String("detections_topic", settings.topology.Detections.Name),
-		slog.String("group", settings.group),
+		slog.String("group", serviceName),
 		slog.String("rules", settings.rules),
 		slog.String("rulesets_topic", settings.topology.Rulesets.Name),
 		slog.String("ruleset", string(registry.Current().ID())),

@@ -17,7 +17,6 @@ type configuration struct {
 	brokers  []string
 	topology broker.Topology
 	security broker.Security
-	group    string
 	rules    string
 
 	logRecords   int
@@ -42,8 +41,7 @@ func load(parser *config.Parser) (configuration, error) {
 
 		brokers:  parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
 		topology: broker.LoadTopology(parser),
-		security: broker.LoadSecurity(parser),
-		group:    parser.String("SEAGULL_ANALYSIS_CONSUMER_GROUP", serviceName),
+		security: broker.LoadSecurity(parser, serviceName),
 		rules:    parser.FilePath("SEAGULL_DETECTION_RULES", "/etc/seagull/rules"),
 
 		logRecords:   parser.Int("SEAGULL_ANALYSIS_RULESET_RECORDS", 256, 1, 10_000),

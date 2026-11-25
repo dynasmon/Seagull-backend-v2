@@ -55,7 +55,7 @@ func projector(ctx context.Context) error {
 	consumer, err := broker.NewConsumer(broker.ConsumerConfig{
 		Brokers:      settings.brokers,
 		Topic:        settings.topology.Status.Name,
-		Group:        settings.group,
+		Group:        serviceName,
 		ClientID:     serviceName,
 		MaxRecords:   settings.batchRecords,
 		FetchMaxWait: settings.fetchMaxWait,
@@ -114,7 +114,7 @@ func projector(ctx context.Context) error {
 	platform.Logger().Info("status_projector_configured",
 		slog.String("topic", settings.topology.Status.Name),
 		slog.String("quarantine_topic", settings.topology.StatusQuarantine.Name),
-		slog.String("group", settings.group),
+		slog.String("group", serviceName),
 		slog.Int("batch_records", settings.batchRecords),
 		slog.String("store_database", settings.store.Database),
 	)

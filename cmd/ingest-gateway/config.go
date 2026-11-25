@@ -87,7 +87,7 @@ func load(parser *config.Parser) (configuration, error) {
 
 		brokers:       parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
 		topology:      broker.LoadTopology(parser),
-		security:      broker.LoadSecurity(parser),
+		security:      broker.LoadSecurity(parser, serviceName),
 		startTimeout:  parser.Duration("SEAGULL_GATEWAY_START_TIMEOUT", 30*time.Second, time.Second, 5*time.Minute),
 		rosterRecords: parser.Int("SEAGULL_GATEWAY_ROSTER_RECORDS", 500, 1, 100_000),
 		rosterCheck:   parser.Duration("SEAGULL_GATEWAY_ROSTER_CHECK_INTERVAL", 5*time.Second, time.Second, time.Minute),

@@ -119,7 +119,7 @@ func load(parser *config.Parser) (configuration, error) {
 
 		brokers:      parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
 		topology:     broker.LoadTopology(parser),
-		security:     broker.LoadSecurity(parser),
+		security:     broker.LoadSecurity(parser, serviceName),
 		startTimeout: parser.Duration("SEAGULL_CONTROL_API_START_TIMEOUT", 30*time.Second, time.Second, 5*time.Minute),
 		logRecords:   parser.Int("SEAGULL_CONTROL_API_RULESET_RECORDS", 256, 1, 10_000),
 		rules:        parser.FilePath("SEAGULL_DETECTION_RULES", "/etc/seagull/rules"),

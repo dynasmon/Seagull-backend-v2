@@ -55,7 +55,7 @@ func writer(ctx context.Context) error {
 	consumer, err := broker.NewConsumer(broker.ConsumerConfig{
 		Brokers:      settings.brokers,
 		Topic:        settings.topology.Detections.Name,
-		Group:        settings.group,
+		Group:        serviceName,
 		ClientID:     serviceName,
 		MaxRecords:   settings.batchDetections,
 		FetchMaxWait: settings.fetchMaxWait,
@@ -114,7 +114,7 @@ func writer(ctx context.Context) error {
 	platform.Logger().Info("detection_writer_configured",
 		slog.String("topic", settings.topology.Detections.Name),
 		slog.String("quarantine_topic", settings.topology.DetectionsQuarantine.Name),
-		slog.String("group", settings.group),
+		slog.String("group", serviceName),
 		slog.Int("batch_detections", settings.batchDetections),
 		slog.String("store_database", settings.store.Database),
 	)

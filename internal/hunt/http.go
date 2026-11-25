@@ -3,6 +3,7 @@ package hunt
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime"
@@ -32,6 +33,7 @@ const (
 type HandlerOptions struct {
 	Grants       Grants
 	Hunter       *Hunter
+	Lister       *Lister
 	Capacity     *Capacity
 	Limiter      *ratelimit.Limiter
 	Metrics      *Metrics
@@ -40,38 +42,86 @@ type HandlerOptions struct {
 
 type Handler struct {
 	grants       Grants
-	hunter       *Hunter
 	capacity     *Capacity
 	limiter      *ratelimit.Limiter
 	metrics      *Metrics
 	maxBodyBytes int64
 	dataset      Dataset
+	route        route
 }
 
 func NewHandler(dataset Dataset, options HandlerOptions) (*Handler, error) {
 	switch {
 	case options.Grants == nil:
 		return nil, errors.New("the hunt handler needs the policy that says who may ask what")
-	case options.Hunter == nil:
-		return nil, errors.New("the hunt handler needs a hunter")
 	case options.MaxBodyBytes <= 0:
 		return nil, errors.New("the hunt handler needs a positive body ceiling")
-	case !Known(dataset):
-		return nil, errors.New("the hunt handler needs a dataset it can ask about")
 	case options.Capacity == nil:
 		return nil, errors.New("the hunt handler needs a ceiling on what the process holds at once")
 	case options.Metrics == nil:
 		return nil, errors.New("the hunt handler needs metrics")
 	}
+	served, err := routeOf(dataset, options)
+	if err != nil {
+		return nil, err
+	}
 	return &Handler{
 		grants:       options.Grants,
-		hunter:       options.Hunter,
 		capacity:     options.Capacity,
 		limiter:      options.Limiter,
 		metrics:      options.Metrics,
 		maxBodyBytes: options.MaxBodyBytes,
 		dataset:      dataset,
+		route:        served,
 	}, nil
+}
+
+// What a route reads its question as and who answers it. Every route shares the
+// admission above it, so a listing is authorised, limited and held to the
+// process ceiling exactly as a hunt is.
+type route struct {
+	question func() proto.Message
+	answer   func(ctx context.Context, scope Scope, asked proto.Message) (proto.Message, error)
+}
+
+func asking[Q any, PQ interface {
+	*Q
+	proto.Message
+}, A proto.Message](answer func(context.Context, Scope, PQ) (A, error)) route {
+	return route{
+		question: func() proto.Message { return PQ(new(Q)) },
+		answer: func(ctx context.Context, scope Scope, asked proto.Message) (proto.Message, error) {
+			return answer(ctx, scope, asked.(PQ))
+		},
+	}
+}
+
+func routeOf(dataset Dataset, options HandlerOptions) (route, error) {
+	switch {
+	case Known(dataset) && options.Hunter == nil:
+		return route{}, errors.New("the hunt handler needs a hunter")
+	case dataset == Events:
+		return asking(options.Hunter.Events), nil
+	case dataset == Detections:
+		return asking(options.Hunter.Detections), nil
+	case listed(dataset) && options.Lister == nil:
+		return route{}, fmt.Errorf("the %s handler needs a lister", dataset)
+	}
+	switch dataset {
+	case Assets:
+		return asking(options.Lister.Assets), nil
+	case Items:
+		return asking(options.Lister.Items), nil
+	case Findings:
+		return asking(options.Lister.Findings), nil
+	case FindingHistory:
+		return asking(options.Lister.History), nil
+	case Assessments:
+		return asking(options.Lister.Assessments), nil
+	case Advisories:
+		return asking(options.Lister.Advisories), nil
+	}
+	return route{}, errors.New("the hunt handler needs a dataset it can ask about")
 }
 
 // Authorisation is decided before the body is read, and the scope it produces is
@@ -112,33 +162,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer release()
 
-	asked, ok := h.read(w, r)
-	if !ok {
+	asked := h.route.question()
+	if !h.read(w, r, asked) {
 		return
 	}
 
-	switch h.dataset {
-	case Detections:
-		page, err := h.hunter.Detections(ctx, scope, asked)
-		if err != nil {
-			h.refuseQuery(ctx, w, err)
-			return
-		}
-		respond(w, http.StatusOK, page)
-	default:
-		page, err := h.hunter.Events(ctx, scope, asked)
-		if err != nil {
-			h.refuseQuery(ctx, w, err)
-			return
-		}
-		respond(w, http.StatusOK, page)
+	page, err := h.route.answer(ctx, scope, asked)
+	if err != nil {
+		h.refuseQuery(ctx, w, err)
+		return
 	}
+	respond(w, http.StatusOK, page)
 }
 
-func (h *Handler) read(w http.ResponseWriter, r *http.Request) (*huntv1.Query, bool) {
+func (h *Handler) read(w http.ResponseWriter, r *http.Request, asked proto.Message) bool {
 	if !protobufRequest(r) {
 		refuse(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "a query is sent as "+ContentType, "")
-		return nil, false
+		return false
 	}
 
 	payload, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.maxBodyBytes))
@@ -146,18 +186,17 @@ func (h *Handler) read(w http.ResponseWriter, r *http.Request) (*huntv1.Query, b
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			refuse(w, http.StatusRequestEntityTooLarge, "query_body_too_large", "the query body exceeds the ceiling", "")
-			return nil, false
+			return false
 		}
 		refuse(w, http.StatusBadRequest, "unreadable_body", "the query body could not be read", "")
-		return nil, false
+		return false
 	}
 
-	var asked huntv1.Query
-	if err := proto.Unmarshal(payload, &asked); err != nil {
+	if err := proto.Unmarshal(payload, asked); err != nil {
 		refuse(w, http.StatusBadRequest, "malformed_payload", "the query is not a valid protobuf message", "")
-		return nil, false
+		return false
 	}
-	return &asked, true
+	return true
 }
 
 // A question this plane would not put to the store is the caller's to correct; a

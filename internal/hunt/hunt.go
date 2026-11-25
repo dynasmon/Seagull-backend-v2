@@ -123,12 +123,14 @@ func (h *Hunter) observe(query Query, records int, elapsed time.Duration) {
 	)
 }
 
-func (h *Hunter) refused(dataset Dataset, err error) error {
+func (h *Hunter) refused(dataset Dataset, err error) error { return counted(h.metrics, dataset, err) }
+
+func counted(metrics *Metrics, dataset Dataset, err error) error {
 	reason := "invalid_query"
 	var refusal *Refusal
 	if errors.As(err, &refusal) {
 		reason = refusal.Code
 	}
-	h.metrics.refused(dataset, reason)
+	metrics.refused(dataset, reason)
 	return err
 }

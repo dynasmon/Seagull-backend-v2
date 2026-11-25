@@ -66,14 +66,27 @@ func Authorize(state *tls.ConnectionState, grants Grants, dataset Dataset) (Scop
 	if err != nil {
 		return Scope{}, fmt.Errorf("%w: %q", ErrNotGranted, caller)
 	}
-	permission := authz.Permission{Resource: authz.Events, Action: authz.Read}
-	if dataset == Detections {
-		permission.Resource = authz.Detections
+	permission, declared := reads[dataset]
+	if !declared {
+		return Scope{}, fmt.Errorf("%w: nothing reads %q", ErrNotPermitted, dataset)
 	}
 	if !grant.Allows(permission) {
 		return Scope{}, fmt.Errorf("%w: it needs %s", ErrNotPermitted, permission)
 	}
 	return NewScope(grant.Tenants())
+}
+
+// The permission each dataset is read under. An advisory is intelligence, not a
+// tenant's, and is read under the permission that reads what it is cited by.
+var reads = map[Dataset]authz.Permission{
+	Events:         {Resource: authz.Events, Action: authz.Read},
+	Detections:     {Resource: authz.Detections, Action: authz.Read},
+	Assets:         {Resource: authz.Inventory, Action: authz.Read},
+	Items:          {Resource: authz.Inventory, Action: authz.Read},
+	Findings:       {Resource: authz.Vulnerabilities, Action: authz.Read},
+	FindingHistory: {Resource: authz.Vulnerabilities, Action: authz.Read},
+	Assessments:    {Resource: authz.Vulnerabilities, Action: authz.Read},
+	Advisories:     {Resource: authz.Vulnerabilities, Action: authz.Read},
 }
 
 func CallerFromConnection(state *tls.ConnectionState) string {

@@ -46,7 +46,7 @@ func encodeCursor(key []byte, fingerprint [sha256.Size]byte, at time.Time, names
 	}
 
 	encoding := base64.RawURLEncoding
-	return encoding.EncodeToString(payload) + "." + encoding.EncodeToString(sign(key, fingerprint, payload))
+	return encoding.EncodeToString(payload) + "." + encoding.EncodeToString(sign(cursorLayout, key, fingerprint, payload))
 }
 
 func decodeCursor(key []byte, fingerprint [sha256.Size]byte, token string) (After, error) {
@@ -64,7 +64,7 @@ func decodeCursor(key []byte, fingerprint [sha256.Size]byte, token string) (Afte
 	if err != nil {
 		return After{}, ErrCursor
 	}
-	if !hmac.Equal(presented, sign(key, fingerprint, payload)) {
+	if !hmac.Equal(presented, sign(cursorLayout, key, fingerprint, payload)) {
 		return After{}, ErrCursor
 	}
 	if len(payload) < 8 {
@@ -96,9 +96,9 @@ func readNames(written []byte) ([]string, bool) {
 	return names, len(names) > 0
 }
 
-func sign(key []byte, fingerprint [sha256.Size]byte, payload []byte) []byte {
+func sign(layout string, key []byte, fingerprint [sha256.Size]byte, payload []byte) []byte {
 	mac := hmac.New(sha256.New, key)
-	mac.Write([]byte(cursorLayout))
+	mac.Write([]byte(layout))
 	mac.Write(fingerprint[:])
 	mac.Write(payload)
 	return mac.Sum(nil)

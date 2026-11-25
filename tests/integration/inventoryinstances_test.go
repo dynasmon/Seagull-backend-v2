@@ -14,53 +14,12 @@ import (
 	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 )
 
-const currentAccounts = `
-	SELECT item.user_name, item.user_uid
-	FROM asset_inventory AS item FINAL
-	INNER JOIN (
-		SELECT tenant_id, agent_id, kind, max(scanned_at) AS scanned_at
-		FROM asset_inventory_scans
-		WHERE tenant_id = ?
-		GROUP BY tenant_id, agent_id, kind
-	) AS scan
-	ON item.tenant_id = scan.tenant_id AND item.agent_id = scan.agent_id AND item.kind = scan.kind
-	WHERE item.tenant_id = ? AND item.last_seen >= scan.scanned_at`
-
 // What the database of a Rocky Linux 9 host said once two kernels were installed
 // side by side: one name, one upstream version, two releases.
 const (
 	olderKernel = "5.14.0-687.60.1.el9_8"
 	newerKernel = "5.14.0-687.61.1.el9_8"
 )
-
-// The map current answers with has one version a name, which is the question a
-// host with two kernels is about, so this one lists what the store holds.
-func instances(t *testing.T, connection driver.Conn, query, owner string) []string {
-	t.Helper()
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-
-	rows, err := connection.Query(ctx, query, owner, owner)
-	if err != nil {
-		t.Fatalf("read the current inventory: %v", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var held []string
-	for rows.Next() {
-		var name, detail string
-		if err := rows.Scan(&name, &detail); err != nil {
-			t.Fatalf("read the current inventory: %v", err)
-		}
-		held = append(held, name+" "+detail)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("read the current inventory: %v", err)
-	}
-	slices.Sort(held)
-	return held
-}
 
 func storedRows(t *testing.T, connection driver.Conn, owner, condition string) uint64 {
 	t.Helper()
@@ -103,7 +62,7 @@ func TestTwoInstalledKernelsAreTwoCurrentItems(t *testing.T) {
 
 	fold(t, store, owner, fixtures.PackageScan{AgentID: "rocky-01", At: at, Packages: kernels(newerKernel, olderKernel)})
 
-	held := instances(t, inspector(t, address), currentItems, owner)
+	held := instances(t, address, owner, "rocky-01", inventoryv1.Kind_KIND_PACKAGE)
 	want := []string{"kernel-core " + olderKernel, "kernel-core " + newerKernel}
 	if !slices.Equal(held, want) {
 		t.Fatalf("the asset holds %q, want both kernels", held)
@@ -126,7 +85,7 @@ func TestASnapshotWithoutTheOldKernelRetiresIt(t *testing.T) {
 		for index, version := range installed {
 			want[index] = "kernel-core " + version
 		}
-		if held := instances(t, connection, currentItems, owner); !slices.Equal(held, want) {
+		if held := instances(t, address, owner, "rocky-01", inventoryv1.Kind_KIND_PACKAGE); !slices.Equal(held, want) {
 			t.Fatalf("after step %d the asset holds %q, want %q", step, held, want)
 		}
 	}
@@ -150,7 +109,7 @@ func TestAnUpgradeARecordShowsAloneReplacesItsRowWhereTheManagerCouldHoldBoth(t 
 		})
 	}
 
-	if held := current(t, connection, owner); held["openssl-libs"] != "1:3.5.8-2.el9_8" {
+	if held := current(t, address, owner, "rocky-01"); held["openssl-libs"] != "1:3.5.8-2.el9_8" {
 		t.Fatalf("the asset holds %q, want the upgraded version", held["openssl-libs"])
 	}
 	if rows := storedRows(t, connection, owner, "package_name = 'openssl-libs'"); rows != 1 {
@@ -162,7 +121,6 @@ func TestADeltaLeavesTheKernelItDidNotNameInstalled(t *testing.T) {
 	address := storeAddress(t)
 	store := migratedInventoryStore(t, address)
 	owner := tenant(t)
-	connection := inspector(t, address)
 	at := time.Date(2026, time.September, 12, 10, 0, 0, 0, time.UTC)
 
 	fold(t, store, owner, fixtures.PackageScan{AgentID: "rocky-01", At: at, Packages: kernels(olderKernel)})
@@ -170,7 +128,7 @@ func TestADeltaLeavesTheKernelItDidNotNameInstalled(t *testing.T) {
 		AgentID: "rocky-01", At: at.Add(time.Hour), Mode: inventoryv1.Mode_MODE_DELTA, Packages: kernels(newerKernel),
 	})
 
-	held := instances(t, connection, currentItems, owner)
+	held := instances(t, address, owner, "rocky-01", inventoryv1.Kind_KIND_PACKAGE)
 	want := []string{"kernel-core " + olderKernel, "kernel-core " + newerKernel}
 	if !slices.Equal(held, want) {
 		t.Fatalf("after the delta the asset holds %q, want both kernels", held)
@@ -183,19 +141,18 @@ func TestTwoAccountsSharingAUidAreTwoCurrentItems(t *testing.T) {
 	address := storeAddress(t)
 	store := migratedInventoryStore(t, address)
 	owner := tenant(t)
-	connection := inspector(t, address)
 	at := time.Date(2026, time.September, 12, 10, 0, 0, 0, time.UTC)
 
 	root := &inventoryv1.User{Name: "root", Uid: "0", Gid: "0", Home: "/root", Shell: "/bin/bash"}
 	toor := &inventoryv1.User{Name: "toor", Uid: "0", Gid: "0", Home: "/root", Shell: "/bin/bash"}
 
 	foldRecord(t, store, owner, accountRecord("web-01", at, root, toor))
-	if held := instances(t, connection, currentAccounts, owner); !slices.Equal(held, []string{"root 0", "toor 0"}) {
+	if held := instances(t, address, owner, "web-01", inventoryv1.Kind_KIND_USER); !slices.Equal(held, []string{"root 0", "toor 0"}) {
 		t.Fatalf("the asset holds %q, want root and toor", held)
 	}
 
 	foldRecord(t, store, owner, accountRecord("web-01", at.Add(time.Hour), root))
-	if held := instances(t, connection, currentAccounts, owner); !slices.Equal(held, []string{"root 0"}) {
+	if held := instances(t, address, owner, "web-01", inventoryv1.Kind_KIND_USER); !slices.Equal(held, []string{"root 0"}) {
 		t.Fatalf("after toor was removed the asset holds %q, want root alone", held)
 	}
 }

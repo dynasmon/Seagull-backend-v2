@@ -303,7 +303,7 @@ func TestAnAdmittedInventoryBatchReachesTheCurrentAssetState(t *testing.T) {
 		t.Fatalf("the projector stopped with %v", err)
 	}
 
-	held := current(t, inspector(t, address), owner)
+	held := current(t, address, owner, "web-01")
 	if held["curl"] != "8.5.0" || held["openssl"] != "3.0.13" {
 		t.Fatalf("the asset holds %v after a scan of curl and openssl", held)
 	}

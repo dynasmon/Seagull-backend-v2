@@ -305,7 +305,7 @@ func TestAnAdvisoryReadFromItsFeedReachesTheStoreSayingWhereAndWhenItWasRead(t *
 	owner := tenant(t)
 	inventory := migratedInventoryStore(t, address)
 	fold(t, inventory, owner, fixtures.PackageScan{AgentID: "web-01", Packages: []fixtures.Installed{{Name: pkg, Version: "3.0.11-1", Architecture: "amd64", Manager: "dpkg"}}})
-	before := current(t, inspector(t, address), owner)
+	before := current(t, address, owner, "web-01")
 
 	served := mirrored(t, map[string]published{id: {modified: modified, body: body}})
 	topic := compactedAdvisoryTopic(t, addresses)
@@ -349,7 +349,7 @@ func TestAnAdvisoryReadFromItsFeedReachesTheStoreSayingWhereAndWhenItWasRead(t *
 	if got := affecting(t, address, pkg); len(got) != 1 {
 		t.Errorf("after a failed attempt %s is affected by %v: a feed that failed changed what the platform believes", pkg, got)
 	}
-	if after := current(t, inspector(t, address), owner); !maps.Equal(before, after) {
+	if after := current(t, address, owner, "web-01"); !maps.Equal(before, after) {
 		t.Errorf("the inventory held %v before the feed failed and %v after", before, after)
 	}
 

@@ -16,6 +16,7 @@ type ServerOptions struct {
 	TLS             *tls.Config
 	Grants          Grants
 	Hunter          *Hunter
+	Lister          *Lister
 	Capacity        *Capacity
 	Limiter         *ratelimit.Limiter
 	Metrics         *Metrics
@@ -35,6 +36,9 @@ func NewServer(options ServerOptions) (*httpx.Server, error) {
 	if options.Hunter == nil {
 		return nil, errors.New("the hunt listener needs a hunter")
 	}
+	if options.Lister == nil {
+		return nil, errors.New("the query listener needs a lister for what the platform holds now")
+	}
 	if options.Instrumentation == nil {
 		return nil, errors.New("the hunt listener shares the process http instrumentation")
 	}
@@ -43,18 +47,25 @@ func NewServer(options ServerOptions) (*httpx.Server, error) {
 	}
 
 	mux := http.NewServeMux()
-	routes := map[string]struct {
+	routes := []struct {
 		route Dataset
 		path  string
 		name  string
 	}{
-		EventsRoute:     {Events, EventsRoute, "hunt_events"},
-		DetectionsRoute: {Detections, DetectionsRoute, "hunt_detections"},
+		{Events, EventsRoute, "hunt_events"},
+		{Detections, DetectionsRoute, "hunt_detections"},
+		{Assets, http.MethodPost + " " + AssetsPath, "inventory_assets"},
+		{Items, http.MethodPost + " " + ItemsPath, "inventory_items"},
+		{Findings, http.MethodPost + " " + FindingsPath, "vulnerability_findings"},
+		{FindingHistory, http.MethodPost + " " + FindingHistoryPath, "vulnerability_finding_history"},
+		{Assessments, http.MethodPost + " " + AssessmentsPath, "vulnerability_assessments"},
+		{Advisories, http.MethodPost + " " + AdvisoriesPath, "vulnerability_advisories"},
 	}
 	for _, entry := range routes {
 		handler, err := NewHandler(entry.route, HandlerOptions{
 			Grants:       options.Grants,
 			Hunter:       options.Hunter,
+			Lister:       options.Lister,
 			Capacity:     options.Capacity,
 			Limiter:      options.Limiter,
 			Metrics:      options.Metrics,

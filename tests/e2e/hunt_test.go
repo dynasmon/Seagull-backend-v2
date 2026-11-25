@@ -49,6 +49,9 @@ roles:
   - name: responder
     description: works alerts without hunting
     permissions: [alerts:read]
+  - name: keeper
+    description: reads what assets have and what is wrong with them
+    permissions: [inventory:read, vulnerabilities:read]
 bindings:
   - subject: analyst-01
     roles: [analyst]
@@ -62,12 +65,17 @@ bindings:
     roles: [responder]
     scope: tenant
     tenants: [acme]
+  - subject: keeper-01
+    roles: [keeper]
+    scope: tenant
+    tenants: [acme]
 `
 
 type queryPlane struct {
 	address   string
 	authority *devpki.Authority
 	store     *answering
+	held      *holding
 	stopped   chan error
 }
 
@@ -140,6 +148,18 @@ func startQueryAPI(t *testing.T, store *answering) *queryPlane {
 		t.Fatalf("build hunter: %v", err)
 	}
 
+	shelf := &holding{}
+	lister, err := hunt.NewLister(hunt.ListerOptions{
+		Inventory:       shelf,
+		Vulnerabilities: shelf,
+		Compiler:        compiler,
+		Metrics:         instruments,
+		Logger:          platform.Logger(),
+	})
+	if err != nil {
+		t.Fatalf("build lister: %v", err)
+	}
+
 	held, err := hunt.NewCapacity(16)
 	if err != nil {
 		t.Fatalf("build capacity: %v", err)
@@ -150,6 +170,7 @@ func startQueryAPI(t *testing.T, store *answering) *queryPlane {
 		TLS:             mutual,
 		Grants:          policy,
 		Hunter:          hunter,
+		Lister:          lister,
 		Capacity:        held,
 		Metrics:         instruments,
 		Instrumentation: platform.HTTP(),
@@ -170,6 +191,7 @@ func startQueryAPI(t *testing.T, store *answering) *queryPlane {
 		address:   listener.Address(),
 		authority: authority,
 		store:     store,
+		held:      shelf,
 		stopped:   make(chan error, 1),
 	}
 	go func() { running.stopped <- platform.Run(ctx) }()

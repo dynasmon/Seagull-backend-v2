@@ -72,7 +72,7 @@ func (s *Status) PublishStatus(ctx context.Context, reports []*agentv1.Status) e
 
 func (s *Status) Ping(ctx context.Context) error {
 	if err := s.client.Ping(ctx); err != nil {
-		return fmt.Errorf("reach the backbone: %w", err)
+		return fmt.Errorf("reach the backbone: %w", named(err))
 	}
 	return nil
 }

@@ -911,8 +911,8 @@ check is held to the contract before the policy is accepted; see
 | `SEAGULL_QUERY_API_TLS_CERT` | required | server certificate |
 | `SEAGULL_QUERY_API_TLS_KEY` | required | server private key |
 | `SEAGULL_QUERY_API_CALLER_CA` | required | the authority that signs a caller's certificate |
-| `SEAGULL_QUERY_API_POLICY` | required | the policy `control-api` decides by, which decides every hunt: the subject of the caller's certificate, `events:read` or `detections:read`, and the tenants it may read; read at startup |
-| `SEAGULL_QUERY_API_WINDOW` | `720h` | the widest stretch of time a query may ask about |
+| `SEAGULL_QUERY_API_POLICY` | required | the policy `control-api` decides by, which decides every hunt and every listing: the subject of the caller's certificate, `events:read` or `detections:read` for a hunt, `inventory:read` or `vulnerabilities:read` for a listing, and the tenants it may read; read at startup |
+| `SEAGULL_QUERY_API_WINDOW` | `720h` | the widest stretch of time a hunt may ask about; a listing asks about what is held now and has no window |
 | `SEAGULL_QUERY_API_PAGE` | `50` | records in a page when the caller asks for no limit |
 | `SEAGULL_QUERY_API_PAGE_MAX` | `500` | ceiling on the page a caller may ask for |
 | `SEAGULL_QUERY_API_READ_BUDGET` | `15s` | how long one read may run in the store |
@@ -1371,6 +1371,7 @@ A permission is the platform's or a tenant's:
 | Permission | Whose | What it decides |
 |---|---|---|
 | `events:read`, `detections:read` | tenant | hunting, within the tenants of the binding |
+| `inventory:read` | tenant | listing the assets of a tenant, what each holds and how old that is, on `query-api` |
 | `alerts:read`, `alerts:write`, `incidents:read`, `incidents:write` | tenant | reading and working the alerts and incidents of a tenant |
 | `alerts:delete`, `incidents:delete` | tenant | acting on one somebody else holds |
 | `agents:read`, `agents:write` | tenant | the registry of a tenant: registering an agent, binding its identity, its policy, the release assigned to it and its rollout |
@@ -1378,7 +1379,7 @@ A permission is the platform's or a tenant's:
 | `rulesets:write` | platform | publishing and activating the ruleset every tenant is detected by |
 | `sessions:read`, `sessions:delete` | platform | listing and ending the sessions of another subject; a caller lists and ends its own without either |
 | `releases:write` | platform | publishing an update root, a catalog and a package |
-| `vulnerabilities:read`, `vulnerabilities:write` | tenant | reading what people decided about the vulnerabilities of a tenant, and recording and withdrawing a disposition there |
+| `vulnerabilities:read`, `vulnerabilities:write` | tenant | reading what people decided about the vulnerabilities of a tenant, and recording and withdrawing a disposition there; on `query-api`, listing a tenant's findings, their history and how each asset was last assessed, and reading the advisories they cite |
 
 Every other pairing of a resource and an action is declared, and whose it is
 is said in `internal/authz/scope.go`, though no route asks for it yet;

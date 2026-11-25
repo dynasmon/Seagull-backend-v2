@@ -1,5 +1,9 @@
 # 43. A record keeps apart what one identity would fold: two versions a manager holds side by side are two items, and so are two accounts of one uid
 
+> Amended by [ADR 59](0059-the-read-plane-lists-what-an-asset-has-and-what-is-wrong-with-it.md):
+> a reader lists instances, grouping the rows that say the same thing by what
+> tells two instances apart.
+
 ## Context
 
 [ADR 27](0027-inventory-is-a-record-kind-of-its-own.md) identified a package by

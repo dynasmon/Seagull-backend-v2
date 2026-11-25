@@ -204,6 +204,7 @@ var resources = map[authz.Resource]controlv1.Resource{
 	authz.Sessions:   controlv1.Resource_RESOURCE_SESSIONS,
 	authz.Releases:   controlv1.Resource_RESOURCE_RELEASES,
 
+	authz.Inventory:       controlv1.Resource_RESOURCE_INVENTORY,
 	authz.Vulnerabilities: controlv1.Resource_RESOURCE_VULNERABILITIES,
 }
 

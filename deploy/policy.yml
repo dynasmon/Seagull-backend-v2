@@ -14,6 +14,7 @@ roles:
       - alerts:read
       - incidents:read
       - agents:read
+      - inventory:read
       - vulnerabilities:read
 
   - name: responder
@@ -26,6 +27,7 @@ roles:
       - incidents:read
       - incidents:write
       - agents:read
+      - inventory:read
       - vulnerabilities:read
       - vulnerabilities:write
 
@@ -51,6 +53,7 @@ roles:
       - incidents:delete
       - incidents:read
       - incidents:write
+      - inventory:read
       - rulesets:read
       - vulnerabilities:read
       - vulnerabilities:write
@@ -69,6 +72,7 @@ roles:
       - incidents:delete
       - incidents:read
       - incidents:write
+      - inventory:read
       - policies:read
       - releases:write
       - rulesets:read

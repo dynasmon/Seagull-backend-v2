@@ -105,6 +105,29 @@ func TestATenantBindingCarryingAPlatformPermissionIsRefused(t *testing.T) {
 	}
 }
 
+// What an asset has belongs to the tenant the asset reports into, as its
+// telemetry does, so reading it is granted inside the tenants a binding lists.
+func TestWhatAnAssetHasIsReadInsideTheTenantsABindingLists(t *testing.T) {
+	read, err := authz.ParsePermission("inventory:read")
+	if err != nil {
+		t.Fatalf("a policy cannot grant reading an inventory: %v", err)
+	}
+	compiled, err := authz.Compile(
+		[]authz.Role{role(t, "inventory-reader", read.String())},
+		[]authz.Binding{binding(t, "alice", authz.Tenant, []string{"inventory-reader"}, []string{"acme"})},
+	)
+	if err != nil {
+		t.Fatalf("a binding of one tenant was refused inventory:read: %v", err)
+	}
+	alice, err := compiled.Grant("alice")
+	if err != nil {
+		t.Fatalf("grant for alice: %v", err)
+	}
+	if !alice.DecideWithin(read, "acme").Allowed() || alice.DecideWithin(read, "globex").Allowed() {
+		t.Error("inventory:read does not reach exactly the tenants the binding lists")
+	}
+}
+
 func TestEveryPlatformPermissionIsRefusedToATenantBinding(t *testing.T) {
 	for _, resource := range authz.Resources() {
 		for _, action := range authz.Actions() {

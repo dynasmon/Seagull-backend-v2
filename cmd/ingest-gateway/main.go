@@ -34,6 +34,9 @@ func gateway(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	denials := broker.NewDenials(platform.Metrics())
+	settings.security = settings.security.Observed(denials)
+	platform.Health().Register("backbone-access", denials.Check)
 
 	material, err := tlsx.NewMaterial(settings.certificateFile, settings.keyFile, settings.agentCAFile)
 	if err != nil {

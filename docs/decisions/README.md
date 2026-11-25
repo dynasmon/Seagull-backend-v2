@@ -62,3 +62,4 @@ rediscovered by reading the code.
 - [56. A finding about an agent is a record of its own, judged only while the platform listens](0056-a-finding-about-an-agent-is-a-record-of-its-own-judged-only-while-the-platform-listens.md)
 - [57. A place is a run: a copy reports a sequence another run already holds, a shared identity is two installations heard in turn, and a renewal is refused before it is signed](0057-a-place-is-a-run-and-a-renewal-is-refused-before-it-is-signed.md)
 - [58. A listener admits an agent only on the certificate in force, and tolerates the one a renewal replaced for a declared while once it learns of the renewal](0058-a-listener-admits-an-agent-only-on-the-certificate-in-force.md)
+- [59. The read plane lists what an asset has and what is wrong with it, within the scope a hunt is answered in, and what an asset currently has is written once](0059-the-read-plane-lists-what-an-asset-has-and-what-is-wrong-with-it.md)

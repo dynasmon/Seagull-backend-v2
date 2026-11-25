@@ -14,6 +14,10 @@
 > the reverse lookup left below to BE-036 is `asset_package_holders`, written with
 > the package rows, one row per name a distribution's advisories may give a
 > package; it says where to look, and `asset_inventory` says what is there.
+> Amended by [ADR 59](0059-the-read-plane-lists-what-an-asset-has-and-what-is-wrong-with-it.md):
+> the read route is `query-api`'s, and what is current is one condition the
+> matcher and the read plane both ask through, under which every item of a kind
+> never enumerated in full is current.
 
 > Corrected: `Seagull-agent-v2` sends inventory, so "No agent" below no longer
 > holds. Its `inventory` module takes complete snapshots of the operating system,

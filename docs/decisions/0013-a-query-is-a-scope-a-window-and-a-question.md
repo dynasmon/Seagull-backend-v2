@@ -11,6 +11,11 @@
 > subject, with `events:read` or `detections:read` for the dataset asked; the
 > certificate's organisation authorises nothing.
 
+> Amended by [ADR 59](0059-the-read-plane-lists-what-an-asset-has-and-what-is-wrong-with-it.md):
+> the read plane also lists what an asset has and what is wrong with it, with a
+> scope and a question and no window, under the same admission, cursor and
+> budget; its connection is one reader of the analytical store, not the only one.
+
 ## Context
 
 [ADR 12](0012-storage-is-owned-per-workload.md) made the store a materialisation

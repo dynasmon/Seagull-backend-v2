@@ -111,14 +111,30 @@ release the same way and never replaces a ruleset a person activated.
 
 ### Event hunting
 
-The query plane holds the only read connection to the store, consumes no topic
-and writes nothing. A query is a scope, a window and a question, and only the
-last comes from the caller: the tenants a caller may read are derived rather
-than requested, so a question cannot widen its own answer. They are the tenants
-the control plane's policy grants the subject of the caller's certificate, which
-must also be granted `events:read` or `detections:read` for what it asks; what
-the certificate's organisation names authorises nothing
+The query plane consumes no topic and writes nothing. A query is a scope, a
+window and a question, and only the last comes from the caller: the tenants a
+caller may read are derived rather than requested, so a question cannot widen
+its own answer. They are the tenants the control plane's policy grants the
+subject of the caller's certificate, which must also be granted `events:read` or
+`detections:read` for what it asks; what the certificate's organisation names
+authorises nothing
 ([ADR 47](docs/decisions/0047-the-query-plane-decides-by-the-policy-and-a-certificate-organisation-authorises-nothing.md)).
+
+### What an asset has and what is wrong with it
+
+The same plane lists, through the same admission, scope, budget and signed
+cursor: an estate's assets with how old each kind of their inventory is, the
+items of one kind an asset holds now or every instance of one name it was seen
+with, the findings of a tenant where each stands, a finding's history, how each
+asset was last assessed whole, and every version of the advisories findings cite
+([ADR 59](docs/decisions/0059-the-read-plane-lists-what-an-asset-has-and-what-is-wrong-with-it.md)).
+An inventory is read under `inventory:read` and the rest under
+`vulnerabilities:read`. What an asset currently has is one condition the
+vulnerability matcher and the read plane both ask the store through: an item last
+seen at or after the newest full enumeration of its kind, and every item of a kind
+never enumerated in full. An open finding older than its asset's newest whole
+assessment on fresh intelligence is one that assessment did not list, and is not
+listed.
 
 ### Access control
 
@@ -522,7 +538,7 @@ Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
 | `vulnerability-matcher` | Decides which packages of each asset are vulnerable from the inventory and advisory stores, read-only, and publishes the decisions to `security.findings`. It reads both streams alone in one loop, waits for each store's owner before reading it, and holds no internet access and no credential that writes. |
 | `finding-writer` | Keeps what the vulnerability matcher decided, one row per episode of a finding and one per evaluation of an asset, under a group and a quarantine of its own, so a findings store outage costs how current findings are and never a decision. |
 | `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry with how recently each agent reported and its posture, the fleet counted by liveness, the authority that signs an agent's certificate, the signed policies agents are handed, the signed catalog of releases agents may install with their packages, a renewal presented with a certificate a renewal had replaced, refused before anything is signed and published as a finding, the agent listener served only on the certificate in force, and what people decide about vulnerabilities instead of fixing them. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates and asking for their policy and their updates on a second one. |
-| `query-api` | The read plane, and the only reader of the analytical store. |
+| `query-api` | The read plane: hunts over events and detections, and listings of each asset's inventory and how old it is, its findings, their history, how it was last assessed and the advisories they cite, read only and within the tenants the policy grants. |
 | `backbone-migrator`, `store-migrator`, `control-migrator` | Apply the topic topology, the analytical schema and the relational schema, then exit. Nothing migrates on the way to serving traffic. |
 
 Dependencies point one way — `cmd` → capability → domain, with adapters plugged

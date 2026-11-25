@@ -16,6 +16,7 @@ type ServerOptions struct {
 	TLS             *tls.Config
 	Grants          Grants
 	Hunter          *Hunter
+	Lister          *Lister
 	Capacity        *Capacity
 	Limiter         *ratelimit.Limiter
 	Metrics         *Metrics
@@ -43,18 +44,19 @@ func NewServer(options ServerOptions) (*httpx.Server, error) {
 	}
 
 	mux := http.NewServeMux()
-	routes := map[string]struct {
+	routes := []struct {
 		route Dataset
 		path  string
 		name  string
 	}{
-		EventsRoute:     {Events, EventsRoute, "hunt_events"},
-		DetectionsRoute: {Detections, DetectionsRoute, "hunt_detections"},
+		{Events, EventsRoute, "hunt_events"},
+		{Detections, DetectionsRoute, "hunt_detections"},
 	}
 	for _, entry := range routes {
 		handler, err := NewHandler(entry.route, HandlerOptions{
 			Grants:       options.Grants,
 			Hunter:       options.Hunter,
+			Lister:       options.Lister,
 			Capacity:     options.Capacity,
 			Limiter:      options.Limiter,
 			Metrics:      options.Metrics,

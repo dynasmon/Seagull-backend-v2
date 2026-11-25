@@ -79,35 +79,24 @@ func (r *MatchingReader) VerifySchema(ctx context.Context) error {
 	return nil
 }
 
-// Current is the inventory's own rule: an item at or after the newest full
-// scan of its kind, or any item of a kind never scanned in full.
+// What is current is the inventory's own rule, read through currentAgainst.
 func (r *MatchingReader) Asset(ctx context.Context, asset matching.Asset) (finding.Asset, bool, error) {
-	kinds := []any{asset.TenantID, asset.AgentID, packageKind, systemKind}
-	lines := map[string]finding.Scan{}
-	scans, err := r.connection.Query(ctx,
-		"SELECT kind, max(scanned_at), argMax(record_id, scanned_at) FROM "+scanTable+
-			" WHERE tenant_id = ? AND agent_id = ? AND kind IN (?, ?) GROUP BY kind", kinds...)
+	kinds := []string{packageKind, systemKind}
+	enumerated, err := enumerations(ctx, r.connection, []string{asset.TenantID}, asset.AgentID, kinds)
 	if err != nil {
-		return finding.Asset{}, false, fmt.Errorf("read the scans of agent %s: %w", asset.AgentID, err)
+		return finding.Asset{}, false, err
 	}
-	for scans.Next() {
-		var kind string
-		var line finding.Scan
-		if err := scans.Scan(&kind, &line.ScannedAt, &line.RecordID); err != nil {
-			_ = scans.Close()
-			return finding.Asset{}, false, fmt.Errorf("read a scan of agent %s: %w", asset.AgentID, err)
-		}
-		line.ScannedAt = line.ScannedAt.UTC()
-		lines[kind] = line
-	}
-	if err := closed(scans); err != nil {
-		return finding.Asset{}, false, fmt.Errorf("read the scans of agent %s: %w", asset.AgentID, err)
+	lines := map[string]finding.Scan{}
+	for kind, line := range enumerated {
+		lines[kind] = finding.Scan{RecordID: line.recordID, ScannedAt: line.scannedAt}
 	}
 
+	current, arguments := currentAgainst(kinds, enumerated)
 	rows, err := r.connection.Query(ctx, "SELECT kind, item_id, record_id, last_seen,"+
 		" os_name, os_version, os_build, os_platform, os_codename, os_family,"+
 		" package_name, package_version, package_architecture, package_manager, package_source, package_vendor, package_size_bytes, package_installed_at"+
-		" FROM "+inventoryTable+" FINAL WHERE tenant_id = ? AND agent_id = ? AND kind IN (?, ?) ORDER BY kind, item_id", kinds...)
+		" FROM "+inventoryTable+" FINAL WHERE tenant_id = ? AND agent_id = ? AND "+current+" ORDER BY kind, item_id",
+		append([]any{asset.TenantID, asset.AgentID}, arguments...)...)
 	if err != nil {
 		return finding.Asset{}, false, fmt.Errorf("read the inventory of agent %s: %w", asset.AgentID, err)
 	}
@@ -128,9 +117,6 @@ func (r *MatchingReader) Asset(ctx context.Context, asset matching.Asset) (findi
 			return finding.Asset{}, false, fmt.Errorf("read an item of agent %s: %w", asset.AgentID, err)
 		}
 		item.LastSeen = item.LastSeen.UTC()
-		if line, scanned := lines[kind]; scanned && item.LastSeen.Before(line.ScannedAt) {
-			continue
-		}
 		found = true
 		held.AsOf = latest(held.AsOf, item.LastSeen)
 		if kind == systemKind {

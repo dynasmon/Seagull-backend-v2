@@ -6,6 +6,30 @@
 [![Store](https://img.shields.io/badge/store-ClickHouse-FFCC01.svg)](internal/clickhouse)
 [![Contracts](https://img.shields.io/badge/contracts-Seagull--contracts-00A6A6.svg)](https://github.com/dynasmon/Seagull-contracts)
 
+<!-- progress:start -->
+## Backlog progress
+
+**59% built, 41% to go** — of the backend backlog's 101 cards, 56 are done, 8 partial and 37 open; 2 more were closed by decision. Updated on 2026-11-25.
+
+🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟨🟨⬜⬜⬜⬜⬜⬜⬜
+
+| Stage | Cards | Built |
+| --- | --- | --- |
+| Foundation | 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟨 | 98% |
+| Correctness | 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜ | 88% |
+| Core release | 🟩🟩🟩🟩 | 100% |
+| Inventory and vulnerability | 🟩🟩 | 100% |
+| Fleet visibility | 🟩🟩🟨 | 83% |
+| Production | 🟩🟨🟨🟨🟨⬜⬜⬜⬜⬜⬜⬜⬜⬜ | 21% |
+| Linux SIEM | ⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜ | 0% |
+| SOC and operator identity | ⬜⬜⬜⬜⬜ | 0% |
+| Fleet management | 🟩🟨🟨 | 67% |
+| Response (XDR) | ⬜⬜ | 0% |
+| Breadth | ⬜⬜⬜⬜⬜⬜⬜⬜ | 0% |
+
+🟩 done · 🟨 partial, counted as half · ⬜ open. Each square of the table is a card. The count is not an estimate of effort: the open cards hold the largest pieces — highly available stores, disaster recovery, federated sign-in, four new event classes, third-party connectors and response — so what is left takes longer than its share of cards.
+<!-- progress:end -->
+
 Seagull v2 is the backend of an open security operations platform, rebuilt as a
 set of small processes around a durable event backbone. Telemetry becomes
 durable before anything else happens to it; every capability downstream is a

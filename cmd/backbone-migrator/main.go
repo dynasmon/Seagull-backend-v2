@@ -62,5 +62,23 @@ func provision(ctx context.Context) error {
 		slog.Int("changes", len(changed)),
 	)
 	broker.LogDurability(ctx, logger, settings.topology.Topics()...)
+
+	if !settings.security.Authenticated() {
+		logger.Warn("backbone_principals_not_applied", slog.String("reason", "the backbone authenticates nobody"))
+		return nil
+	}
+	grants := settings.topology.Grants()
+	secrets, err := passwords(settings.principals, grants)
+	if err != nil {
+		return err
+	}
+	granted, err := provisioner.ApplyGrants(ctx, grants, secrets)
+	for _, change := range granted {
+		logger.Info("backbone_principals_changed", slog.String("change", change))
+	}
+	if err != nil {
+		return err
+	}
+	logger.Info("backbone_principals_current", slog.Int("components", len(grants)), slog.Int("changes", len(granted)))
 	return nil
 }

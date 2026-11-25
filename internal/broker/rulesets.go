@@ -105,7 +105,7 @@ func keyed(topic, key string, record *rulesetv1.Record) (*kgo.Record, error) {
 
 func (r *Rulesets) Ping(ctx context.Context) error {
 	if err := r.client.Ping(ctx); err != nil {
-		return fmt.Errorf("reach the backbone: %w", err)
+		return fmt.Errorf("reach the backbone: %w", named(err))
 	}
 	return nil
 }

@@ -134,6 +134,17 @@ func KindName(kind inventoryv1.Kind) string {
 	return strings.ToLower(strings.TrimPrefix(name, "KIND_"))
 }
 
+func KindOf(name string) (inventoryv1.Kind, bool) {
+	if name == "" || name != strings.ToLower(name) {
+		return inventoryv1.Kind_KIND_UNSPECIFIED, false
+	}
+	value, declared := inventoryv1.Kind_value["KIND_"+strings.ToUpper(name)]
+	if !declared || value == int32(inventoryv1.Kind_KIND_UNSPECIFIED) {
+		return inventoryv1.Kind_KIND_UNSPECIFIED, false
+	}
+	return inventoryv1.Kind(value), true
+}
+
 func ModeName(mode inventoryv1.Mode) string {
 	name, declared := inventoryv1.Mode_name[int32(mode)]
 	if !declared {

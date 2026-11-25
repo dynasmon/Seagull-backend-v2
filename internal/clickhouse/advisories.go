@@ -104,6 +104,33 @@ func advisoryValues(row advisorystore.AdvisoryRow) []any {
 	}
 }
 
+func advisoryPointers(row *advisorystore.AdvisoryRow) []any {
+	return []any{
+		&row.Source,
+		&row.AdvisoryID,
+		&row.Modified,
+		&row.Normalization,
+		&row.SchemaVersion,
+		&row.Published,
+		&row.Withdrawn,
+		&row.Aliases,
+		&row.Upstream,
+		&row.Related,
+		&row.Summary,
+		&row.Details,
+		&row.SeverityTypes,
+		&row.SeverityScores,
+		&row.SeverityAssessors,
+		&row.Affected,
+		&row.Feed,
+		&row.FeedVersion,
+		&row.Location,
+		&row.FetchedAt,
+		&row.Digest,
+		&row.Format,
+	}
+}
+
 func affectedValues(row advisorystore.AffectedRow) []any {
 	ranges := row.EventRanges
 	if ranges == nil {
@@ -126,6 +153,27 @@ func affectedValues(row advisorystore.AffectedRow) []any {
 		listed(row.SeverityScores),
 		listed(row.SeverityAssessors),
 		row.Withdrawn,
+	}
+}
+
+func affectedPointers(row *advisorystore.AffectedRow) []any {
+	return []any{
+		&row.Ecosystem,
+		&row.Package,
+		&row.Source,
+		&row.AdvisoryID,
+		&row.Modified,
+		&row.Normalization,
+		&row.Entry,
+		&row.RangeTypes,
+		&row.EventRanges,
+		&row.EventKinds,
+		&row.EventVersions,
+		&row.Versions,
+		&row.SeverityTypes,
+		&row.SeverityScores,
+		&row.SeverityAssessors,
+		&row.Withdrawn,
 	}
 }
 

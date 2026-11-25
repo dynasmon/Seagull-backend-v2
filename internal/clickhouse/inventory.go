@@ -205,6 +205,92 @@ func inventoryValues(row inventorystore.Row) []any {
 	}
 }
 
+// The same columns in the same order, to read a row back out.
+func inventoryPointers(row *inventorystore.Row) []any {
+	return []any{
+		&row.TenantID,
+		&row.AgentID,
+		&row.Kind,
+		&row.ItemID,
+
+		&row.LastSeen,
+		&row.Mode,
+		&row.RecordID,
+		&row.SchemaVersion,
+
+		&row.HostHostname,
+		&row.HostIP,
+		&row.HostOS,
+		&row.HostArchitecture,
+
+		&row.Collector,
+		&row.Source,
+		&row.Sequence,
+
+		&row.Gateway,
+		&row.BatchID,
+		&row.IngestTime,
+
+		&row.OSName,
+		&row.OSVersion,
+		&row.OSBuild,
+		&row.OSPlatform,
+		&row.OSCodename,
+		&row.OSFamily,
+
+		&row.KernelName,
+		&row.KernelRelease,
+		&row.KernelVersion,
+		&row.KernelArchitecture,
+
+		&row.PackageName,
+		&row.PackageVersion,
+		&row.PackageArchitecture,
+		&row.PackageManager,
+		&row.PackageSource,
+		&row.PackageVendor,
+		&row.PackageSizeBytes,
+		&row.PackageInstalledAt,
+
+		&row.ServiceName,
+		&row.ServiceDisplayName,
+		&row.ServiceState,
+		&row.ServiceStartMode,
+		&row.ServicePath,
+
+		&row.InterfaceName,
+		&row.InterfaceMAC,
+		&row.InterfaceAddresses,
+		&row.InterfaceState,
+		&row.InterfaceMTU,
+		&row.InterfaceType,
+
+		&row.UserName,
+		&row.UserUID,
+		&row.UserGID,
+		&row.UserHome,
+		&row.UserShell,
+		&row.UserGroups,
+		&row.UserLastLogin,
+
+		&row.HardwareCPUName,
+		&row.HardwareCPUCores,
+		&row.HardwareCPUMHz,
+		&row.HardwareMemoryTotalBytes,
+		&row.HardwareSerial,
+		&row.HardwareVendor,
+		&row.HardwareModel,
+
+		&row.ProcessPID,
+		&row.ProcessParentPID,
+		&row.ProcessName,
+		&row.ProcessPath,
+		&row.ProcessCommandLine,
+		&row.ProcessUser,
+		&row.ProcessStartedAt,
+	}
+}
+
 func holderValues(holder inventorystore.Holder) []any {
 	return []any{
 		holder.Package,

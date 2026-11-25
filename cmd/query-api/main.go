@@ -28,10 +28,12 @@ func main() {
 	}
 }
 
-// The read plane. It holds the only read connection to the analytical store, it
-// consumes no topic and it changes nothing: an expensive question asked here
-// cannot slow the pipeline that is still admitting telemetry, and cannot reach
-// the surface an operator uses to act on what it finds.
+// The read plane. It holds one read connection to the analytical store, which
+// both its hunts and its listings of what assets have and what is wrong with
+// them are asked through; it consumes no topic and it changes nothing: an
+// expensive question asked here cannot slow the pipeline that is still admitting
+// telemetry, and cannot reach the surface an operator uses to act on what it
+// finds.
 func queryAPI(ctx context.Context) error {
 	settings, err := load(config.FromEnvironment())
 	if err != nil {
@@ -92,6 +94,17 @@ func queryAPI(ctx context.Context) error {
 		return err
 	}
 
+	lister, err := hunt.NewLister(hunt.ListerOptions{
+		Inventory:       store,
+		Vulnerabilities: store,
+		Compiler:        compiler,
+		Metrics:         instruments,
+		Logger:          platform.Logger(),
+	})
+	if err != nil {
+		return err
+	}
+
 	capacity, err := hunt.NewCapacity(settings.maxInflight)
 	if err != nil {
 		return err
@@ -114,6 +127,7 @@ func queryAPI(ctx context.Context) error {
 		TLS:             transport,
 		Grants:          policy,
 		Hunter:          hunter,
+		Lister:          lister,
 		Capacity:        capacity,
 		Limiter:         callers,
 		Metrics:         instruments,

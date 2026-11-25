@@ -8,30 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
-
 	"github.com/dynasmon/Seagull-backend-v2/internal/clickhouse"
 	"github.com/dynasmon/Seagull-backend-v2/internal/inventorystore"
 	"github.com/dynasmon/Seagull-backend-v2/tests/fixtures"
 	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 )
-
-// What an asset currently has, stated once: the items of a kind whose last_seen
-// is at or after the newest full enumeration of that kind. Every claim the card
-// makes about absence, deltas and late records is this query answering
-// differently, so the suite asks it rather than asking the writer.
-const currentItems = `
-	SELECT item.package_name, item.package_version
-	FROM asset_inventory AS item FINAL
-	INNER JOIN (
-		SELECT tenant_id, agent_id, kind, max(scanned_at) AS scanned_at
-		FROM asset_inventory_scans
-		WHERE tenant_id = ?
-		GROUP BY tenant_id, agent_id, kind
-	) AS scan
-	ON item.tenant_id = scan.tenant_id AND item.agent_id = scan.agent_id AND item.kind = scan.kind
-	WHERE item.tenant_id = ? AND item.last_seen >= scan.scanned_at
-	ORDER BY item.package_name`
 
 func migratedInventoryStore(t *testing.T, address string) *clickhouse.InventoryStore {
 	t.Helper()
@@ -83,32 +64,6 @@ func foldRecord(t *testing.T, store *clickhouse.InventoryStore, owner string, re
 	if err := store.Store(ctx, rows, inventorystore.Holders(rows), scans); err != nil {
 		t.Fatalf("fold the record: %v", err)
 	}
-}
-
-func current(t *testing.T, connection driver.Conn, owner string) map[string]string {
-	t.Helper()
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-
-	rows, err := connection.Query(ctx, currentItems, owner, owner)
-	if err != nil {
-		t.Fatalf("read the current inventory: %v", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	held := map[string]string{}
-	for rows.Next() {
-		var name, version string
-		if err := rows.Scan(&name, &version); err != nil {
-			t.Fatalf("read the current inventory: %v", err)
-		}
-		held[name] = version
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("read the current inventory: %v", err)
-	}
-	return held
 }
 
 func TestTheInventoryStoreKeepsEveryFieldAPackageCarries(t *testing.T) {
@@ -179,7 +134,7 @@ func TestAnUpgradeReplacesTheItemRatherThanAddingOne(t *testing.T) {
 	fold(t, store, owner, fixtures.PackageScan{AgentID: "web-01", At: at.Add(time.Hour),
 		Packages: []fixtures.Installed{{Name: "curl", Version: "8.6.0", Architecture: "amd64", Manager: "dpkg"}}})
 
-	held := current(t, inspector(t, address), owner)
+	held := current(t, address, owner, "web-01")
 	if len(held) != 1 || held["curl"] != "8.6.0" {
 		t.Fatalf("the asset holds %v, want one curl at 8.6.0", held)
 	}
@@ -196,7 +151,7 @@ func TestARecordThatArrivesLateNeverOverwritesANewerOne(t *testing.T) {
 	fold(t, store, owner, fixtures.PackageScan{AgentID: "web-01", At: at,
 		Packages: []fixtures.Installed{{Name: "curl", Version: "8.5.0", Architecture: "amd64", Manager: "dpkg"}}})
 
-	held := current(t, inspector(t, address), owner)
+	held := current(t, address, owner, "web-01")
 	if held["curl"] != "8.6.0" {
 		t.Fatalf("a late record put curl back to %q", held["curl"])
 	}
@@ -219,7 +174,7 @@ func TestAnItemTheNewestSnapshotDoesNotNameStopsBeingCurrent(t *testing.T) {
 		{Name: "curl", Version: "8.5.0", Architecture: "amd64", Manager: "dpkg"},
 	}})
 
-	held := current(t, connection, owner)
+	held := current(t, address, owner, "web-01")
 	if len(held) != 1 || held["curl"] == "" {
 		t.Fatalf("the asset holds %v, want curl alone", held)
 	}
@@ -258,7 +213,7 @@ func TestADeltaRefreshesWhatItNamesWithoutRetiringAnythingElse(t *testing.T) {
 		},
 	})
 
-	held := current(t, inspector(t, address), owner)
+	held := current(t, address, owner, "web-01")
 	if len(held) != 3 {
 		t.Fatalf("the asset holds %v, want curl, openssl and jq", held)
 	}
@@ -286,7 +241,7 @@ func TestAnEmptySnapshotRetiresEverything(t *testing.T) {
 		AgentID: "web-01", At: at.Add(time.Hour), Packages: []fixtures.Installed{},
 	})
 
-	if held := current(t, inspector(t, address), owner); len(held) != 0 {
+	if held := current(t, address, owner, "web-01"); len(held) != 0 {
 		t.Fatalf("an empty snapshot left %v installed", held)
 	}
 }

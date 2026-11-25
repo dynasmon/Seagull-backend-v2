@@ -16,6 +16,8 @@ SCANNER := SEAGULL_RUNTIME_USER="$$(id -u):$$(id -g)" $(COMPOSE_TEST) run --rm -
 TEST_BROKERS ?= 127.0.0.1:19092
 TEST_EVENT_STORE ?= 127.0.0.1:19000
 TEST_ALERT_STORE ?= 127.0.0.1:15432
+TEST_SECURED_BROKERS ?= 127.0.0.1:19093
+SECURED_BACKBONE := .local/secured-backbone
 
 .PHONY: help fmt fmt-check vet mod-check lint test test-race test-integration \
         test-load test-alerts record-agent-answers record-starting-rules bench build images scan-images \
@@ -80,10 +82,18 @@ test-race:
 	$(GO) test -race ./internal/... ./tests/...
 
 test-integration:
-	$(COMPOSE_TEST) up -d --wait redpanda clickhouse postgres
+	@mkdir -p $(SECURED_BACKBONE) && chmod 700 $(SECURED_BACKBONE)
+	@[ -s $(SECURED_BACKBONE)/administrator ] || \
+	  (umask 077 && head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > $(SECURED_BACKBONE)/administrator)
+	SEAGULL_TEST_SECURED_PASSWORD="$$(cat $(SECURED_BACKBONE)/administrator)" \
+	  $(COMPOSE_TEST) up -d --wait redpanda clickhouse postgres redpanda-secured
+	$(COMPOSE_TEST) exec -T redpanda-secured cat /tmp/tls/authority.pem > $(SECURED_BACKBONE)/authority.pem
 	SEAGULL_TEST_BROKERS=$(TEST_BROKERS) \
 	SEAGULL_TEST_EVENT_STORE=$(TEST_EVENT_STORE) \
 	SEAGULL_TEST_ALERT_STORE=$(TEST_ALERT_STORE) \
+	SEAGULL_TEST_SECURED_BROKERS=$(TEST_SECURED_BROKERS) \
+	SEAGULL_TEST_SECURED_AUTHORITY=$(CURDIR)/$(SECURED_BACKBONE)/authority.pem \
+	SEAGULL_TEST_SECURED_PASSWORD_FILE=$(CURDIR)/$(SECURED_BACKBONE)/administrator \
 	  $(GO) test -tags integration -count=1 ./tests/integration/...
 
 test-load:

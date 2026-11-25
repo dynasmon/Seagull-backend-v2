@@ -88,8 +88,12 @@ func TestASecuredBackboneCarriesItsOptionsIntoEveryClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a secured backbone was refused: %v", err)
 	}
-	if len(options) != 2 {
-		t.Errorf("a secured backbone contributes %d client options, want tls and a mechanism", len(options))
+	plain, err := Security{}.options()
+	if err != nil {
+		t.Fatalf("a development backbone was refused: %v", err)
+	}
+	if len(options) != len(plain)+2 {
+		t.Errorf("a secured backbone contributes %d client options beyond a plain one, want tls and a mechanism", len(options)-len(plain))
 	}
 	if !held.Encrypted() || !held.Authenticated() {
 		t.Error("a secured backbone did not report itself as secured")

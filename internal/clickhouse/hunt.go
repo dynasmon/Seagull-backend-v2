@@ -3,11 +3,9 @@ package clickhouse
 import (
 	"context"
 	"fmt"
-	"math"
 	"slices"
 	"strings"
 
-	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/detectionstore"
@@ -171,10 +169,24 @@ func (h *Hunter) VerifySchema(ctx context.Context) error {
 		return fmt.Errorf("the store is missing %d migration(s): %s — run store-migrator",
 			len(outstanding), strings.Join(names, ", "))
 	}
-	if err := columnsPresent(ctx, h.connection, h.database, table, storedColumns); err != nil {
-		return err
+	for _, read := range []struct {
+		table   string
+		columns []string
+	}{
+		{table, storedColumns},
+		{detectionTable, detectionColumns},
+		{inventoryTable, inventoryColumns},
+		{scanTable, scanColumns},
+		{findingTable, findingColumns},
+		{findingAssessmentTable, findingAssessmentColumns},
+		{advisoryTable, advisoryColumns},
+		{affectedTable, affectedColumns},
+	} {
+		if err := columnsPresent(ctx, h.connection, h.database, read.table, read.columns); err != nil {
+			return err
+		}
 	}
-	return columnsPresent(ctx, h.connection, h.database, detectionTable, detectionColumns)
+	return nil
 }
 
 func (h *Hunter) Events(ctx context.Context, query hunt.Query) ([]*eventv1.Event, error) {
@@ -203,23 +215,13 @@ func (h *Hunter) Detections(ctx context.Context, query hunt.Query) ([]*detection
 	return found, err
 }
 
-// The budget travels with the query rather than with the connection, so one
-// caller cannot spend another caller's allowance, and the store stops the read
-// itself instead of being abandoned mid-scan.
 func (h *Hunter) read(ctx context.Context, query hunt.Query, take func(driver.Rows) error) error {
 	statement, arguments, err := compile(query)
 	if err != nil {
 		return err
 	}
 
-	budgeted := clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{
-		"max_execution_time":    int(math.Ceil(query.Timeout().Seconds())),
-		"timeout_overflow_mode": "throw",
-		"max_rows_to_read":      query.MaxRowsRead(),
-		"read_overflow_mode":    "throw",
-	}))
-
-	rows, err := h.connection.Query(budgeted, statement, arguments...)
+	rows, err := h.connection.Query(budgeted(ctx, query.Timeout(), query.MaxRowsRead()), statement, arguments...)
 	if err != nil {
 		return fmt.Errorf("ask the store: %w", err)
 	}

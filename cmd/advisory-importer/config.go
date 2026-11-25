@@ -45,7 +45,7 @@ func load(parser *config.Parser) (configuration, error) {
 
 		brokers:  parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
 		topology: broker.LoadTopology(parser),
-		security: broker.LoadSecurity(parser),
+		security: broker.LoadSecurity(parser, serviceName),
 
 		feeds:     parser.RequiredList("SEAGULL_ADVISORY_FEEDS"),
 		export:    parser.String("SEAGULL_ADVISORY_OSV_EXPORT", "https://osv-vulnerabilities.storage.googleapis.com"),

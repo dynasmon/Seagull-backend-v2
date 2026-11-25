@@ -37,8 +37,8 @@ type Security struct {
 	Password  config.Secret
 }
 
-func LoadSecurity(parser *config.Parser) Security {
-	return Security{
+func LoadSecurity(parser *config.Parser, component string) Security {
+	security := Security{
 		TLS:        parser.Bool("SEAGULL_BACKBONE_TLS", true),
 		CAFile:     parser.FilePath("SEAGULL_BACKBONE_TLS_CA", ""),
 		CertFile:   parser.FilePath("SEAGULL_BACKBONE_TLS_CERT", ""),
@@ -49,6 +49,10 @@ func LoadSecurity(parser *config.Parser) Security {
 		User:      parser.String("SEAGULL_BACKBONE_SASL_USER", ""),
 		Password:  parser.Secret("SEAGULL_BACKBONE_SASL_PASSWORD"),
 	}
+	if security.Authenticated() && security.User == "" {
+		security.User = component
+	}
+	return security
 }
 
 func (s Security) Encrypted() bool { return s.TLS }

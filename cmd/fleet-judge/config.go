@@ -37,7 +37,7 @@ func load(parser *config.Parser) (configuration, error) {
 
 		brokers:  parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
 		topology: broker.LoadTopology(parser),
-		security: broker.LoadSecurity(parser),
+		security: broker.LoadSecurity(parser, serviceName),
 
 		every:        parser.Duration("SEAGULL_FLEET_JUDGE_INTERVAL", 5*time.Second, time.Second, time.Minute),
 		staleAfter:   parser.Duration("SEAGULL_FLEET_JUDGE_STALE_AFTER", 30*time.Second, 2*time.Second, 10*time.Minute),

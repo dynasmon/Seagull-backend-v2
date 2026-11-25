@@ -32,7 +32,7 @@ func load(parser *config.Parser) (configuration, error) {
 
 		brokers:  parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
 		topology: broker.LoadTopology(parser),
-		security: broker.LoadSecurity(parser),
+		security: broker.LoadSecurity(parser, serviceName),
 
 		batchEvents:   parser.Int("SEAGULL_WRITER_BATCH_EVENTS", 5_000, 1, 100_000),
 		fetchMaxWait:  parser.Duration("SEAGULL_WRITER_FETCH_MAX_WAIT", time.Second, 10*time.Millisecond, time.Minute),

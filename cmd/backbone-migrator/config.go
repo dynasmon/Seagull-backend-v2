@@ -24,7 +24,7 @@ func load(parser *config.Parser) (configuration, error) {
 		logFormat: parser.Enum("SEAGULL_LOG_FORMAT", log.FormatJSON, log.FormatJSON, log.FormatText),
 		brokers:   parser.RequiredList("SEAGULL_BACKBONE_BROKERS"),
 		topology:  broker.LoadTopology(parser),
-		security:  broker.LoadSecurity(parser),
+		security:  broker.LoadSecurity(parser, serviceName),
 	}
 
 	return loaded, parser.Err()

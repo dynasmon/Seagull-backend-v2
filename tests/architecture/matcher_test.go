@@ -19,7 +19,7 @@ import (
 func TestTheMatcherConstructsNoWriterButTheFindingsPublisher(t *testing.T) {
 	allowed := map[string][]string{
 		"clickhouse": {"NewMatchingReader"},
-		"broker":     {"NewConsumer", "NewConsumerMetrics", "NewPositions", "NewFindings"},
+		"broker":     {"NewConsumer", "NewConsumerMetrics", "NewPositions", "NewFindings", "NewDenials"},
 	}
 	directory := filepath.Join(moduleRoot(t), "cmd", "vulnerability-matcher")
 	entries, err := os.ReadDir(directory)

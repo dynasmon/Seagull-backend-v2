@@ -234,13 +234,19 @@ func columnNames(body string) []string {
 	for _, line := range strings.Split(body, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if depth == 0 && trimmed != "" && !strings.HasPrefix(trimmed, "--") {
-			if fields := strings.Fields(trimmed); len(fields) > 1 && !computed(fields[2:]) {
+			if fields := strings.Fields(trimmed); len(fields) > 1 && !computed(fields[2:]) && !beside(fields[0]) {
 				columns = append(columns, identifier(strings.Trim(fields[0], ",")))
 			}
 		}
 		depth += strings.Count(line, "(") - strings.Count(line, ")")
 	}
 	return columns
+}
+
+// An index, a projection or a constraint is declared among the columns and is
+// none of them.
+func beside(name string) bool {
+	return strings.EqualFold(name, "INDEX") || strings.EqualFold(name, "PROJECTION") || strings.EqualFold(name, "CONSTRAINT")
 }
 
 func computed(definition []string) bool {

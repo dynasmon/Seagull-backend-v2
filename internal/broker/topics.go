@@ -16,6 +16,7 @@ import (
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentfinding"
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentstatus"
 	"github.com/dynasmon/Seagull-backend-v2/internal/assessment"
+	"github.com/dynasmon/Seagull-backend-v2/internal/audit"
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	"github.com/dynasmon/Seagull-backend-v2/internal/finding"
@@ -72,6 +73,8 @@ type Topology struct {
 	AgentFindingsQuarantine Topic
 	Gateways                Topic
 	Refusals                Topic
+	Audit                   Topic
+	AuditQuarantine         Topic
 }
 
 // Refused records and detections are both kept far longer than admitted events:
@@ -306,6 +309,28 @@ func LoadTopology(parser *config.Parser) Topology {
 			MinInSync:       minInSync,
 			Durability:      durability,
 			MaxMessageBytes: defaultCarriage,
+		},
+		Audit: Topic{
+			Name:            parser.String("SEAGULL_BACKBONE_AUDIT_TOPIC", "security.audit"),
+			Partitions:      int32(parser.Int("SEAGULL_BACKBONE_AUDIT_PARTITIONS", 3, 1, 1_000)),
+			Replicas:        replicas,
+			Retention:       parser.Duration("SEAGULL_BACKBONE_AUDIT_RETENTION", 30*24*time.Hour, 7*24*time.Hour, 10*365*24*time.Hour),
+			Cleanup:         cleanupDelete,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			Durability:      durability,
+			MaxMessageBytes: carrying(audit.MaxEventBytes),
+		},
+		AuditQuarantine: Topic{
+			Name:            parser.String("SEAGULL_BACKBONE_AUDIT_QUARANTINE_TOPIC", "security.audit.quarantine"),
+			Partitions:      int32(parser.Int("SEAGULL_BACKBONE_AUDIT_QUARANTINE_PARTITIONS", 1, 1, 1_000)),
+			Replicas:        replicas,
+			Retention:       parser.Duration("SEAGULL_BACKBONE_AUDIT_QUARANTINE_RETENTION", 30*24*time.Hour, time.Hour, 10*365*24*time.Hour),
+			Cleanup:         cleanupDelete,
+			Compression:     compressionZstd,
+			MinInSync:       minInSync,
+			Durability:      durability,
+			MaxMessageBytes: quarantining(carrying(audit.MaxEventBytes)),
 		},
 	}
 }

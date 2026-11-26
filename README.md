@@ -9,25 +9,23 @@
 <!-- progress:start -->
 ## Backlog progress
 
-**60% built, 40% to go** — of the backend backlog's 101 cards, 57 are done, 8 partial and 36 open; 2 more were closed by decision. Updated on 2026-11-25.
+**40% to go** · 60% built · updated on 2026-11-26
 
-🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟨🟨⬜⬜⬜⬜⬜⬜⬜
+<img src="https://geps.dev/progress/60?label=40%25%20to%20go" width="100%" alt="60% built, 40% to go">
 
-| Stage | Cards | Built |
-| --- | --- | --- |
-| Foundation | 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟨 | 98% |
-| Correctness | 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜ | 94% |
-| Core release | 🟩🟩🟩🟩 | 100% |
-| Inventory and vulnerability | 🟩🟩 | 100% |
-| Fleet visibility | 🟩🟩🟨 | 83% |
-| Production | 🟩🟨🟨🟨🟨⬜⬜⬜⬜⬜⬜⬜⬜⬜ | 21% |
-| Linux SIEM | ⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜ | 0% |
-| SOC and operator identity | ⬜⬜⬜⬜⬜ | 0% |
-| Fleet management | 🟩🟨🟨 | 67% |
-| Response (XDR) | ⬜⬜ | 0% |
-| Breadth | ⬜⬜⬜⬜⬜⬜⬜⬜ | 0% |
+The bar counts the backend backlog's cards, a partial card as half. The cards left are the larger ones.
 
-🟩 done · 🟨 partial, counted as half · ⬜ open. Each square of the table is a card. The count is not an estimate of effort: the open cards hold the largest pieces — highly available stores, disaster recovery, federated sign-in, four new event classes, third-party connectors and response — so what is left takes longer than its share of cards.
+### What is left
+
+- **Foundation** — Test harness and backtesting *(partial)*
+- **Correctness** — Judge a Store Rebuild by What It Promises a Writer
+- **Fleet visibility** — Detect Fleet Integrity Anomalies: Silence, Duplicate Identity and Tampering *(partial)*
+- **Production** — Security Audit Log · Observability Contract per Process *(partial)* · Failure Recovery and Chaos Integration Suite *(partial)* · Backend Soak and Load Testing *(partial)* · Production Readiness Gate *(partial)* · Bootstrap Enrollment With Single-Use Tokens · Persistent Sessions and a Live Policy · Reference Deployment and Its Security Posture · Highly Available Stores · Backup, Restore and Disaster Recovery · Retention, Tiering and Data Subject Requests · Tenant Lifecycle and Quotas · Bound What an Update Package Costs the Control Plane
+- **Linux SIEM** — Decide How a New Event Class Enters the Platform · Process Execution Events · Privilege and Account Management Events · File Integrity Events · Network Connection and DNS Events · Rule Language: Address Ranges, Distinct Counts and Reference Lists · Correlate Across Agents by Repartitioning on the Group Key · Backtest a Ruleset Against Recorded Telemetry · Detection Content Library and ATT&CK Coverage · Hunt Analytics and Investigative Indexes · Alert Tuning as a Published, Audited Document
+- **SOC and operator identity** — Federated Operator Identity and the Browser-Facing API · Service Accounts and API Tokens for Integrations · Case Management · Notifications and Outbound Integrations · Saved and Scheduled Searches
+- **Fleet management** — Signed Agent Policy Service *(partial)* · Agent Release Distribution and Staged Rollout *(partial)*
+- **Response (XDR)** — Server-to-Agent Command Channel · Response Action Policy and Catalogue
+- **Breadth** — Extend Vulnerability Coverage Where an Asset Can Be Placed · Ingest Third-Party Logs Through a Connector Gateway · Pull Connectors for Cloud and Identity Providers · Sequences Across Event Classes · Enrichment and Threat Intelligence · Behavioral Baselines (UEBA) · Rare Process per Host · Peer-Group Deviation
 <!-- progress:end -->
 
 Seagull v2 is the backend of an open security operations platform, rebuilt as a

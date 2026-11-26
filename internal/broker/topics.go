@@ -347,6 +347,7 @@ func (t Topology) Topics() []Topic {
 		t.Findings, t.FindingsQuarantine,
 		t.AgentFindings, t.AgentFindingsQuarantine,
 		t.Gateways, t.Refusals,
+		t.Audit, t.AuditQuarantine,
 	}
 }
 

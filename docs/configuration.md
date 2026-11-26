@@ -184,6 +184,12 @@ capacity does not count, so a host is sized for it beside this setting. See
 | `SEAGULL_BACKBONE_REFUSALS_TOPIC` | `security.agents.refusals` | what every gateway refused of an agent's certificate, for the fleet judge |
 | `SEAGULL_BACKBONE_REFUSALS_PARTITIONS` | `3` | how far per-agent ordering spreads |
 | `SEAGULL_BACKBONE_REFUSALS_RETENTION` | `168h` | at least `48h`: the judge reads it whole whenever it starts, so it is kept longer than a judge is away |
+| `SEAGULL_BACKBONE_AUDIT_TOPIC` | `security.audit` | every audit event, keyed by the chain it belongs to: its tenant, or nothing for the platform's |
+| `SEAGULL_BACKBONE_AUDIT_PARTITIONS` | `3` | how far the chains spread; each chain is read from one partition |
+| `SEAGULL_BACKBONE_AUDIT_RETENTION` | `720h` | at least `168h`: an audit writer away for a week chains what it missed when it returns |
+| `SEAGULL_BACKBONE_AUDIT_QUARANTINE_TOPIC` | `security.audit.quarantine` | records the audit writer could not chain |
+| `SEAGULL_BACKBONE_AUDIT_QUARANTINE_PARTITIONS` | `1` | |
+| `SEAGULL_BACKBONE_AUDIT_QUARANTINE_RETENTION` | `720h` | |
 | `SEAGULL_BACKBONE_QUARANTINE_PARTITIONS` | `3` | |
 | `SEAGULL_BACKBONE_QUARANTINE_RETENTION` | `720h` | |
 | `SEAGULL_BACKBONE_DURABILITY` | `production` | `production` refuses a topic that keeps fewer than 3 replicas or acknowledges a write fewer than 2 hold; `development`, which the development Compose file sets beside one replica, admits one broker and is reported as a warning |
@@ -553,6 +559,34 @@ seagull_fleetjudge_refusals_total{outcome="counted|outdated"}
 A decision is a few hundred bytes and a fleet makes few of them. A store outage
 costs how current the findings an operator reads are and is retried until the
 batch is durable; a decision is never skipped to make progress.
+
+### audit-writer
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEAGULL_AUDIT_WRITER_BATCH_RECORDS` | `256` | audit records per poll, and per store batch |
+| `SEAGULL_AUDIT_WRITER_FETCH_MAX_WAIT` | `1s` | how long a poll waits before returning short |
+| `SEAGULL_AUDIT_WRITER_RETRY_DELAY` | `1s` | first delay before a batch is retried |
+| `SEAGULL_AUDIT_WRITER_RETRY_DELAY_MAX` | `30s` | ceiling the delay backs off to |
+| `SEAGULL_AUDIT_STORE_ADDRESS` | required | the store's native protocol address, `clickhouse:9000` |
+| `SEAGULL_AUDIT_STORE_DATABASE` | `seagull` | the database holding `audit_entries` |
+| `SEAGULL_AUDIT_STORE_USER` | `seagull` | |
+| `SEAGULL_AUDIT_STORE_PASSWORD` | empty | read from `..._FILE` in a deployment |
+| `SEAGULL_AUDIT_STORE_TIMEOUT` | `30s` | budget for one attempt, its two reads and its insert, and to dial |
+| `SEAGULL_AUDIT_STORE_TLS` | `true` | verify and encrypt the native connection; development Compose explicitly sets `false` |
+| `SEAGULL_AUDIT_STORE_TLS_CA` | unset | authority the store must chain to; the system pool when unset |
+| `SEAGULL_AUDIT_STORE_TLS_SERVER_NAME` | unset | name the store certificate must carry; the dialled host when unset |
+
+The only consumer of `security.audit` and the only process that writes
+`audit_entries`. A store outage costs how current the trail is and is retried
+until the batch is durable; an event is never skipped to make progress, and the
+components it audits never wait on it. What it did with each record is counted:
+
+```text
+seagull_auditstore_events_total{outcome="chained|replayed|duplicate|quarantined"}
+seagull_auditstore_refusals_total{reason="undecodable|contract_violation|misplaced"}
+seagull_auditstore_batches_total{outcome="stored|retried|unordered"}
+```
 
 ### assessment-projector
 
@@ -967,7 +1001,7 @@ before its body is read.
 
 ## The backbone topology
 
-Twenty topics, declared once in `internal/broker` and applied by
+Twenty-two topics, declared once in `internal/broker` and applied by
 `backbone-migrator`:
 
 | Topic | Partitions | Retention | Largest batch | Why |
@@ -992,6 +1026,8 @@ Twenty topics, declared once in `internal/broker` and applied by
 | `security.agents.findings.quarantine` | 1 | 30 days | 1 MiB + 64 KiB | decisions the agent finding writer could not store |
 | `security.gateways` | 1 | compacted, kept | 1 MiB | the newest beacon of every gateway, keyed by it: whether it admits what agents send, which is how the fleet judge tells a silent agent from a platform that stopped listening |
 | `security.agents.refusals` | 3 | 7 days | 1 MiB | what the gateways refused of a certificate a renewal had replaced, gathered per agent and keyed by it, for the fleet judge to make findings of; not compacted, because every record is a count the judge adds |
+| `security.audit` | 3 | 30 days | 1 MiB | what people, agents and the platform did that a review has to reconstruct, keyed by the chain the event belongs to so each chain is read in one order; kept at least a week, longer than its writer is away |
+| `security.audit.quarantine` | 1 | 30 days | 1 MiB + 64 KiB | audit records the audit writer could not chain |
 
 **Partitions and replication are refused, never converged.** Records are keyed
 by `agent_id`, so growing the partition count moves an agent to a different
@@ -1041,7 +1077,7 @@ groups whose positions it waits on; nothing administrative, and nothing else.
 | Component | Writes | Consumes in its group | Follows whole | Observes |
 |---|---|---|---|---|
 | `ingest-gateway` | events, inventory, status, assessments, gateways, refusals | | agents | |
-| `control-api` | agents, agent findings, rulesets | | rulesets | |
+| `control-api` | agents, agent findings, rulesets, audit | | rulesets | |
 | `analysis-engine` | detections | events | rulesets | |
 | `event-writer` | events quarantine | events | | |
 | `detection-writer` | detections quarantine | detections | | |
@@ -1055,6 +1091,7 @@ groups whose positions it waits on; nothing administrative, and nothing else.
 | `advisory-writer` | advisories quarantine | advisories | | |
 | `finding-writer` | findings quarantine | findings | | |
 | `vulnerability-matcher` | findings | inventory, advisories | | `inventory-projector`, `advisory-writer`, `finding-writer` |
+| `audit-writer` | audit quarantine | audit | | |
 
 `backbone-migrator` makes them. On a backbone that authenticates it reads
 `SEAGULL_BACKBONE_PRINCIPALS_DIR`, a directory holding one file named after each
@@ -1358,6 +1395,44 @@ seagull_control_fleet_findings_open{kind="silence|copied_installation|shared_ide
 
 A reading that cannot count them publishes neither count and is counted
 `unreadable`, as one that cannot count the fleet.
+
+## The audit trail
+
+`audit_entries` holds the security audit trail, one row per entry of a chain,
+written by `audit-writer` alone from `security.audit`. Each tenant's events are
+one chain, and the events of no tenant another; an entry is the event exactly as
+its component published it, its sequence from 1 without a gap, and a SHA-256
+digest over the previous entry's digest and the event, as `seagull.audit.v1.Entry`
+writes it down, so removing, reordering or altering an entry breaks every digest
+after it.
+
+**The chain is a function of the topic.** A chain's records are keyed by it and
+so read from one partition in one order, and an entry depends on nothing but the
+entry before it and the record. The writer keeps nothing between batches: for
+each batch it asks the store which of the batch's event identifiers each chain
+already holds, then where each chain stands, and appends the rest. A batch
+delivered again after a crash is found chained, an event a component published
+twice is chained once, a writer that lost its partition writes rows identical to
+the ones its successor writes, and reading the topic again from the start writes
+nothing. That needs a store that reads its own writes: one ClickHouse with
+synchronous inserts does; a replicated one needs quorum inserts and sequential
+consistency on these reads, and a batch answered out of order is retried and
+counted `unordered` rather than decided on.
+
+**What it refuses goes to `security.audit.quarantine`**, counted by reason: a
+record that is not an audit event, one the contract refuses, and one `misplaced`,
+keyed for another chain or arriving on a partition other than the one its chain
+is read from, which only a mis-keyed producer or a repartitioned topic makes.
+
+**The table keeps every row as it was written.** It is a `MergeTree`, not a
+`ReplacingMergeTree`: two different rows at one sequence are evidence, and a
+merge choosing between them would erase it, which would let a credential that
+may only insert replace an entry. An insert retried with the same entries is one
+block (`non_replicated_deduplication_window`), and identical rows from two
+writers read as one entry. It is ordered by chain and sequence, carries a bloom
+filter on `event_id` for the writer's lookups, and has no partition and no TTL:
+an entry leaves only with every entry before it once a signed checkpoint has
+sealed them, and a chain's newest entry never does.
 
 ## Vulnerability dispositions
 

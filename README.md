@@ -88,6 +88,7 @@ Every stream on the backbone, as [`internal/broker/grants.go`](internal/broker/g
 | `security.agents.findings` | fleet-judge, control-api | agent-finding-writer |
 | `security.advisories` | advisory-importer | advisory-writer, vulnerability-matcher |
 | `security.findings` | vulnerability-matcher | finding-writer |
+| `security.audit` | control-api | audit-writer |
 
 The writers and projectors keep their streams in ClickHouse, except `alert-writer`,
 which keeps alerts and incidents in PostgreSQL. What a ClickHouse writer cannot

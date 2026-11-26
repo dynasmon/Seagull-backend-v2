@@ -27,6 +27,7 @@ const (
 	AdvisoryWriter       Component = "advisory-writer"
 	FindingWriter        Component = "finding-writer"
 	VulnerabilityMatcher Component = "vulnerability-matcher"
+	AuditWriter          Component = "audit-writer"
 )
 
 func (c Component) Principal() string { return "User:" + string(c) }
@@ -47,7 +48,7 @@ type Grant struct {
 func (t Topology) Grants() []Grant {
 	return []Grant{
 		{Component: IngestGateway, Writes: []Topic{t.Events, t.Inventory, t.Status, t.Assessments, t.Gateways, t.Refusals}, Follows: []Topic{t.Agents}},
-		{Component: ControlAPI, Writes: []Topic{t.Agents, t.AgentFindings, t.Rulesets}, Follows: []Topic{t.Rulesets}},
+		{Component: ControlAPI, Writes: []Topic{t.Agents, t.AgentFindings, t.Rulesets, t.Audit}, Follows: []Topic{t.Rulesets}},
 		{Component: AnalysisEngine, Writes: []Topic{t.Detections}, Consumes: []Topic{t.Events}, Follows: []Topic{t.Rulesets}},
 		{Component: EventWriter, Writes: []Topic{t.Quarantine}, Consumes: []Topic{t.Events}},
 		{Component: DetectionWriter, Writes: []Topic{t.DetectionsQuarantine}, Consumes: []Topic{t.Detections}},
@@ -66,6 +67,7 @@ func (t Topology) Grants() []Grant {
 			Consumes:  []Topic{t.Inventory, t.Advisories},
 			Observes:  []Component{InventoryProjector, AdvisoryWriter, FindingWriter},
 		},
+		{Component: AuditWriter, Writes: []Topic{t.AuditQuarantine}, Consumes: []Topic{t.Audit}},
 	}
 }
 

@@ -153,3 +153,21 @@ func TestAGrantNamesTheTopicsTheDeploymentConfigured(t *testing.T) {
 		t.Errorf("the engine is not granted reading the events topic the deployment named")
 	}
 }
+
+func TestTheAuditTrailIsReadByTheAuditWriterAlone(t *testing.T) {
+	topology := declared(t, map[string]string{})
+	for _, grant := range topology.Grants() {
+		reads := slices.ContainsFunc(append(append([]Topic{}, grant.Consumes...), grant.Follows...), func(read Topic) bool {
+			return read.Name == topology.Audit.Name
+		})
+		switch {
+		case grant.Component == AuditWriter && !slices.ContainsFunc(grant.Consumes, func(read Topic) bool { return read.Name == topology.Audit.Name }):
+			t.Errorf("%s does not consume %s in its group", grant.Component, topology.Audit.Name)
+		case grant.Component != AuditWriter && reads:
+			t.Errorf("%s reads %s, which only the audit writer chains", grant.Component, topology.Audit.Name)
+		}
+	}
+	if writers := writersOf(topology.Grants(), topology.Audit); slices.Contains(writers, AuditWriter) {
+		t.Errorf("%s writes the trail it chains", AuditWriter)
+	}
+}

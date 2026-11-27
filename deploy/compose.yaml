@@ -444,6 +444,35 @@ services:
     restart: unless-stopped
     <<: *hardening
 
+  # Chains the audit trail and keeps it, as the only consumer of security.audit
+  # and the only process that writes audit_entries: a store outage costs how
+  # current the trail is, and never an action of a component it audits.
+  audit-writer:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        COMPONENT: audit-writer
+        VERSION: ${SEAGULL_VERSION:-dev}
+        REVISION: ${SEAGULL_REVISION:-unknown}
+    depends_on:
+      backbone-migrator:
+        condition: service_completed_successfully
+      store-migrator:
+        condition: service_completed_successfully
+    networks: [backbone]
+    environment:
+      <<: *backbone
+      SEAGULL_AUDIT_STORE_ADDRESS: clickhouse:9000
+      SEAGULL_AUDIT_STORE_DATABASE: ${SEAGULL_AUDIT_STORE_DATABASE:-seagull}
+      SEAGULL_AUDIT_STORE_USER: ${SEAGULL_AUDIT_STORE_USER:-seagull}
+      SEAGULL_AUDIT_STORE_PASSWORD: ${SEAGULL_AUDIT_STORE_PASSWORD:-}
+      SEAGULL_AUDIT_STORE_TLS: ${SEAGULL_AUDIT_STORE_TLS:-false}
+      SEAGULL_LOG_LEVEL: ${SEAGULL_LOG_LEVEL:-info}
+      SEAGULL_OPS_ADDRESS: 0.0.0.0:9100
+    restart: unless-stopped
+    <<: *hardening
+
   # Keeps every assessment agents made of their hosts, under a group and a
   # quarantine of its own: an assessment store outage costs how fresh a posture
   # is, and never the admission or the storage of telemetry.

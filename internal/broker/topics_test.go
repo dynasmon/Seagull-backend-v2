@@ -9,6 +9,7 @@ import (
 
 	"github.com/dynasmon/Seagull-backend-v2/internal/agentstatus"
 	"github.com/dynasmon/Seagull-backend-v2/internal/assessment"
+	"github.com/dynasmon/Seagull-backend-v2/internal/audit"
 	"github.com/dynasmon/Seagull-backend-v2/internal/detection"
 	"github.com/dynasmon/Seagull-backend-v2/internal/event"
 	"github.com/dynasmon/Seagull-backend-v2/internal/finding"
@@ -419,6 +420,7 @@ func TestEveryQuarantineCarriesMoreThanTheStreamItQuarantines(t *testing.T) {
 		{topology.Status, topology.StatusQuarantine},
 		{topology.Assessments, topology.AssessmentsQuarantine},
 		{topology.Findings, topology.FindingsQuarantine},
+		{topology.Audit, topology.AuditQuarantine},
 	} {
 		if stream.quarantine.MaxMessageBytes <= stream.source.MaxMessageBytes {
 			t.Errorf("%s carries %d bytes and quarantines into %s, which carries %d: a refused record is copied whole and the reason travels beside it",
@@ -441,6 +443,7 @@ func TestEveryTopicCarriesTheLargestRecordItsProducersMayWrite(t *testing.T) {
 		{topology.Status, agentstatus.MaxReportBytes},
 		{topology.Assessments, assessment.MaxAssessmentBytes},
 		{topology.Findings, finding.MaxRecordBytes},
+		{topology.Audit, audit.MaxEventBytes},
 	} {
 		if int(kind.topic.MaxMessageBytes) < kind.largest+1<<10 {
 			t.Errorf("%s carries %d bytes and its producers may write a record of %d, with a key, headers and framing beside it",
@@ -633,5 +636,47 @@ func TestTheGatewaysRefusalsAreAStreamOfTheirOwnKeptLongerThanAJudgeIsAway(t *te
 	LoadTopology(parser)
 	if parser.Err() == nil {
 		t.Error("refusals kept for a day were accepted, and a judge away a weekend would lose them")
+	}
+}
+
+func TestTheAuditTrailIsAStreamOfItsOwnKeptLongerThanItsWriterIsAway(t *testing.T) {
+	topology := declared(t, map[string]string{})
+	trail, refused := topology.Audit, topology.AuditQuarantine
+	if trail.Name != "security.audit" || trail.Partitions != 3 || trail.Cleanup != cleanupDelete || trail.Retention != 30*24*time.Hour {
+		t.Errorf("the audit topic is %+v", trail)
+	}
+	if refused.Name != "security.audit.quarantine" || refused.Partitions != 1 || refused.Cleanup != cleanupDelete {
+		t.Errorf("the audit quarantine is %+v", refused)
+	}
+	for _, topic := range []Topic{trail, refused} {
+		if err := topic.Validate(); err != nil {
+			t.Errorf("the shipped %s is refused: %v", topic.Name, err)
+		}
+		if !slices.ContainsFunc(topology.Topics(), func(applied Topic) bool { return applied.Name == topic.Name }) {
+			t.Errorf("%s is not in the topology the migrator applies, so the audit writer would refuse to serve", topic.Name)
+		}
+	}
+
+	configured := declared(t, map[string]string{
+		"SEAGULL_BACKBONE_AUDIT_TOPIC":                 "tenant.audit",
+		"SEAGULL_BACKBONE_AUDIT_PARTITIONS":            "6",
+		"SEAGULL_BACKBONE_AUDIT_RETENTION":             "240h",
+		"SEAGULL_BACKBONE_AUDIT_QUARANTINE_TOPIC":      "tenant.audit.refused",
+		"SEAGULL_BACKBONE_AUDIT_QUARANTINE_PARTITIONS": "2",
+		"SEAGULL_BACKBONE_AUDIT_QUARANTINE_RETENTION":  "72h",
+	})
+	if trail := configured.Audit; trail.Name != "tenant.audit" || trail.Partitions != 6 || trail.Retention != 240*time.Hour {
+		t.Errorf("the audit topic read back as %+v", trail)
+	}
+	if refused := configured.AuditQuarantine; refused.Name != "tenant.audit.refused" || refused.Partitions != 2 || refused.Retention != 72*time.Hour {
+		t.Errorf("the audit quarantine read back as %+v", refused)
+	}
+
+	parser := config.New(func(key string) (string, bool) {
+		return "72h", key == "SEAGULL_BACKBONE_AUDIT_RETENTION"
+	})
+	LoadTopology(parser)
+	if parser.Err() == nil {
+		t.Error("an audit trail kept three days was accepted, and an audit writer away a week would lose what it had not chained")
 	}
 }

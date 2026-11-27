@@ -44,6 +44,7 @@ var layers = map[string]layer{
 	"internal/assessment":        domain,
 	"internal/assessmentstore":   capability,
 	"internal/audit":             domain,
+	"internal/auditstore":        capability,
 	"internal/analysis":          capability,
 	"internal/authz":             domain,
 	"internal/broker":            adapter,
@@ -234,6 +235,14 @@ var within = map[string]restriction{
 			modulePath + "/internal/platform/tlsx",
 		},
 		because: "what putting a detection in front of a person means has no transport of its own: this half is reached from the backbone",
+	},
+	"internal/auditstore": {
+		prefixes: []string{
+			"net/http",
+			modulePath + "/internal/platform/httpx",
+			modulePath + "/internal/platform/tlsx",
+		},
+		because: "chaining the audit trail has no transport of its own: this half is reached from the backbone, and nothing a component audited could call reaches it",
 	},
 	"internal/detectionstore": {
 		prefixes: []string{

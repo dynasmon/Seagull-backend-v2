@@ -9,396 +9,53 @@
 <!-- progress:start -->
 ## Backlog progress
 
-**60% built, 40% to go** — of the backend backlog's 101 cards, 57 are done, 8 partial and 36 open; 2 more were closed by decision. Updated on 2026-11-25.
+**40% to go** · 60% built · updated on 2026-11-26
 
-🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟨🟨⬜⬜⬜⬜⬜⬜⬜
+<img src="https://geps.dev/progress/60?label=40%25%20to%20go" width="100%" alt="60% built, 40% to go">
 
-| Stage | Cards | Built |
-| --- | --- | --- |
-| Foundation | 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟨 | 98% |
-| Correctness | 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜ | 94% |
-| Core release | 🟩🟩🟩🟩 | 100% |
-| Inventory and vulnerability | 🟩🟩 | 100% |
-| Fleet visibility | 🟩🟩🟨 | 83% |
-| Production | 🟩🟨🟨🟨🟨⬜⬜⬜⬜⬜⬜⬜⬜⬜ | 21% |
-| Linux SIEM | ⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜ | 0% |
-| SOC and operator identity | ⬜⬜⬜⬜⬜ | 0% |
-| Fleet management | 🟩🟨🟨 | 67% |
-| Response (XDR) | ⬜⬜ | 0% |
-| Breadth | ⬜⬜⬜⬜⬜⬜⬜⬜ | 0% |
+The bar counts the backend backlog's cards, a partial card as half. The cards left are the larger ones.
 
-🟩 done · 🟨 partial, counted as half · ⬜ open. Each square of the table is a card. The count is not an estimate of effort: the open cards hold the largest pieces — highly available stores, disaster recovery, federated sign-in, four new event classes, third-party connectors and response — so what is left takes longer than its share of cards.
+### What is left
+
+- **Foundation** — Test harness and backtesting *(partial)*
+- **Correctness** — Judge a Store Rebuild by What It Promises a Writer
+- **Fleet visibility** — Detect Fleet Integrity Anomalies: Silence, Duplicate Identity and Tampering *(partial)*
+- **Production** — Security Audit Log · Observability Contract per Process *(partial)* · Failure Recovery and Chaos Integration Suite *(partial)* · Backend Soak and Load Testing *(partial)* · Production Readiness Gate *(partial)* · Bootstrap Enrollment With Single-Use Tokens · Persistent Sessions and a Live Policy · Reference Deployment and Its Security Posture · Highly Available Stores · Backup, Restore and Disaster Recovery · Retention, Tiering and Data Subject Requests · Tenant Lifecycle and Quotas · Bound What an Update Package Costs the Control Plane
+- **Linux SIEM** — Decide How a New Event Class Enters the Platform · Process Execution Events · Privilege and Account Management Events · File Integrity Events · Network Connection and DNS Events · Rule Language: Address Ranges, Distinct Counts and Reference Lists · Correlate Across Agents by Repartitioning on the Group Key · Backtest a Ruleset Against Recorded Telemetry · Detection Content Library and ATT&CK Coverage · Hunt Analytics and Investigative Indexes · Alert Tuning as a Published, Audited Document
+- **SOC and operator identity** — Federated Operator Identity and the Browser-Facing API · Service Accounts and API Tokens for Integrations · Case Management · Notifications and Outbound Integrations · Saved and Scheduled Searches
+- **Fleet management** — Signed Agent Policy Service *(partial)* · Agent Release Distribution and Staged Rollout *(partial)*
+- **Response (XDR)** — Server-to-Agent Command Channel · Response Action Policy and Catalogue
+- **Breadth** — Extend Vulnerability Coverage Where an Asset Can Be Placed · Ingest Third-Party Logs Through a Connector Gateway · Pull Connectors for Cloud and Identity Providers · Sequences Across Event Classes · Enrichment and Threat Intelligence · Behavioral Baselines (UEBA) · Rare Process per Host · Peer-Group Deviation
 <!-- progress:end -->
 
-Seagull v2 is the backend of an open security operations platform, rebuilt as a
-set of small processes around a durable event backbone. Telemetry becomes
-durable before anything else happens to it; every capability downstream is a
-consumer of that stream rather than a step inside the request that admitted it.
+Seagull v2 is the backend of an open security operations platform: small
+processes around a durable event backbone (Redpanda), with ClickHouse for
+telemetry and PostgreSQL for operator work. Telemetry is durable before it is
+acknowledged, and everything downstream consumes that stream.
 
-It is a re-architecture of [Seagull v1](https://github.com/dynasmon/Seagull), not
-a port of it. v1 is the functional reference — its detection content, security
-invariants and operational lessons carry over — while the layering, the queues,
-the ORM-shaped domain and the synchronous telemetry path do not. Where the two
-disagree, v2 wins unless there is evidence the v2 decision is wrong.
-
-Endpoint collection is performed by an agent released independently, and the
-messages the two exchange live in
-[Seagull-contracts](https://github.com/dynasmon/Seagull-contracts) so that
-neither repository depends on the other.
+It re-architects [Seagull v1](https://github.com/dynasmon/Seagull) rather than
+porting it: v1's detection content and lessons carry over, its structure does
+not. The agent is released separately, and the messages the two exchange live in
+[Seagull-contracts](https://github.com/dynasmon/Seagull-contracts).
 
 ## What the backend does
 
-### Durable telemetry ingestion
-
-The gateway terminates mutual TLS, takes the agent's identity from the verified
-certificate rather than from anything the producer sent, admits or refuses the
-batch against explicit size and rate ceilings, and answers only once the
-backbone owns it — by default, once two of the three replicas a production
-backbone keeps hold it. An agent may drop its local copy of a batch on that
-answer and on nothing else, so a gateway that crashes mid-batch costs a retry
-rather than telemetry. A body is weighed before it is decoded, for what decoding
-it would allocate, so a batch of empty messages that would decode to a hundred
-times its length is refused before it costs that
-([ADR 41](docs/decisions/0041-production-is-the-default-and-development-is-declared.md)). A retry is only ever asked for when it can succeed: every topic
-declares the largest batch it carries, every producer is held to it, and a record
-heavier than its topic takes is refused by its position instead of being admitted
-and answered `503` for as long as it is sent
-([ADR 37](docs/decisions/0037-a-record-is-bounded-by-what-its-topic-carries.md)).
-
-An agent learns what the platform admits before it sends anything. The gateway's
-`GET /v1/descriptor`, behind the certificate, registry and limiter of the streams,
-lists every stream it routes with the record it carries, the schema versions it
-reads and the limits a batch and a record are admitted under, as the admitters
-that judge them hold them; a record's is what an agent may send, room left for
-what the gateway stamps on it. The control plane's agent listener lists what it
-offers beside them: renewal, the policy route and, once updates are configured,
-the update route. A descriptor carries an entity tag, is answered `304` when it
-did not change, and decides nothing: a batch is judged on its own
-([ADR 45](docs/decisions/0045-a-listener-tells-an-agent-what-it-serves-and-decides-nothing-by-it.md)).
-
-### Detection engineering
-
-A rule names the class of event it reads and matches with a typed expression
-over the fields of the event contract — there is no dictionary between the two,
-so a rule naming a field the contract does not declare is refused where it is
-written, with the line and the part that is wrong. Rules carry severity, ATT&CK
-technique, false-positive guidance and provenance, and each one travels with the
-cases it was written for, which the same evaluator checks. A rule is weighed as it
-is compiled, by the heaviest detection it could make, and refused when its
-consumers could not take that detection: every detection the engine makes is one
-they take, whatever the event it was decided from carried
-([ADR 40](docs/decisions/0040-a-record-the-platform-makes-is-bounded-where-it-is-made.md)).
-
-### Sigma import
-
-A supported Sigma rule is translated into a Seagull rule and goes through the
-same validator and compiler as a rule somebody wrote here; the domain does not
-know Sigma exists. What can be translated is decided by the canonical form: a
-field it folds can carry Sigma's case-insensitive comparison, and a field whose
-case it keeps on purpose cannot, so the comparison is refused and the remedy is
-named. Everything the rule language cannot state — a pattern, a network range,
-a keyword search, a distinct count, a threshold counting down — is refused with
-the line it was written on rather than imported as something that runs and finds
-less. A translated rule arrives as a draft carrying no cases, so two independent
-gates keep it out of an estate until a person has written down what it should
-find.
-
-```bash
-go run ./tools/sigmaimport -input path/to/sigma -output deploy/rules/imported.yml -strict
-```
-
-### Incidents and correlation output
-
-Event, detection, alert and incident are four records with four owners, not four
-names for one row. A detection states that a rule matched; an alert is one
-detection somebody owns; an incident is what a correlation becomes when a person
-has to answer for it, named by the detection that told the story and carrying one
-event per stage, so it can be traced back to what it was made of. It has a
-lifecycle of its own and nothing an operator does to it writes to the events or
-the detection behind it. How far the platform vouches for the order a story rests
-on is measured from the clocks that timed it rather than declared by the rule.
-
-### Ruleset management
-
-Rulesets are administered through the control plane and published to a compacted
-topic, never by reaching into a running engine. A ruleset is named by its own
-content, so publishing the same rules twice is one version; publishing and
-activating are separate acts, so a rollout can be rolled back to a version that
-cannot have changed underneath it. Nothing that fails to compile, whose own
-cases do not hold, or that is heavier than the topic carries, is ever written.
-
-The rules an installation starts from are its first publication: the control
-plane publishes the tree the engine starts on before it serves, under the name
-of the installation, so a rule an engine already ran cannot be published again
-at its revision asking something else. An upgrade brings the rules of its
-release the same way and never replaces a ruleset a person activated.
-
-### Event hunting
-
-The query plane consumes no topic and writes nothing. A query is a scope, a
-window and a question, and only the last comes from the caller: the tenants a
-caller may read are derived rather than requested, so a question cannot widen
-its own answer. They are the tenants the control plane's policy grants the
-subject of the caller's certificate, which must also be granted `events:read` or
-`detections:read` for what it asks; what the certificate's organisation names
-authorises nothing
-([ADR 47](docs/decisions/0047-the-query-plane-decides-by-the-policy-and-a-certificate-organisation-authorises-nothing.md)).
-
-### What an asset has and what is wrong with it
-
-The same plane lists, through the same admission, scope, budget and signed
-cursor: an estate's assets with how old each kind of their inventory is, the
-items of one kind an asset holds now or every instance of one name it was seen
-with, the findings of a tenant where each stands, a finding's history, how each
-asset was last assessed whole, and every version of the advisories findings cite
-([ADR 59](docs/decisions/0059-the-read-plane-lists-what-an-asset-has-and-what-is-wrong-with-it.md)).
-An inventory is read under `inventory:read` and the rest under
-`vulnerabilities:read`. What an asset currently has is one condition the
-vulnerability matcher and the read plane both ask the store through: an item last
-seen at or after the newest full enumeration of its kind, and every item of a kind
-never enumerated in full. An open finding older than its asset's newest whole
-assessment on fresh intelligence is one that assessment did not list, and is not
-listed.
-
-### Access control
-
-The control plane authenticates by certificate, exchanges a completed handshake
-for a short-lived session bound to that certificate, and decides every request
-against a policy of typed permissions resolved per request. A token carries
-identity and no authority. Every route declares what it requires and a route
-that declares nothing cannot be registered, so deny-by-default is structural.
-
-A grant reaches the platform or the tenants it names, and its binding says
-which. What every tenant shares — the ruleset that detects, the releases agents
-may install, the sessions of other people — is held only by a grant of the
-platform, and a policy that gives it to a binding of one tenant is refused when
-it is read. Reaching the platform is never reaching every tenant: a tenant's
-records still need the tenant named. `deploy/policy.yml` shows an administrator
-of each kind; see
-[ADR 50](docs/decisions/0050-a-grant-reaches-the-platform-or-the-tenants-it-names.md).
-
-### Backbone principals
-
-Every component reaches the backbone as itself: its principal and its consumer
-group are its name, and what it may write, read and describe there is a grant
-declared once in code, from which the broker's ACLs follow and nothing else —
-`security.agents` and `security.rulesets` are written by the control plane alone,
-`security.advisories` by the advisory importer alone, and no writer writes what it
-consumes. `backbone-migrator` makes the principals from passwords the installation
-generates, converges their ACLs and refuses to finish while any component can see,
-describe or join more than its grant, which catches a broker that enforces no ACL
-and an ACL granted to everyone. A production backbone is reached only over TLS by
-processes that authenticate, and what it refuses a process is named in readiness
-and counted rather than reported as a generic error; a suite holds every grant
-against a broker run the way production runs one
-([ADR 60](docs/decisions/0060-a-component-reaches-the-backbone-as-itself-and-is-held-to-its-grant.md)).
-
-### Agent registry and admission
-
-The platform records what it decided about every machine it takes telemetry
-from: which tenant it belongs to, what it says it is, the certificate identity
-bound to it, and where it stands. Registering an agent creates it `pending`;
-binding the certificate it will present makes it `active`; disabling, revoking
-and decommissioning are three different endings, and the last two are final
-because an identifier that came back would re-admit the certificate that was
-revoked. Every change carries an actor and a reason, and the trail is
-append-only.
-
-The gateway keeps authenticating from the certificate and reads no store. What
-the control plane decided crosses `security.agents`, a compacted topic keyed by
-the agent: the gateway replays it before it serves, follows it afterwards, and
-refuses a batch from an agent the platform stopped honouring with a map lookup
-and no round trip. A decision the backbone did not take stays outstanding in the
-registry and is published again until it lands. See
-[ADR 24](docs/decisions/0024-an-agent-is-registered-by-the-control-plane-and-refused-by-the-gateway.md).
-
-A gateway admits only by a roster it confirmed current within its bound, every
-five seconds against the ends of the log and thirty seconds at most, and past it
-answers every batch `503 roster_stale`, so the agent keeps it: a revocation that
-reached the log is enforced within thirty seconds or nothing is admitted, and in
-practice within milliseconds under load and seconds after the backbone comes
-back. A decision the log was never told is republished every five seconds and
-raises an alert past a minute. See
-[ADR 46](docs/decisions/0046-a-revocation-is-enforced-within-the-bound-a-gateway-confirms-its-roster-by.md).
-
-The record also names the certificate the registry binds the agent to, by its
-fingerprint, and the one it replaced. A gateway and the control plane's agent
-listener admit an agent only on the certificate in force, and on the one a renewal
-replaced for a minute after they learn of the renewal, so a request in flight
-finishes; any other is refused `403 agent_certificate_replaced` and becomes a
-finding. A certificate newer than the one a gateway holds is answered
-`503 roster_behind`, so an agent that renewed while the record was on its way
-sends again and loses nothing, and every answer to a certificate other than the
-one in force closes its connection. A copy of an installation started after the
-original renewed delivers nothing. See
-[ADR 58](docs/decisions/0058-a-listener-admits-an-agent-only-on-the-certificate-in-force.md).
-
-The tenant an agent's telemetry belongs to travels on the same record. It is the
-one the agent was registered in by an operator holding that tenant, and the
-gateway stamps it on every event in place of whatever the agent wrote; no
-gateway-wide tenant exists. An agent the registry never named is refused rather
-than placed somewhere, so one gateway serves every tenant and a routing mistake
-cannot move an estate's telemetry into another's. See
-[ADR 26](docs/decisions/0026-an-agent-sends-into-the-tenant-it-was-registered-in.md).
-
-### Agent policies
-
-How agents run can be changed without visiting them, by a policy signed off the
-platform. An operator signs it with a key the platform never holds and publishes
-it; the platform checks the signature against the public keys it was given,
-records it, and hands each agent the newest revision of its tenant that names it
-on the listener the agent renews on. The agent checks the signature again under
-keys it was provisioned with, refuses any revision older than the one it holds,
-and applies what a policy may set — its log level, which modules collect, what
-the files module watches, lower budgets — inside the ceilings of its own
-configuration. A taken control plane can withhold a policy and cannot write or
-roll one back. See
-[ADR 29](docs/decisions/0029-an-agent-policy-is-signed-off-the-platform.md).
-
-```bash
-go run ./tools/policysign -key signer.pem -policy policy.json -tenant default -lifetime 720h -output publication.pb
-```
-
-### Agent assessments
-
-A policy may also carry the checks its agents assess their hosts against: typed
-tests with bounded parameters — a path's owner and permissions, the host's
-account files, a kernel parameter or module, a package, a service unit, a
-directive of sshd or login.defs — that read what a host keeps and never run a
-command. The platform holds every check to the contract before it accepts the
-policy. What an agent found travels on a stream of its own, one assessment per
-run answering every check of the revision it names, with `pass`, `fail`,
-`error`, `unsupported` or `not_applicable` and bounded evidence; the platform
-keeps every one, and an agent's posture is its newest, carried when one agent is
-read. See
-[ADR 33](docs/decisions/0033-a-posture-is-the-newest-assessment-of-checks-an-operator-signed.md).
-
-### Agent updates
-
-Which releases agents may install is authorized off the platform too, by the
-roles of a root after The Update Framework: the root role signs the next root and
-the catalog role signs a catalog of every release agents may install, each with
-the digest and size of its package. The platform holds no key of either. It
-verifies what it is given, keeps the packages a catalog names, and hands an agent
-the roots, the newest catalog and the version it wants that agent to run, on the
-listener the agent renews on; the agent verifies all of it again from the root it
-was provisioned with. Which agent runs which release is the platform's decision
-and never signed, so a taken control plane can withhold an update and cannot
-make an agent install anything an operator did not sign, or go back past what a
-release allows. See
-[ADR 31](docs/decisions/0031-an-agent-release-is-authorized-off-the-platform.md).
-
-A release reaches a tenant's agents through a rollout: waves an operator orders,
-a canary named agent by agent and shares of the rest, each agent at a place drawn
-from the rollout and its own identifier, so reconnecting, renewing or rotating its
-key never moves it. The control plane reads the status the agents it reached
-report, opens the next wave once the open one soaked with enough of them running
-the release, and pauses the rollout once as many failed it — went back from it,
-or could not verify, install or run it — as the rollout allows; an agent that
-cannot reach the platform has not failed it, and a paused rollout asks nothing of
-any agent. See
-[ADR 32](docs/decisions/0032-a-rollout-opens-a-release-wave-by-wave-and-pauses-on-what-agents-report.md).
-
-```bash
-go run ./tools/updatesign root -version 1 -key root.pem -root-key root.pub -catalog-key catalog.pub -envelope update-root.pb
-go run ./tools/updatesign catalog -catalog catalog.json -package v0.2.0=seagull-agent_0.2.0-1_amd64.deb -key catalog.pem -root update-root.pb -output catalog.pb
-```
-
-### Asset inventory
-
-What an asset has is a record kind of its own, on a contract, a topic, a store
-and a process of its own, because it is not an event: an event is one observation
-and a scan is a set, and an estate reports orders of magnitude more package
-observations than logins. The platform derives an item's identity rather than
-reading one off the wire, so two collectors that spell a package differently
-cannot leave an asset holding it twice, and an upgrade replaces the row instead
-of adding one. **What an asset currently has is what its newest full scan
-named**: an item that scan stopped naming is no longer current and keeps the
-`last_seen` saying when it was last there, so nothing is deleted, nothing is
-tombstoned, and how stale the answer is falls out of the same line. A delta
-refreshes what it names and never moves that line, because it says nothing about
-what it omits — and an empty scan does move it, which is how a collector says the
-asset has none of that kind left. A record that reaches the store out of order
-loses to the newer one it arrived behind.
-[ADR 27](docs/decisions/0027-inventory-is-a-record-kind-of-its-own.md).
-
-A record keeps apart what one identity would fold. dpkg and apk hold one version of
-a name and architecture, so a package of theirs is never named by its version; rpm
-holds as many as it was given, kernels, keys and what an interrupted transaction
-left, so what decides is the snapshot, which is the whole of what the manager
-holds. Two versions it shows are two items, and a version shown alone keeps the
-identity an upgrade replaces. Two accounts sharing a uid stay two accounts the same
-way, because a second account of uid 0 is how a backdoor is kept.
-[ADR 43](docs/decisions/0043-a-record-keeps-apart-what-one-identity-would-fold.md).
-
-### Vulnerability intelligence
-
-What is known to be wrong with software is read from its source — OSV's export
-of the distributions' own advisories — by the one process that reaches the
-internet, which holds no store and names no asset: what a feed says reaches the
-platform as a validated advisory on the backbone and by no other way, so a feed
-that fails or lies can stop nothing but that process. Every advisory says which
-feed it came from, the version of that feed, the URL, when it was fetched and the
-SHA-256 of the bytes, and the platform writes all of that itself. Ecosystems are
-named with their release — `Debian:12`, `Ubuntu:22.04:LTS`, `Alpine:v3.19` — and an
-advisory entry and an installed package are keyed by the same function, the
-source package where the distribution's advisories name one, so a match is a
-lookup rather than a guess; an asset the platform cannot assess says why instead
-of reading as clean. **Nothing is concluded from what a feed did not say**: an
-attempt that failed changes nothing and says how old the platform's copy is, an
-advisory a feed stops listing is kept, and one is withdrawn only when its source
-withdraws it. Every version is kept, so what was concluded from one stays
-explicable. Debian, Ubuntu, Alpine, Rocky Linux and AlmaLinux are read, and
-`vulnerability-matcher` compares what they say with the packages every asset
-holds, deciding one finding per package and CVE.
-[ADR 28](docs/decisions/0028-vulnerability-intelligence-is-read-from-its-source.md),
-[ADR 49](docs/decisions/0049-a-finding-is-decided-by-one-reader-from-the-stores-their-owners-filled.md).
-
-### Storage and failure semantics
-
-Storage is owned per workload: ClickHouse holds telemetry and detections in
-tables shaped for the questions asked of each, the current state of every
-asset in two more, and every version of every advisory the platform has read in
-three more. A consumer advances its position
-only after the work it did is durable, so a crash replays rather than skips. A
-record that can never be stored is quarantined with the reason and its position,
-so one poison record cannot hold up a partition. A stored event is named by the
-agent that sent it as well as by its identifier and instant, so a replay
-collapses into one row and no agent can overwrite another's event
-([ADR 34](docs/decisions/0034-a-stored-event-is-named-by-the-agent-that-sent-it.md)).
-
-### State, restarts and replicas
-
-A rule that counts or orders remembers a bounded window of events, held by the
-process that decided them. That state does not move with a partition, so
-whenever the group hands the engine a partition — at startup and at every
-rebalance — the engine is put back to the first record inside the window its
-rules need, measured back from the last record it committed there rather than
-from the clock, and reads forward. The window is rebuilt from the stream rather than
-from a checkpoint, because an observation names the event it came from and every
-window is measured in event time: replaying decides the same detections, under
-the same names, and counts nothing twice.
-
-Which rules an engine may run follows from that. `security.events.raw` is keyed
-by the agent, so a rule grouping by anything that includes the agent is exact at
-any number of replicas, and one grouping across agents is only exact where a
-single reader holds the whole stream. A deployment may declare that it does, and
-the declaration is checked against what the group actually assigned it: a claim
-that stops being true stops the engine rather than halving what such a rule
-reports. Under such a rule a key holds several agents' events, and an event is
-told apart there by the agent that sent it as well as by its identifier, so one
-agent can never make another's event read as a repeat
-([ADR 38](docs/decisions/0038-an-observation-is-named-by-the-agent-that-sent-its-event.md)).
-A detection is named by the agent and identifier of every event it was decided
-from, so a story across agents is one detection whichever event the reader met
-last, and is about the agent its last stage came from; a count across agents
-decides as often in any order, and which events it names follows the order
-([ADR 39](docs/decisions/0039-a-detection-is-named-by-the-agent-and-identifier-of-every-event-that-decided-it.md)).
-A ruleset carrying a rule this deployment cannot answer — a window
-wider than the store keeps, a threshold no key could reach, a group the stream
-splits — is refused whole, and the last ruleset the process could answer keeps
-running. Active means executable. See
-[ADR 23](docs/decisions/0023-state-is-owned-by-the-partition-and-rebuilt-by-reading-it-back.md).
+- **Ingestion**: mutual TLS, identity from the certificate, size and rate limits, and an answer only once the backbone holds the batch on two of three replicas. [ADR 1](docs/decisions/0001-durable-before-acknowledged.md), [37](docs/decisions/0037-a-record-is-bounded-by-what-its-topic-carries.md), [41](docs/decisions/0041-production-is-the-default-and-development-is-declared.md)
+- **Detection**: typed rules over the event contract, with severity, ATT&CK and their own test cases. A rule may also count or order events inside a bounded event-time window. [ADR 6](docs/decisions/0006-a-rule-addresses-the-contract.md), [10](docs/decisions/0010-a-rule-carries-the-cases-it-was-written-for.md), [18](docs/decisions/0018-detection-state-is-a-bounded-window.md)–[20](docs/decisions/0020-a-sequence-is-decided-by-the-window-that-holds-it.md)
+- **Sigma import**: supported Sigma rules become native rules, and what cannot be expressed is refused. It covers one event class so far. [ADR 22](docs/decisions/0022-sigma-is-translated-and-never-adopted.md)
+- **Alerts and incidents**: a detection above a severity floor becomes an alert, and a correlation becomes an incident. Duplicates fold into one alert, and the detection itself is never changed. [ADR 16](docs/decisions/0016-an-alert-is-a-detection-somebody-owns.md), [17](docs/decisions/0017-noise-is-removed-from-the-alert-and-never-from-the-detection.md), [21](docs/decisions/0021-an-incident-is-a-correlation-somebody-owns.md)
+- **Rulesets**: compiled, tested and published by the control plane, named by their content and activated separately, so a rollback is exact. [ADR 8](docs/decisions/0008-a-ruleset-is-named-by-what-is-in-it.md), [15](docs/decisions/0015-a-ruleset-is-published-to-a-log.md), [51](docs/decisions/0051-the-rules-an-installation-starts-from-are-its-first-publication.md)
+- **Hunting and asset reads**: events, detections, inventory, findings and advisories, read only and within the tenants the policy grants. [ADR 13](docs/decisions/0013-a-query-is-a-scope-a-window-and-a-question.md), [47](docs/decisions/0047-the-query-plane-decides-by-the-policy-and-a-certificate-organisation-authorises-nothing.md), [59](docs/decisions/0059-the-read-plane-lists-what-an-asset-has-and-what-is-wrong-with-it.md)
+- **Access control**: certificate login, short sessions, typed permissions on every route, deny by default, grants scoped to the platform or to named tenants. [ADR 14](docs/decisions/0014-a-token-says-who-and-the-policy-says-what.md), [50](docs/decisions/0050-a-grant-reaches-the-platform-or-the-tenants-it-names.md)
+- **Backbone principals**: every process reaches Redpanda as itself, held to its own ACL grant. [ADR 60](docs/decisions/0060-a-component-reaches-the-backbone-as-itself-and-is-held-to-its-grant.md)
+- **Agent registry**: register, activate, disable, revoke and decommission agents. The gateway enforces a revocation within 30 seconds without a database lookup and admits only the certificate in force. [ADR 24](docs/decisions/0024-an-agent-is-registered-by-the-control-plane-and-refused-by-the-gateway.md), [26](docs/decisions/0026-an-agent-sends-into-the-tenant-it-was-registered-in.md), [46](docs/decisions/0046-a-revocation-is-enforced-within-the-bound-a-gateway-confirms-its-roster-by.md), [58](docs/decisions/0058-a-listener-admits-an-agent-only-on-the-certificate-in-force.md)
+- **Agent certificates**: the control plane signs and renews them. [ADR 25](docs/decisions/0025-the-platform-signs-the-identity-it-binds.md)
+- **Agent policies and assessments**: policies signed off the platform change how agents run and which host checks they assess. [ADR 29](docs/decisions/0029-an-agent-policy-is-signed-off-the-platform.md), [33](docs/decisions/0033-a-posture-is-the-newest-assessment-of-checks-an-operator-signed.md)
+- **Agent updates**: releases signed off the platform, after The Update Framework, rolled out to a tenant in waves that pause on reported failures. [ADR 31](docs/decisions/0031-an-agent-release-is-authorized-off-the-platform.md), [32](docs/decisions/0032-a-rollout-opens-a-release-wave-by-wave-and-pauses-on-what-agents-report.md)
+- **Fleet health**: liveness from status reports, and findings for a silent agent, a copied installation, a shared identity and a replaced certificate in use. [ADR 30](docs/decisions/0030-an-agent-is-alive-while-its-reports-arrive.md), [56](docs/decisions/0056-a-finding-about-an-agent-is-a-record-of-its-own-judged-only-while-the-platform-listens.md), [57](docs/decisions/0057-a-place-is-a-run-and-a-renewal-is-refused-before-it-is-signed.md)
+- **Inventory**: packages, services and accounts per asset. What is current is what the newest full scan named, and nothing is deleted. [ADR 27](docs/decisions/0027-inventory-is-a-record-kind-of-its-own.md), [43](docs/decisions/0043-a-record-keeps-apart-what-one-identity-would-fold.md)
+- **Vulnerabilities**: advisories from OSV for Debian, Ubuntu, Alpine, Rocky Linux and AlmaLinux, matched against installed packages into one finding per package and CVE. Risk acceptances are kept apart. [ADR 28](docs/decisions/0028-vulnerability-intelligence-is-read-from-its-source.md), [49](docs/decisions/0049-a-finding-is-decided-by-one-reader-from-the-stores-their-owners-filled.md), [52](docs/decisions/0052-a-disposition-is-kept-beside-the-findings-it-covers.md)
+- **Replay and failure**: a consumer commits only after its work is durable, a poison record goes to quarantine, and a replay gives the same rows and detections. [ADR 12](docs/decisions/0012-storage-is-owned-per-workload.md), [23](docs/decisions/0023-state-is-owned-by-the-partition-and-rebuilt-by-reading-it-back.md), [34](docs/decisions/0034-a-stored-event-is-named-by-the-agent-that-sent-it.md), [39](docs/decisions/0039-a-detection-is-named-by-the-agent-and-identifier-of-every-event-that-decided-it.md)
 
 ## Architecture
 
@@ -406,498 +63,118 @@ running. Active means executable. See
 Seagull Agent
       │  mutual TLS · protobuf
       ▼
- ingest-gateway ─────▶ Redpanda  security.events.raw
-                           │  (durable before the acknowledgement)
-             ┌─────────────┴─────────────┐
-             ▼                           ▼
-       event-writer                analysis-engine
-             │                     route · normalise · detect
-             ▼                           │
-  ClickHouse security_events      security.detections
-             │                           │
-             ▼                 ┌─────────┴─────────┐
- security.events.quarantine    ▼                   ▼
-                        detection-writer      alert-writer
-                               │            above a severity floor: a finding
-                               ▼            becomes an alert, a story an incident
-                  ClickHouse security_detections   │
-                                                   ▼
-                     PostgreSQL alerts · incidents · trails · occurrences
-                                                    ▲
- control-api ───────────────────────────────────────┘
-   │   open · acknowledged · in investigation · resolved / false positive
-   │
-   └───▶ Redpanda security.rulesets ──▶ analysis-engine
-         compiles, tests and publishes   compacted: every version,
-         a ruleset; activates one        one pointer at the one to run
-
- query-api ──▶ security_events · security_detections, read only, within a scope
+ingest-gateway ──▶ Redpanda ──┬──▶ event-writer ───────────────────▶ ClickHouse ◀── query-api
+                              │                                        ▲
+                              └──▶ analysis-engine                     │
+                                         │                             │
+                                         ▼                             │
+                                    detections ──┬──▶ detection-writer─┘
+                                                 │
+                                                 └──▶ alert-writer ──▶ PostgreSQL ◀── control-api
 ```
 
-What an asset has travels beside that stream and never in it, because a
-fleet-wide package scan is orders of magnitude more records than the telemetry it
-arrives with, and neither may delay the other:
+Every stream on the backbone, as [`internal/broker/grants.go`](internal/broker/grants.go) grants it:
 
-```text
-Seagull Agent
-      │  mutual TLS · protobuf · POST /v1/inventory
-      ▼
- ingest-gateway ─────▶ Redpanda  security.inventory.raw
-                           │  keyed by the asset, so one asset's scans stay ordered
-                           ▼
-                   inventory-projector
-                           │                    └──▶ security.inventory.quarantine
-                           ▼
-     ClickHouse asset_inventory · asset_inventory_scans · asset_package_holders
-                 one row per item      when that kind was    which assets hold a package,
-                                       last enumerated       by the names advisories use
-                                       in full
-```
+| Stream | Written by | Read by |
+|---|---|---|
+| `security.events.raw` | ingest-gateway | event-writer, analysis-engine |
+| `security.detections` | analysis-engine | detection-writer, alert-writer |
+| `security.rulesets` | control-api | analysis-engine |
+| `security.agents` | control-api | ingest-gateway, fleet-judge |
+| `security.inventory.raw` | ingest-gateway | inventory-projector, vulnerability-matcher |
+| `security.agents.status` | ingest-gateway | status-projector, fleet-judge |
+| `security.assessments` | ingest-gateway | assessment-projector |
+| `security.gateways`, `security.agents.refusals` | ingest-gateway | fleet-judge |
+| `security.agents.findings` | fleet-judge, control-api | agent-finding-writer |
+| `security.advisories` | advisory-importer | advisory-writer, vulnerability-matcher |
+| `security.findings` | vulnerability-matcher | finding-writer |
+| `security.audit` | control-api | audit-writer |
 
-What an agent says of itself travels on a third stream, beside the other two, so
-an agent on a host nobody logs into is still heard from:
+The writers and projectors keep their streams in ClickHouse, except `alert-writer`,
+which keeps alerts and incidents in PostgreSQL. What a ClickHouse writer cannot
+store goes to a `.quarantine` topic of its own. `control-api` is the administrative
+surface, `query-api` the read plane, `advisory-importer` the only process that
+reaches the internet, and `backbone-migrator`, `store-migrator` and
+`control-migrator` apply the schemas and exit. Every process is declared in
+[`deploy/compose.yaml`](deploy/compose.yaml).
 
-```text
-Seagull Agent
-      │  mutual TLS · protobuf · POST /v1/status, every interval it announces
-      ▼
- ingest-gateway ─────▶ Redpanda  security.agents.status
-                           │  compacted, keyed by the agent: the newest report of each
-                           ▼
-                    status-projector ──▶ security.agents.status.quarantine
-                           │
-                           ▼
-     ClickHouse agent_status ──▶ control-api: active · late · silent · stopped
-          one row per agent        judged when an agent is read, never decided,
-                                   and the admitted fleet counted the same way
-```
-
-The gateway's descriptor names the interval the platform asks agents to report
-at, and a report is still judged against the interval it announces; every thirty
-seconds `control-api` counts the agents the registry admits by liveness, into one
-series per liveness, never one per agent
-([ADR 54](docs/decisions/0054-a-gateway-asks-how-often-to-report-and-the-fleet-is-counted-as-it-is-read.md)).
-What the platform finds about an agent from how it reports and presents itself
-is a record of its own. `fleet-judge` decides a silence while every gateway says
-on `security.gateways` whether it admits, and tells the runs it hears apart to
-find an installation copied to a second place or two installations sharing one
-identity, and a gateway's refusals of a certificate a renewal had replaced;
-`control-api` asks the registry before it signs a renewal, and decides a renewal or
-a request of its agent listener presented with such a certificate. `agent-finding-writer`
-keeps them in `agent_findings`: reading one agent carries
-its open findings, `POST /v1/agents/findings/search` lists them within the
-tenants a caller holds, and the open findings are counted by kind beside the
-fleet. A finding changes nothing by itself; no agent is disabled, revoked or
-refused for one
-([ADR 56](docs/decisions/0056-a-finding-about-an-agent-is-a-record-of-its-own-judged-only-while-the-platform-listens.md),
-[ADR 57](docs/decisions/0057-a-place-is-a-run-and-a-renewal-is-refused-before-it-is-signed.md),
-[ADR 58](docs/decisions/0058-a-listener-admits-an-agent-only-on-the-certificate-in-force.md)).
-
-What an agent found when it ran the checks of its policy travels on a fourth,
-and every assessment is kept, because the ones before the newest are what a
-posture was:
-
-```text
-Seagull Agent
-      │  mutual TLS · protobuf · POST /v1/assessments, when its posture changed and once a day
-      ▼
- ingest-gateway ─────▶ Redpanda  security.assessments
-                           │  keyed by the agent, so its assessments stay ordered
-                           ▼
-                  assessment-projector ──▶ security.assessments.quarantine
-                           │
-                           ▼
-     ClickHouse agent_assessments ──▶ control-api: the newest is the agent's posture
-          one row per assessment         carried when one agent is read
-```
-
-What is known to be wrong with software comes from outside, through the one
-process allowed to reach it:
-
-```text
- OSV export (https) ──▶ advisory-importer ──▶ Redpanda  security.advisories
-   index · records        translate · stamp        compacted: the newest version of
-                          provenance · publish     every advisory, and each feed's freshness
-                                                           │
-                                                           ▼
-                                                    advisory-writer ──▶ security.advisories.quarantine
-                                                           │
-                                                           ▼
-            ClickHouse vulnerability_advisories · vulnerability_affected · vulnerability_feed_syncs
-                        every version            by release and package      how fresh each feed is
-```
-
-What is vulnerable is decided by one process that reads both of those stores and
-writes neither, and kept by another:
-
-```text
- Redpanda  security.inventory.raw · security.advisories
-                    │  one group, one loop, read alone
-                    ▼
-          vulnerability-matcher ◀── ClickHouse  asset_inventory · asset_package_holders
-                    │                           vulnerability_* · vulnerability_findings
-                    │  waits for the owners to have stored what a batch is about,
-                    │  decides every asset an inventory record names, and the holders
-                    │  of what an advisory names, against their previous decisions
-                    ▼
-           Redpanda  security.findings      keyed by the agent
-                    │
-                    ▼
-             finding-writer ──▶ security.findings.quarantine
-                    │
-                    ▼
-     ClickHouse vulnerability_findings · vulnerability_assessments
-                 one row per episode       one row per evaluation
-```
-
-What a person decides about a vulnerability instead of fixing it is kept apart,
-by the control plane, and never read by the matcher:
-
-```text
- control-api ──▶ PostgreSQL vulnerability_dispositions · …_withdrawals
-   ignored or accepted risk, for a tenant, an agent or a package,
-   with a reason, an actor and an expiry; ended only by a withdrawal
-```
-
-Processes are declared in [`deploy/compose.yaml`](deploy/compose.yaml):
-
-| Process | Role |
-|---|---|
-| `ingest-gateway` | The only durable entry point for telemetry: identity, the certificate in force, admission, validation, rate limiting, and what it refused for the fleet judge. |
-| `analysis-engine` | Reads the event stream under its own group, routes and normalises, and decides events against the ruleset it is pinned to. |
-| `event-writer` | Makes admitted telemetry queryable, quarantining what it cannot store. |
-| `detection-writer` | Makes a detection queryable, on the same terms and as a consumer of its own. |
-| `alert-writer` | Opens the work a detection at or above a severity floor becomes: an alert for a finding about one event, folded on a declared key, or an incident for a story several events told. It inserts and never updates. |
-| `inventory-projector` | Folds what a collector saw into what an asset currently has, under a group and a quarantine of its own. An item the newest full scan stops naming is no longer current, and nothing is deleted to say so. |
-| `status-projector` | Keeps the newest report each agent sent of itself, one row per agent, under a group and a quarantine of its own, so a status store outage costs how fresh liveness is and never telemetry. |
-| `fleet-judge` | Decides what agents' reports, and their absence, say about them: an agent the registry admits that stopped reporting is a silence, judged only while the judge confirmed it reads the end of the status log and a gateway said it admits, so an outage of the backbone, the gateways or the judge never reads as a silent fleet. A run reporting a sequence another run of its installation already holds is a copy, and two installations reporting in turn share one identity, held within a bound per agent whatever the holder of its key sends. The gateways' refusals of a replaced certificate are one finding per agent while one certificate is in force. It reads its logs whole and writes nothing but decisions. |
-| `agent-finding-writer` | Keeps what the platform found about its agents — a silence, an installation or an identity reporting from two places, a replaced certificate in use — one row per finding as its newest decision, under a group and a quarantine of its own, so a store outage costs how current the findings are and never a decision. |
-| `assessment-projector` | Keeps every assessment agents made of their hosts, one row per assessment, under a group and a quarantine of its own, so an assessment store outage costs how fresh a posture is and never telemetry. |
-| `advisory-importer` | Follows the vulnerability feeds a deployment names, translates each changed record into an advisory carrying its provenance, and publishes it with the freshness of the feed. The one process that reaches the internet; it holds no store and names no asset. |
-| `advisory-writer` | Keeps every version of every advisory and every attempt to follow a feed, under a group and a quarantine of its own. |
-| `vulnerability-matcher` | Decides which packages of each asset are vulnerable from the inventory and advisory stores, read-only, and publishes the decisions to `security.findings`. It reads both streams alone in one loop, waits for each store's owner before reading it, and holds no internet access and no credential that writes. |
-| `finding-writer` | Keeps what the vulnerability matcher decided, one row per episode of a finding and one per evaluation of an asset, under a group and a quarantine of its own, so a findings store outage costs how current findings are and never a decision. |
-| `control-api` | The administrative surface: sessions, authorisation, ruleset validation, publication and rollback, the alert and incident lifecycles, the agent registry with how recently each agent reported and its posture, the fleet counted by liveness, the authority that signs an agent's certificate, the signed policies agents are handed, the signed catalog of releases agents may install with their packages, a renewal presented with a certificate a renewal had replaced, refused before anything is signed and published as a finding, the agent listener served only on the certificate in force, and what people decide about vulnerabilities instead of fixing them. It is the one process terminating both trust domains — operators on its own port, and agents renewing their certificates and asking for their policy and their updates on a second one. |
-| `query-api` | The read plane: hunts over events and detections, and listings of each asset's inventory and how old it is, its findings, their history, how it was last assessed and the advisories they cite, read only and within the tenants the policy grants. |
-| `backbone-migrator`, `store-migrator`, `control-migrator` | Apply the topic topology, the analytical schema and the relational schema, then exit. Nothing migrates on the way to serving traffic. |
-
-Dependencies point one way — `cmd` → capability → domain, with adapters plugged
-in at the edges and `internal/platform` never learning about the product. That
-is not a convention: [`tests/architecture`](tests/architecture) enforces it, so a
-violation fails the build rather than a review.
-
-Two capabilities never reach each other through Go. They meet on the backbone,
-which is what keeps the shape of an alert table out of the thing that decides
-what an alert is about.
-
-An alert is named by the detection that raised it, so a replayed batch finds the
-alert it already opened rather than opening a second one — and the process that
-opens alerts never updates one, so nothing a reprocessed batch does can reach
-somebody's triage. [ADR 16](docs/decisions/0016-an-alert-is-a-detection-somebody-owns.md).
-
-Noise is removed from the alert plane and never from the detection stream:
-detections that are the same piece of work fold into one alert with a count,
-the estate can declare which never become work at all, and both are counted so
-what was reduced is readable. The detection keeps its full evidence for 730 days
-whatever happens, and an alert names every detection it is made of.
-[ADR 17](docs/decisions/0017-noise-is-removed-from-the-alert-and-never-from-the-detection.md).
-
-What a rule remembers between events is a bounded window of the backbone, keyed
-by tenant, rule, revision and group, and measured in event time. State is a pure
-function of the events inside its window, so a replayed batch counts once and a
-restart rebuilds it by reading the window again rather than by recovering
-anything. Every ceiling is declared, and a store at its limit refuses a new key
-instead of evicting one: a flood of invented group values must not get to choose
-which real counts an estate forgets.
-[ADR 18](docs/decisions/0018-detection-state-is-a-bounded-window.md). The store is
-carved into a quota per tenant and per rule, so a flood is refused at its own
-tenant's quota and leaves every other tenant's rules deciding; a tenant's room
-comes back only as its own stream moves past its keys, partition by partition, so
-what one tenant sends moves nothing another tenant is counting.
-[ADR 42](docs/decisions/0042-a-tenants-detection-state-is-carved-out-of-the-store-and-timed-by-its-own-partitions.md).
-
-A rule may count what it matches: twenty failed passwords from one address
-against one agent inside a minute is a different security statement from one
-failed password, made of the same match. The count is part of the rule rather
-than a second kind of rule, every window is event time, and the detection
-carries what was counted — how many, against which threshold, over what window,
-and what the events shared — so a threshold finding is not mistaken for a single
-event. Nothing resets when a rule fires: past its threshold a rule decides once
-per event and never more, and `deploy/alerting.yml` is where those become one
-piece of work.
-[ADR 19](docs/decisions/0019-a-rule-that-counts-decides-on-a-window.md).
-
-A rule may instead order what it matches: a failed SSH password from an address,
-then one from the same address that was accepted, inside five minutes, is a guess
-that worked — where either event alone is unremarkable. The stages are what such
-a rule matches with, so it carries a sequence or a match and never both, and the
-match of each stage stays a pure function of one event while the order is read
-out of the same bounded window a count is. Ordering is event time, which means
-the story does not depend on the backbone delivering it in order: an event that
-arrives after a later stage lands where it happened and is what completes the
-story. The detection names the event that satisfied each stage, so an incident
-can be traced back to the events it was made of, and it carries how far apart the
-clocks that timed them stood — because ordering rests on the producer's clock,
-and a story whose clocks disagree by more than it lasted is one the data does not
-order.
-[ADR 20](docs/decisions/0020-a-sequence-is-decided-by-the-window-that-holds-it.md).
-
-A story that several events tell is a different piece of work from a finding
-about one of them, so a detection carrying a correlation opens an incident and
-never an alert. It is named by that detection the way an alert is named by the
-one that raised it, so a replay finds the story it already opened; it carries one
-event per stage and the group that made them one story, so the trace to its
-component events and detection is on the record rather than in a join; and it has
-a lifecycle of its own, granted separately, whose moves never touch what the
-analysis engine wrote. How far the order can be trusted is a measurement rather
-than a number somebody tuned: the spread of the clocks that timed the story,
-against its own span and against the window the rule looked through.
-[ADR 21](docs/decisions/0021-an-incident-is-a-correlation-somebody-owns.md).
-
-Sigma is a language this platform reads and never becomes. A Sigma document is
-translated into a `detection.Rule` by an adapter and compiled by the same door
-every rule file goes through, so an imported rule cannot be a second way into the
-engine. What survives translation is bounded by the canonical form rather than by
-a table of aliases: Sigma compares without case and the rule language compares
-with it, so a comparison translates only where normalisation already removed the
-difference, and where it deliberately did not — an account name, because case is
-meaning on a Unix host — the comparison is refused and Sigma's own `|cased`
-modifier is the way to ask for what the platform can actually answer. v1 answered
-the same question by rewriting what it could not read into an inert placeholder,
-so an unsupported rule imported cleanly, compiled and quietly found nothing.
-[ADR 22](docs/decisions/0022-sigma-is-translated-and-never-adopted.md).
+Dependencies point one way, `cmd` → capability → domain, and
+[`tests/architecture`](tests/architecture) fails the build when they do not.
 
 ## Getting started
 
 Requires Docker with the Compose plugin and Go 1.26.
 
 ```bash
-make dev-pki    # mint the development authorities and the server, agent and operator certificates
-make up         # build the images and start the backbone, the store and every process
-make verify     # the full gate: lint, module graph, tests, race detector
+make dev-pki    # development authorities and certificates, in .local/pki
+make up         # build and start the backbone, the stores and every process
+make verify     # lint, module graph, tests, race detector
+make down       # stop everything and drop its state
 ```
 
-`make up` writes nothing outside the repository and reads nothing that is not in
-it; the development material lands in `.local/pki`, which Git ignores.
-
-`make dev-pki`, which `make up` runs first, keeps the material it finds while it
-still serves. An agent enrolled under the development agent authority trusts that
-authority alone, so minting it again would cut off every agent enrolled so far. A
-certificate close to its end, or one that does not name what is asked, is issued
-again by the same authority, and a running process serves it once restarted.
-`make rotate-dev-pki` mints new authorities: every agent enrolled before has to
-be enrolled again, and the stack restarted. Every process restarts with the
-host, so a reboot needs no `make up`.
-
-Send a batch through the running gateway, then ask the query plane what became
-of it. The probe first registers the development agent in the `default` tenant as
-`dev-admin`, because the gateway admits only an agent the registry placed in a
-tenant; `-register ""` skips that step:
+Try it against the running stack:
 
 ```bash
-go run ./tools/devprobe -endpoint https://127.0.0.1:8443
-go run ./tools/devprobe -hunt https://127.0.0.1:8444
+go run ./tools/devprobe -endpoint https://127.0.0.1:8443                             # send a batch of events
+go run ./tools/devprobe -hunt https://127.0.0.1:8444                                 # query them back
+go run ./tools/devprobe -inventory                                                    # send an asset's inventory
+go run ./tools/devprobe -agents https://127.0.0.1:8445 -renewals https://127.0.0.1:8446  # register, renew, revoke
+go run ./tools/devprobe -dispositions https://127.0.0.1:8445                         # accept a risk and withdraw it
 ```
 
-Send what an asset has — a distribution, a package list and a service — and watch
-it become the current state of that asset; `-packages 10000` sends the widest
-package list one record carries, about 1.9 MB, and `-kernels` and `-accounts` send a
-host holding what one identity would fold, which a later scan without them retires:
-
-```bash
-go run ./tools/devprobe -inventory
-go run ./tools/devprobe -inventory -packages 10000
-go run ./tools/devprobe -inventory -kernels 2 -accounts root,toor
-go run ./tools/devprobe -inventory -kernels 1 -accounts root
-```
-
-The development stack follows Debian's advisories; another distribution is one
-variable away, `SEAGULL_ADVISORY_FEEDS=Alpine make up`. How fresh the platform's
-copy of each feed is, read from the store:
-
-```bash
-docker compose -f deploy/compose.yaml exec clickhouse clickhouse-client --user seagull -d seagull -q \
-  "SELECT feed, argMax(outcome, checked_at), argMax(synced_at, checked_at), argMax(held, checked_at)
-   FROM vulnerability_feed_syncs GROUP BY feed"
-```
-
-An agent on another machine reaches this one by an address the server
-certificates name, and they name only `localhost`, `127.0.0.1` and each service
-by default. Issue them for this machine's address as well, from the same
-authorities, publish the two listeners an agent talks to beyond the loopback, and
-restart what serves the new certificates:
+An agent on another machine needs the server certificates to name this one:
 
 ```bash
 make dev-pki HOSTS=localhost,127.0.0.1,192.0.2.10
 SEAGULL_GATEWAY_PUBLISH=0.0.0.0:8443 SEAGULL_CONTROL_API_RENEWAL_PUBLISH=0.0.0.0:8446 make up
-docker compose -f deploy/compose.yaml restart ingest-gateway control-api query-api
 ```
 
-On that machine the agent's `platform-ca.pem` is `.local/pki/agent-trust.pem`,
-every authority an agent is told to trust, and its settings name
-`https://192.0.2.10:8443` and `https://192.0.2.10:8446`; its enrollment request is
-registered and signed as `-agents` below does. A later `make up` keeps those
-certificates, since they cover every host asked by default.
-
-Register an agent, have the platform sign the certificate it will present, watch
-it renew that certificate itself, and revoke it:
-
-```bash
-go run ./tools/devprobe -agents https://127.0.0.1:8445 -renewals https://127.0.0.1:8446
-```
-
-Accept the risk of a vulnerability for the `default` tenant, read it back, and
-withdraw it:
-
-```bash
-go run ./tools/devprobe -dispositions https://127.0.0.1:8445
-```
-
-Agent policies, the checks they carry and agent updates are signed off the
-platform, so the development stack runs without them until it is given what
-verifies them. That goes in `.local/signing`, which `make up` mounts at
-`/run/signing` in `control-api`, and is named there; the signing key itself stays
-off the machine the platform runs on. `SEAGULL_GATEWAY_STATUS_INTERVAL` and
-`SEAGULL_CONTROL_API_FLEET_INTERVAL` reach the gateway and `control-api` the same
-way:
-
-```bash
-openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out ~/policy-signer.pem
-openssl pkey -in ~/policy-signer.pem -pubout -out .local/signing/policy-signers.pem
-SEAGULL_CONTROL_API_AGENT_POLICY_SIGNERS=/run/signing/policy-signers.pem make up
-```
-
-Stop everything and drop its state with `make down`. If a port is taken, publish
-elsewhere with `SEAGULL_GATEWAY_PUBLISH`, `SEAGULL_QUERY_API_PUBLISH`,
-`SEAGULL_CONTROL_API_PUBLISH` or `SEAGULL_CONTROL_API_RENEWAL_PUBLISH`.
-
-Redpanda runs on data written by its own feature release or the one before it,
-and refuses anything older, so the backbone image never skips a release:
-`deploy/redpanda-upgrade-path` lists every release a development volume may have
-been written by, with the logical version it runs, and a test holds
-`deploy/compose.yaml` to its last line. A volume an older release wrote, as every
-stack started before 2026-11-02 was written by v24.2, stops Redpanda with
-`Attempted to upgrade from incompatible logical version`; `make upgrade-backbone`
-walks it up the list, keeping its data, and `make up` starts the stack again.
+Its `platform-ca.pem` is `.local/pki/agent-trust.pem`. Policies and updates are
+signed off the platform with `tools/policysign` and `tools/updatesign`, and stay
+off until `control-api` is given their public keys in `.local/signing`.
+`make rotate-dev-pki` mints new authorities, so every agent has to enroll again.
+A Redpanda volume from an older release is walked up with `make upgrade-backbone`.
 
 ## Agent compatibility
 
-A platform serves the newest agent release and the one before it: it accepts the
-protocol and schema versions both speak, and within a protocol version a refusal
-keeps its code and status. Every answer an agent reads — each stream's
-acknowledgement and refusals, both descriptors, issuance, renewal, the policy and
-the update it is handed — is recorded from the real listeners in
-`tests/e2e/testdata/agent/protocol-1`, and every build compares what the listeners
-answer with the recording: an answer that changes fails until it is recorded
-again with `make record-agent-answers`, which is where its version is decided.
-The agent takes its evidence from that directory of a tag or a commit alone
-([ADR 48](docs/decisions/0048-every-answer-an-agent-reads-is-recorded-here-and-changes-only-by-a-version-decision.md)).
+The platform serves the newest agent release and the one before it. Every answer
+an agent reads is recorded in `tests/e2e/testdata/agent/protocol-1`, and a build
+whose answers differ fails until `make record-agent-answers` records them again.
+[ADR 48](docs/decisions/0048-every-answer-an-agent-reads-is-recorded-here-and-changes-only-by-a-version-decision.md)
 
 ## Configuration
 
-Every setting is an environment variable, typed, validated at startup, and
-reported all at once when something is wrong. Any variable can be read from a
-file instead by adding the `_FILE` suffix, which is how secrets reach a
-container without going through the environment. The settings that matter most:
-
-| Variable | Purpose |
-|---|---|
-| `SEAGULL_BACKBONE_BROKERS` | The event backbone every process depends on. |
-| `SEAGULL_GATEWAY_TLS_CERT`, `SEAGULL_GATEWAY_TLS_KEY`, `SEAGULL_GATEWAY_AGENT_CA` | The gateway's mutual TLS material; there is no plaintext mode. |
-| `SEAGULL_DETECTION_RULES` | The rule tree the engine starts on and falls back to, and the control plane publishes as the installation's first ruleset. |
-| `SEAGULL_DETECTION_STATE_WINDOW`, `SEAGULL_DETECTION_STATE_OBSERVATIONS`, `SEAGULL_DETECTION_STATE_KEYS` | What a counting or ordering rule may remember: the longest window, the events one key holds, and how many keys at once. The window is also what a restart re-reads. |
-| `SEAGULL_DETECTION_STATE_KEYS_PER_TENANT`, `SEAGULL_DETECTION_STATE_KEYS_PER_RULE` | What one tenant, and one rule of a tenant, may hold of those keys: a quarter of the store and half of that, unless a deployment says otherwise. [How to size them](docs/configuration.md). |
-| `SEAGULL_DETECTION_STATE_SOLE_READER` | Declares that this engine reads the whole stream, which is what makes a rule counting across agents answerable. Verified against the assignment; a broken claim stops the engine. |
-| `SEAGULL_GATEWAY_MAX_INFLIGHT_BYTES`, `SEAGULL_GATEWAY_MAX_INFLIGHT_REQUESTS` | What the gateway holds at once across every caller: each body and what decoding it would allocate, weighed before it is decoded. Past it a batch is refused with `503` and `Retry-After`, never queued, and one that could never fit with `413`. |
-| `SEAGULL_GATEWAY_RATE_PER_SECOND`, `SEAGULL_CONTROL_API_RATE_PER_SECOND`, `SEAGULL_QUERY_API_RATE_PER_SECOND` | What one caller may spend of a process, at least one a second. Only the word `unlimited` turns a limiter off, and a process told it says so at startup. |
-| `SEAGULL_BACKBONE_TLS`, `SEAGULL_BACKBONE_TLS_CA`, `SEAGULL_BACKBONE_SASL_MECHANISM`, `SEAGULL_BACKBONE_SASL_USER`, `SEAGULL_BACKBONE_SASL_PASSWORD` | How every process reaches the backbone, as its own principal. A backbone reached without TLS or without authentication is refused unless the deployment declares a `development` durability; authenticating without TLS is always refused. |
-| `SEAGULL_BACKBONE_PRINCIPALS_DIR` | Where `backbone-migrator` reads each component's password, one file named after it, to give every component its credential and exactly its grant. |
-| `SEAGULL_BACKBONE_REPLICAS`, `SEAGULL_BACKBONE_MIN_INSYNC_REPLICAS`, `SEAGULL_BACKBONE_DURABILITY` | How many copies of a record the backbone keeps and how many must hold it before it is acknowledged: three and two, unless the deployment declares a `development` durability. Every process reports at startup what an acknowledgement is worth. |
-| `SEAGULL_EVENT_STORE_TLS`, `SEAGULL_EVENT_STORE_TLS_CA` | Encryption to the telemetry store. There is no option to skip verification. |
-| `SEAGULL_CONTROL_API_POLICY` | The policy document the control plane is pinned to. |
-| `SEAGULL_CONTROL_API_AGENT_AUTHORITY_CERT`, `SEAGULL_CONTROL_API_AGENT_AUTHORITY_KEY` | The authority the control plane signs agent certificates with. Read once at startup; a plane that cannot read it does not serve. |
-| `SEAGULL_CONTROL_API_AGENT_TRUST_BUNDLE` | Every authority an agent is told to trust, read at each issuance and sent with the certificate. Widening it is how a certificate authority is rotated without visiting a machine; an authority that signs and is not in it is refused. |
-| `SEAGULL_GATEWAY_REPLACED_CERTIFICATE_TOLERANCE`, `SEAGULL_CONTROL_API_REPLACED_CERTIFICATE_TOLERANCE` | How long a listener still admits the certificate a renewal replaced once it learns of the renewal, a minute by default: long enough for a request in flight, short enough that a copy of an installation delivers nothing. |
-| `SEAGULL_CONTROL_API_AGENT_CERT_LIFETIME` | How long an issued agent certificate is valid. Short is the answer to a stolen key nobody has revoked, and renewal is what makes short affordable. |
-| `SEAGULL_CONTROL_API_RENEWAL_ADDRESS`, `SEAGULL_CONTROL_API_RENEWAL_TLS_CERT`, `SEAGULL_CONTROL_API_RENEWAL_TLS_KEY`, `SEAGULL_CONTROL_API_AGENT_CA` | The agent-facing listener an agent renews on and asks for its policy on, in the agent trust domain rather than the operator one. |
-| `SEAGULL_CONTROL_API_AGENT_POLICY_SIGNERS` | The public keys an agent policy must be signed under. Read at each publication; unset, the plane publishes no policy. |
-| `SEAGULL_CONTROL_API_AGENT_UPDATE_ROOT` | The update root every agent is provisioned with, as a signed envelope. Read whenever it is needed; unset, the plane takes and hands out no update. |
-| `SEAGULL_BACKBONE_AGENTS_TOPIC` | Where the control plane says what it decided about an agent and the gateway reads it. Compacted, keyed by the agent. |
-| `SEAGULL_CONTROL_TELEMETRY_STORE_ADDRESS` | Where the control plane reads when an agent was last heard from. It writes nothing there. |
-| `SEAGULL_CONTROL_API_SESSION_KEY` | Key sessions are signed with; drawn at random when unset. |
-| `SEAGULL_EVENT_STORE_ADDRESS`, `SEAGULL_EVENT_STORE_PASSWORD` | The telemetry store and its credentials. |
-| `SEAGULL_ADVISORY_FEEDS` | The distributions whose advisories the platform reads — any of `Debian`, `Ubuntu`, `Alpine`, `Rocky Linux`, `AlmaLinux`. Required, because the first read of a feed is its whole index; the development stack names `Debian`. |
-| `SEAGULL_ADVISORY_OSV_EXPORT`, `SEAGULL_ADVISORY_OSV_CA` | Where the advisories are read from — OSV's public export, or a mirror laid out the same way — and the authority a mirror is signed by. https only; there is no plaintext mode. |
-
-[`docs/configuration.md`](docs/configuration.md) lists every setting each
-process reads, along with the acknowledgement contract, the topic topology and
-the shape of the store.
+Every setting is a typed environment variable, validated at startup. Adding
+`_FILE` to its name reads it from a file, which is how secrets reach a container.
+Production durability, TLS and authentication are the default, and a development
+stack declares `SEAGULL_BACKBONE_DURABILITY=development`. Every setting is listed in
+[`docs/configuration.md`](docs/configuration.md).
 
 ## Tests
 
 ```bash
 make test              # unit, architecture and end-to-end suites
-make test-race         # the same suites under the race detector
-make test-integration  # the data plane against a live Redpanda and ClickHouse, and the grants against one that authorizes
-make test-load         # the ingest load scenarios against a live Redpanda
-make test-alerts       # the operational alert rules against recorded series
-make bench             # the hot path, one core, no infrastructure
-make vulncheck         # refuse a known vulnerability in any package this module links
-make gosec             # refuse what the static security rules find
-make scan-images       # refuse a built image holding a fixable high or critical vulnerability
+make test-race         # the same under the race detector
+make test-integration  # against a live Redpanda and ClickHouse, including crash, replay and rebalance
+make test-load         # ingest load scenarios
+make test-alerts       # the operational alert rules
+make bench             # the hot path
+make vulncheck         # known vulnerabilities in linked packages
+make gosec             # static security rules
+make scan-images       # fixable high or critical vulnerabilities in built images
 ```
-
-The integration suite includes the failure scenarios the guarantees rest on: a
-restart in the middle of an active window, the same restart without the read
-back so the assertion cannot pass for another reason, a partition moving to a
-second replica while three agents are being counted, and a reader losing the
-whole stream it claimed. The end-to-end suite mints its own certificate
-authority and drives the real listeners over real mutual TLS, so it depends on no fixture files and no
-property of the machine it runs on. The integration suite ends with the whole
-slice — admission, backbone, writer, store — against real infrastructure, which
-is what the rest of it is a decomposition of, and holds every component to its
-grant against a second Redpanda that authenticates by SCRAM over TLS and enforces
-ACLs, whose administrator's password `make test-integration` generates under
-`.local/` and whose authority the broker mints itself.
-
-The stores of the suite are shared and kept between runs, so a test stays
-apart by a tenant or an agent identifier of its own. A test whose question spans
-the store — the oldest decisions not yet announced, the records held in an older
-shape, the replaced certificates not yet published, the freshness of a
-distribution's feed — migrates a database of its own and drops it after, so
-what earlier runs left never decides its verdict. The reads that span the store
-and pick their own records out of it — the rollouts in force, the agents
-admitted, the holders of a package, the chain of update roots and catalogs, the
-counts compared before and after — need none. The load suite fails a run when
-the gateway allocates more than 8 KB per admitted event, when a slow backbone
-produces an acknowledgement the backbone never received, or when a shutdown
-drops a batch it had already answered for.
 
 ## Delivery
 
-`main` takes a change only through a pull request every job passed, and nobody can
-bypass that: the rules are declared in [`.github/rulesets`](.github/rulesets) and
-compared with what GitHub enforces every day. Every image is named by its digest,
-every action by its commit, and Go by the one line in `go.mod`. Dependabot proposes
-updates after a week, and only patches within a release line, because a line moves
-by a decision: ClickHouse turned asynchronous inserts on in a release whose whole
-test suite still passed, which cost the writers two thirds of their throughput.
-A release tag is signed, and a tag no signer of `main` signed fails
-`make verify-tag`. [ADR 44](docs/decisions/0044-main-takes-what-every-job-passed-and-a-release-line-moves-by-a-decision.md).
+`main` takes a change only through a pull request every job passed. Images are
+pinned by digest, actions by commit, and release tags are signed.
+[ADR 44](docs/decisions/0044-main-takes-what-every-job-passed-and-a-release-line-moves-by-a-decision.md)
 
 ## Further reading
 
-| Document | Topic |
-|---|---|
-| [Architecture decisions](docs/decisions) | Why the foundation looks like this, one record per decision. |
-| [Configuration reference](docs/configuration.md) | Every setting, the acknowledgement contract, the topology, the store. |
-| [Seagull-contracts](https://github.com/dynasmon/Seagull-contracts) | The messages agents, the platform and the portal exchange. |
-
-Response actions are not implemented, and Sigma import covers one class of
-event. A rollout reaches a tenant or a list of
-agents, never a group, since the registry has none. Detection is stateless unless
-a rule asks otherwise: a rule that counts or orders its events reads a bounded window of the
-backbone in event time, which is what keeps both replayable.
+- [Architecture decisions](docs/decisions): why the platform looks like this, one record per decision.
+- [Configuration reference](docs/configuration.md): every setting, the acknowledgement contract, the topics and the store.
+- [Seagull-contracts](https://github.com/dynasmon/Seagull-contracts): the messages agents, the platform and the portal exchange.
 
 ## License
 

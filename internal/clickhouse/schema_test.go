@@ -101,6 +101,32 @@ ORDER BY event_id`},
 	}
 }
 
+func TestAnIndexDeclaredAmongTheColumnsIsNotAColumn(t *testing.T) {
+	history := []migration{{
+		version: 1,
+		name:    "audit_entries",
+		statements: []string{`CREATE TABLE IF NOT EXISTS audit_entries
+(
+    chain    LowCardinality(String),
+    event_id String,
+
+    INDEX event_id_bloom event_id TYPE bloom_filter GRANULARITY 1,
+    PROJECTION by_event (SELECT event_id ORDER BY event_id),
+    CONSTRAINT named CHECK length(event_id) > 0
+)
+ENGINE = MergeTree
+ORDER BY chain`},
+	}}
+
+	got, err := declaredColumnsIn(history, "audit_entries")
+	if err != nil {
+		t.Fatalf("build the final schema: %v", err)
+	}
+	if want := []string{"chain", "event_id"}; !slices.Equal(got, want) {
+		t.Fatalf("a writer supplies %v, want %v", got, want)
+	}
+}
+
 func TestEveryColumnIsGivenAValue(t *testing.T) {
 	if got, want := len(values(eventstore.Row{})), len(storedColumns); got != want {
 		t.Fatalf("the adapter names %d columns and supplies %d values", want, got)

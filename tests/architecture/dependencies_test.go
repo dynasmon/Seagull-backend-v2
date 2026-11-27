@@ -43,6 +43,7 @@ var layers = map[string]layer{
 	"internal/alertstore":        capability,
 	"internal/assessment":        domain,
 	"internal/assessmentstore":   capability,
+	"internal/audit":             domain,
 	"internal/analysis":          capability,
 	"internal/authz":             domain,
 	"internal/broker":            adapter,

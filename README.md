@@ -11,9 +11,11 @@
 
 **40% to go** · 60% built · updated on 2026-11-26
 
-<img src="https://geps.dev/progress/60?label=40%25%20to%20go" width="100%" alt="60% built, 40% to go">
+<img src="docs/assets/backlog-progress.svg" width="400" alt="Backlog progress: a 10 by 10 grid with 60 filled squares for completed work and 40 outlined squares for remaining work. Each square represents 1 percentage point.">
 
-The bar counts the backend backlog's cards, a partial card as half. The cards left are the larger ones.
+**Each square = 1 percentage point** · Filled = built · Outlined = to go
+
+Progress counts the backend backlog's cards, a partial card as half. The cards left are the larger ones; this is card completion, not an estimate of remaining effort.
 
 ### What is left
 
